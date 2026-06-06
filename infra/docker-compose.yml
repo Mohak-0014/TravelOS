@@ -1,0 +1,103 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: travelos
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - travelnet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d travelos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - travelnet
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:v1.9.0
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    networks:
+      - travelnet
+
+  backend:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.backend
+    env_file:
+      - ../.env
+    ports:
+      - "8000:8000"
+    networks:
+      - travelnet
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    volumes:
+      - ../backend:/app/backend
+    command: uvicorn backend.api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  celery_worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.backend
+    env_file:
+      - ../.env
+    networks:
+      - travelnet
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../backend:/app/backend
+    command: celery -A backend.workflows.celery_tasks worker --loglevel=info
+
+  celery_beat:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.backend
+    env_file:
+      - ../.env
+    networks:
+      - travelnet
+    depends_on:
+      - redis
+    volumes:
+      - ../backend:/app/backend
+    command: celery -A backend.workflows.celery_tasks beat --loglevel=info
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_storage:
+
+networks:
+  travelnet:
+    driver: bridge
