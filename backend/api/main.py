@@ -50,7 +50,11 @@ async def health() -> dict:
     return {"status": "ok", "db": db_status}
 
 
+from backend.api.routers.approvals import router as approvals_router
 from backend.api.routers.auth import preferences_router, router as auth_router
+from backend.api.routers.trips import router as trips_router
 
 app.include_router(auth_router)
 app.include_router(preferences_router)
+app.include_router(trips_router)
+app.include_router(approvals_router)
