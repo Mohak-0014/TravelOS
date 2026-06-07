@@ -50,5 +50,7 @@ async def health() -> dict:
     return {"status": "ok", "db": db_status}
 
 
-# Routers added incrementally each week — imported here when ready
-# from backend.api.routers import auth, trips, approvals, concierge
+from backend.api.routers.auth import preferences_router, router as auth_router
+
+app.include_router(auth_router)
+app.include_router(preferences_router)
