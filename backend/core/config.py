@@ -22,8 +22,8 @@ class Settings(BaseSettings):
     # External APIs
     LITEAPI_KEY: str = ""
     HOTELSNL_API_KEY: str = ""
-    OPENTRIPMAP_API_KEY: str = ""
     FOURSQUARE_API_KEY: str = ""
+    # Overpass API (OpenStreetMap) — no key required
 
     # Auth
     JWT_SECRET_KEY: str = "change-me-in-production"

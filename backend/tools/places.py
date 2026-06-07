@@ -4,109 +4,137 @@ import httpx
 from pydantic import BaseModel
 from redis.asyncio import Redis
 
-from backend.core.config import settings
 from backend.core.logging import get_logger
 from backend.tools import redis_get_cached, redis_set_cached
 
 logger = get_logger(__name__)
 
 _CACHE_TTL = 60 * 60 * 6  # 6 hours
-_OTM_LIST_URL = "https://api.opentripmap.com/0.1/en/places/radius"
-_OTM_DETAIL_URL = "https://api.opentripmap.com/0.1/en/places/xid/{xid}"
+_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+_USER_AGENT = "TravelOS/1.0 rj.mohaknahata@gmail.com"
+
+# OSM tag filters for interesting tourist places
+_TOURISM_TAGS = "attraction|museum|gallery|viewpoint|artwork|zoo|theme_park|aquarium"
+_HISTORIC_TAGS = "monument|memorial|ruins|castle|archaeological_site"
+
+_OVERPASS_QUERY = """
+[out:json][timeout:25];
+(
+  node["tourism"~"^({tourism})$"](around:{radius},{lat},{lng});
+  way["tourism"~"^({tourism})$"](around:{radius},{lat},{lng});
+  node["historic"~"^({historic})$"](around:{radius},{lat},{lng});
+  way["historic"~"^({historic})$"](around:{radius},{lat},{lng});
+);
+out center {limit};
+""".strip()
 
 
 class Attraction(BaseModel):
-    xid: str
+    osm_id: str          # e.g. "node/12345678" or "way/87654321"
     name: str
     lat: float
     lng: float
-    kinds: str
-    description: str | None
-    image_url: str | None
-    source_provider: str = "opentripmap"
-    source_ref: str  # same as xid
+    kinds: str           # derived from OSM tag value (tourism=museum → "museum")
+    description: str | None = None
+    website: str | None = None
+    source_provider: str = "overpass"
+    source_ref: str      # same as osm_id
 
 
-def _cache_key(lat: float, lng: float, radius_m: int, kinds: str) -> str:
-    raw = f"{lat:.3f}|{lng:.3f}|{radius_m}|{kinds}"
+def _cache_key(lat: float, lng: float, radius_m: int) -> str:
+    raw = f"{lat:.3f}|{lng:.3f}|{radius_m}"
     return f"places:{hashlib.sha256(raw.encode()).hexdigest()}"
+
+
+def _element_to_attraction(el: dict) -> Attraction | None:
+    tags = el.get("tags", {})
+    name = tags.get("name") or tags.get("name:en")
+    if not name:
+        return None
+
+    el_type = el.get("type", "node")
+    el_id = el.get("id", 0)
+    osm_id = f"{el_type}/{el_id}"
+
+    # Coordinates: nodes have lat/lon directly; ways expose a center object
+    if el_type == "node":
+        lat = el.get("lat")
+        lng = el.get("lon")
+    else:
+        center = el.get("center", {})
+        lat = center.get("lat")
+        lng = center.get("lon")
+
+    if lat is None or lng is None:
+        return None
+
+    # Derive category label from most specific tag
+    kinds = (
+        tags.get("tourism")
+        or tags.get("historic")
+        or tags.get("amenity")
+        or "place_of_interest"
+    )
+
+    return Attraction(
+        osm_id=osm_id,
+        name=name,
+        lat=float(lat),
+        lng=float(lng),
+        kinds=kinds,
+        description=tags.get("description"),
+        website=tags.get("website") or tags.get("contact:website"),
+        source_ref=osm_id,
+    )
 
 
 async def search_attractions(
     lat: float,
     lng: float,
     radius_m: int = 5000,
-    kinds: str = "interesting_places",
+    limit: int = 20,
     cache: Redis | None = None,  # type: ignore[type-arg]
 ) -> list[Attraction]:
     """
-    Find top attractions near a point using OpenTripMap.
-    Returns [] when key is missing or on any failure — never raises.
+    Find attractions near a point using the Overpass API (OpenStreetMap).
+    No API key required. Returns [] on any failure — never raises.
     Cache TTL: 6 hours.
     """
-    if not settings.OPENTRIPMAP_API_KEY:
-        logger.warning("opentripmap_key_missing")
-        return []
-
-    key = _cache_key(lat, lng, radius_m, kinds)
+    key = _cache_key(lat, lng, radius_m)
     cached = await redis_get_cached(cache, key)
     if cached:
         logger.info("places_cache_hit", lat=lat, lng=lng)
         return [Attraction(**a) for a in cached]
 
-    # Step 1 — list xids in radius (up to 20)
+    query = _OVERPASS_QUERY.format(
+        tourism=_TOURISM_TAGS,
+        historic=_HISTORIC_TAGS,
+        radius=radius_m,
+        lat=lat,
+        lng=lng,
+        limit=limit,
+    )
+
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            list_resp = await client.get(
-                _OTM_LIST_URL,
-                params={
-                    "radius": radius_m,
-                    "lon": lng,
-                    "lat": lat,
-                    "kinds": kinds,
-                    "format": "json",
-                    "limit": 20,
-                    "apikey": settings.OPENTRIPMAP_API_KEY,
-                },
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                _OVERPASS_URL,
+                data={"data": query},
+                headers={"User-Agent": _USER_AGENT},
             )
-            list_resp.raise_for_status()
-            items = list_resp.json()
+            resp.raise_for_status()
+            payload = resp.json()
     except Exception as exc:
-        logger.warning("opentripmap_list_failed", lat=lat, lng=lng, error=str(exc))
+        logger.warning("overpass_query_failed", lat=lat, lng=lng, error=str(exc))
         return []
 
-    # Step 2 — fetch details for each xid (best-effort; skip failures)
     attractions: list[Attraction] = []
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        for item in items:
-            xid = item.get("xid", "")
-            if not xid:
-                continue
-            try:
-                detail_resp = await client.get(
-                    _OTM_DETAIL_URL.format(xid=xid),
-                    params={"apikey": settings.OPENTRIPMAP_API_KEY},
-                )
-                detail_resp.raise_for_status()
-                d = detail_resp.json()
-                name = d.get("name") or item.get("name", "")
-                if not name:
-                    continue
-                point = d.get("point", {})
-                attractions.append(
-                    Attraction(
-                        xid=xid,
-                        name=name,
-                        lat=point.get("lat", lat),
-                        lng=point.get("lon", lng),
-                        kinds=d.get("kinds", kinds),
-                        description=d.get("wikipedia_extracts", {}).get("text") if d.get("wikipedia_extracts") else None,
-                        image_url=d.get("preview", {}).get("source") if d.get("preview") else None,
-                        source_ref=xid,
-                    )
-                )
-            except Exception:
-                continue
+    for element in payload.get("elements", []):
+        attraction = _element_to_attraction(element)
+        if attraction:
+            attractions.append(attraction)
+        if len(attractions) >= limit:
+            break
 
     if attractions:
         await redis_set_cached(cache, key, [a.model_dump() for a in attractions], _CACHE_TTL)
