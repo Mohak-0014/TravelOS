@@ -1,0 +1,153 @@
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+type Method = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+
+interface RequestOptions {
+  body?: unknown;
+  params?: Record<string, string | number | boolean>;
+}
+
+class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly detail: unknown,
+  ) {
+    super(`API error ${status}`);
+  }
+}
+
+function buildUrl(path: string, params?: Record<string, string | number | boolean>): string {
+  const url = new URL(path, API_BASE);
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      url.searchParams.set(k, String(v));
+    }
+  }
+  return url.toString();
+}
+
+async function request<T>(
+  method: Method,
+  path: string,
+  options: RequestOptions = {},
+): Promise<T> {
+  // Token is read fresh each call so it reflects the latest Zustand state persisted to localStorage
+  let token: string | null = null;
+  if (typeof window !== "undefined") {
+    try {
+      const raw = localStorage.getItem("auth-store");
+      if (raw) {
+        const parsed = JSON.parse(raw) as { state?: { token?: string } };
+        token = parsed.state?.token ?? null;
+      }
+    } catch {
+      // ignore parse errors
+    }
+  }
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(buildUrl(path, options.params), {
+    method,
+    headers,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+  });
+
+  if (res.status === 401) {
+    // Clear stale token and redirect — avoids hard import cycle with store
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("auth-store");
+      window.location.href = "/login";
+    }
+  }
+
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({ message: res.statusText }));
+    throw new ApiError(res.status, detail);
+  }
+
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
+export const api = {
+  get: <T>(path: string, params?: Record<string, string | number | boolean>) =>
+    request<T>("GET", path, { params }),
+
+  post: <T>(path: string, body?: unknown) => request<T>("POST", path, { body }),
+
+  put: <T>(path: string, body?: unknown) => request<T>("PUT", path, { body }),
+
+  delete: <T>(path: string) => request<T>("DELETE", path),
+};
+
+export { ApiError };
+
+// ── typed response shapes ─────────────────────────────────────────────────────
+
+export interface UserOut {
+  id: string;
+  email: string;
+  full_name: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface Token {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+}
+
+export interface PreferenceOut {
+  id: string;
+  user_id: string;
+  pace: string | null;
+  luxury_tier: string | null;
+  walking_tolerance: string | null;
+  food_prefs: string[] | null;
+  interests: string[] | null;
+  budget_behavior: string | null;
+  updated_at: string;
+}
+
+export interface TripOut {
+  id: string;
+  title: string;
+  destination_city: string;
+  destination_country: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  start_date: string;
+  end_date: string;
+  num_travelers: number;
+  budget_total: number | null;
+  budget_currency: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ItineraryItemOut {
+  id: string;
+  trip_id: string;
+  day_number: number;
+  item_date: string;
+  start_time: string | null;
+  end_time: string | null;
+  item_type: string;
+  title: string;
+  description: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  address: string | null;
+  source_provider: string | null;
+  source_ref: string | null;
+  est_cost: number | null;
+  est_cost_currency: string | null;
+  is_outdoor: boolean;
+  sort_order: number;
+}

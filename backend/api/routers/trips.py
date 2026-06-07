@@ -15,6 +15,7 @@ from backend.db.schemas import (
     TripOut,
     TripUpdate,
 )
+from backend.tools.geocode import geocode
 
 router = APIRouter(prefix="/api/v1/trips", tags=["trips"])
 
@@ -39,17 +40,21 @@ async def create_trip(
             detail={"code": "VALIDATION_ERROR", "message": "end_date must be >= start_date."},
         )
 
+    # Geocode destination — best-effort, trip still created if Nominatim is unavailable
+    geo = await geocode(f"{body.destination_city}, {body.destination_country or ''}")
+
     trip = Trip(
         user_id=current_user.id,
         title=body.title,
         destination_city=body.destination_city,
         destination_country=body.destination_country,
+        latitude=geo.lat if geo else None,
+        longitude=geo.lng if geo else None,
         start_date=body.start_date,
         end_date=body.end_date,
         num_travelers=body.num_travelers,
         budget_total=body.budget_total,
         budget_currency=body.budget_currency,
-        # latitude/longitude stubbed here — real geocoding wired in Week 4
     )
     db.add(trip)
     await db.flush()
