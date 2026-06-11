@@ -60,6 +60,12 @@ ignore = ["B008"]
 python_version = "3.11"
 strict = true
 ignore_missing_imports = true
+exclude = ["backend/.venv/"]
+
+[[tool.mypy.overrides]]
+module = ["transformers.*", "sentence_transformers.*"]
+follow_imports = "skip"
+ignore_errors = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
