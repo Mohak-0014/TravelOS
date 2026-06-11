@@ -53,9 +53,11 @@ async def health() -> dict:
 from backend.api.routers.approvals import router as approvals_router  # noqa: E402
 from backend.api.routers.auth import preferences_router  # noqa: E402
 from backend.api.routers.auth import router as auth_router  # noqa: E402
+from backend.api.routers.concierge import router as concierge_router  # noqa: E402
 from backend.api.routers.trips import router as trips_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(preferences_router)
 app.include_router(trips_router)
 app.include_router(approvals_router)
+app.include_router(concierge_router)

@@ -3,8 +3,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-
 # ── Auth ────────────────────────────────────────────────────────────────────
+
 
 class UserCreate(BaseModel):
     email: str
@@ -35,6 +35,7 @@ class LoginRequest(BaseModel):
 
 # ── Preferences ──────────────────────────────────────────────────────────────
 
+
 class PreferenceUpdate(BaseModel):
     pace: str | None = None
     luxury_tier: str | None = None
@@ -59,6 +60,7 @@ class PreferenceOut(BaseModel):
 
 
 # ── Trips ────────────────────────────────────────────────────────────────────
+
 
 class TripCreate(BaseModel):
     title: str
@@ -100,6 +102,7 @@ class TripOut(BaseModel):
 
 
 # ── Itinerary ────────────────────────────────────────────────────────────────
+
 
 class ItineraryItemCreate(BaseModel):
     day_number: int
@@ -155,6 +158,7 @@ class ItineraryItemOut(BaseModel):
 
 # ── Approvals ─────────────────────────────────────────────────────────────────
 
+
 class ApprovalDecision(BaseModel):
     decision: str  # "approved" | "rejected"
     resolution_note: str | None = None
@@ -172,3 +176,15 @@ class ApprovalOut(BaseModel):
     status: str
     created_at: datetime
     resolved_at: datetime | None
+
+
+# ── Concierge chat ─────────────────────────────────────────────────────────────
+
+
+class ChatRequest(BaseModel):
+    question: str
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    sources: list[dict]
