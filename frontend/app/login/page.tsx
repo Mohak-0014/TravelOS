@@ -27,9 +27,10 @@ export default function LoginPage() {
         await api.post("/api/v1/auth/register", { email, password, full_name: fullName });
       }
 
-      const token = await api.post<Token>("/api/v1/auth/login", { email, password });
-      const user = await api.get<UserOut>("/api/v1/auth/me");
-      setAuth(token.access_token, user);
+      const tokenData = await api.post<Token>("/api/v1/auth/login", { email, password });
+      // Pass token explicitly — store isn't hydrated to localStorage yet at this point
+      const user = await api.get<UserOut>("/api/v1/auth/me", undefined, tokenData.access_token);
+      setAuth(tokenData.access_token, user);
       router.push("/trips");
     } catch (err) {
       if (err instanceof ApiError) {

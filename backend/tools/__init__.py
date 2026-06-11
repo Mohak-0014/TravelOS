@@ -24,9 +24,7 @@ async def redis_get_cached(client: Redis | None, key: str) -> Any:  # type: igno
         return None
 
 
-async def redis_set_cached(
-    client: Redis | None, key: str, value: Any, ttl: int
-) -> None:
+async def redis_set_cached(client: Redis | None, key: str, value: Any, ttl: int) -> None:
     if client is None:
         return
     try:

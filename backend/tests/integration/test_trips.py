@@ -1,10 +1,8 @@
-from datetime import date, timedelta
-
 import pytest
 from httpx import AsyncClient
 
-
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 async def _auth(client: AsyncClient, email: str = "traveler@example.com") -> str:
     await client.post(
@@ -46,6 +44,7 @@ async def _create_trip(client: AsyncClient, token: str, **overrides) -> dict:
 
 
 # ── trip CRUD ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_create_trip_returns_201(client: AsyncClient) -> None:
@@ -146,9 +145,7 @@ async def test_soft_delete_trip(client: AsyncClient) -> None:
 async def test_cancelled_trip_still_fetchable_by_id(client: AsyncClient) -> None:
     token = await _auth(client)
     trip = await _create_trip(client, token)
-    await client.delete(
-        f"/api/v1/trips/{trip['id']}", headers={"Authorization": f"Bearer {token}"}
-    )
+    await client.delete(f"/api/v1/trips/{trip['id']}", headers={"Authorization": f"Bearer {token}"})
 
     resp = await client.get(
         f"/api/v1/trips/{trip['id']}", headers={"Authorization": f"Bearer {token}"}
@@ -158,6 +155,7 @@ async def test_cancelled_trip_still_fetchable_by_id(client: AsyncClient) -> None
 
 
 # ── itinerary ─────────────────────────────────────────────────────────────────
+
 
 def _item_body(item_date: str = "2025-06-02") -> dict:
     return {

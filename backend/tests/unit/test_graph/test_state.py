@@ -24,10 +24,20 @@ def _minimal_state() -> TravelOSState:
 
 def test_state_has_all_required_keys() -> None:
     required = {
-        "trip_id", "user_id", "traveler_profiles", "itinerary",
-        "weather_state", "budget_state", "hotel_state", "memory_context",
-        "approval_queue", "agent_messages", "current_step",
-        "error_state", "run_checkpoint_ref", "replan_iterations",
+        "trip_id",
+        "user_id",
+        "traveler_profiles",
+        "itinerary",
+        "weather_state",
+        "budget_state",
+        "hotel_state",
+        "memory_context",
+        "approval_queue",
+        "agent_messages",
+        "current_step",
+        "error_state",
+        "run_checkpoint_ref",
+        "replan_iterations",
     }
     state = _minimal_state()
     assert required.issubset(set(state.keys()))

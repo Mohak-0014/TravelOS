@@ -97,6 +97,7 @@ class Trip(Base):
     budget_total: Mapped[float | None] = mapped_column(Numeric(12, 2))
     budget_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="planning")
+    langgraph_thread_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -157,7 +158,9 @@ class ItineraryItem(Base):
     item_date: Mapped[date] = mapped_column(Date, nullable=False)
     start_time: Mapped[time | None] = mapped_column(Time)
     end_time: Mapped[time | None] = mapped_column(Time)
-    item_type: Mapped[str] = mapped_column(String(20), nullable=False)  # activity|meal|transport|lodging|free
+    item_type: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # activity|meal|transport|lodging|free
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     latitude: Mapped[float | None] = mapped_column(Double)
@@ -219,7 +222,9 @@ class BudgetLog(Base):
     trip_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), ForeignKey("trips.id", ondelete="CASCADE"), nullable=False
     )
-    category: Mapped[str] = mapped_column(String(20), nullable=False)  # lodging|food|activity|transport
+    category: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # lodging|food|activity|transport
     planned_amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     actual_amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")

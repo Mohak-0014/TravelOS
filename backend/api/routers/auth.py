@@ -93,12 +93,12 @@ async def get_preferences(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> Preference:
-    result = await db.execute(
-        select(Preference).where(Preference.user_id == current_user.id)
-    )
+    result = await db.execute(select(Preference).where(Preference.user_id == current_user.id))
     pref = result.scalar_one_or_none()
     if pref is None:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Preferences not found."})
+        raise HTTPException(
+            status_code=404, detail={"code": "NOT_FOUND", "message": "Preferences not found."}
+        )
     return pref
 
 
@@ -108,9 +108,7 @@ async def update_preferences(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> Preference:
-    result = await db.execute(
-        select(Preference).where(Preference.user_id == current_user.id)
-    )
+    result = await db.execute(select(Preference).where(Preference.user_id == current_user.id))
     pref = result.scalar_one_or_none()
     if pref is None:
         pref = Preference(user_id=current_user.id)

@@ -1,13 +1,22 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useEffect } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { TripOut, ItineraryItemOut } from "@/lib/api";
+import { useAuthStore } from "@/lib/store";
 import Link from "next/link";
 
 export default function TripDetailPage() {
   const { tripId } = useParams<{ tripId: string }>();
+  const router = useRouter();
+  const token = useAuthStore((s) => s.token);
+  const _hasHydrated = useAuthStore((s) => s._hasHydrated);
+
+  useEffect(() => {
+    if (_hasHydrated && !token) router.replace("/login");
+  }, [_hasHydrated, token, router]);
 
   const { data: trip, isLoading: tripLoading } = useQuery<TripOut>({
     queryKey: ["trip", tripId],

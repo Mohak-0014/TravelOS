@@ -22,12 +22,12 @@ class TravelOSState(TypedDict):
     itinerary: list[dict]
 
     # Sub-states populated by their respective agents
-    weather_state: dict    # keys: risk_flags, last_checked
-    budget_state: dict     # keys: total, spent, by_category, breach_pct
-    hotel_state: dict      # keys: candidates, selected
+    weather_state: dict  # keys: risk_flags, last_checked
+    budget_state: dict  # keys: total, spent, by_category, breach_pct
+    hotel_state: dict  # keys: candidates, selected
 
     # Semantic memory context injected by Travel Style agent
-    memory_context: dict   # keys: preferences, embedding_hits, past_trips
+    memory_context: dict  # keys: preferences, embedding_hits, past_trips
 
     # Pending approval records (dicts matching Approval schema)
     approval_queue: list[dict]

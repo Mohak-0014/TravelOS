@@ -1,56 +1,56 @@
-from langgraph.checkpoint.memory import MemorySaver
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 
+from backend.agents import hotel as hotel_agent
+from backend.agents import itinerary_planner as itinerary_planner_agent
+from backend.agents import supervisor as supervisor_agent
+from backend.agents import travel_style as travel_style_agent
 from backend.core.logging import get_logger
+from backend.graphs import approval_gate as approval_gate_module
+from backend.graphs import checkpoint_save as checkpoint_save_module
+from backend.graphs import conflict_detection as conflict_detection_node_module
+from backend.graphs import validation as validation_node_module
 from backend.graphs.state import TravelOSState
 
 logger = get_logger(__name__)
 
-# ── Stub node functions ───────────────────────────────────────────────────────
-# Each returns an empty dict (partial state update) until the real agent is
-# wired in Weeks 6–9. The graph structure and conditional edges are final.
-
-async def supervisor_node(state: TravelOSState) -> dict:
-    logger.info("supervisor_node_stub", trip_id=state.get("trip_id"))
-    return {"current_step": "travel_style"}
+# ── Node functions ────────────────────────────────────────────────────────────
 
 
-async def travel_style_node(state: TravelOSState) -> dict:
-    logger.info("travel_style_node_stub", trip_id=state.get("trip_id"))
-    return {"current_step": "itinerary_planner"}
+async def supervisor_node(state: TravelOSState) -> dict:  # type: ignore[type-arg]
+    return await supervisor_agent.run(state)
 
 
-async def itinerary_planner_node(state: TravelOSState) -> dict:
-    logger.info("itinerary_planner_node_stub", trip_id=state.get("trip_id"))
-    return {"current_step": "hotel_agent"}
+async def travel_style_node(state: TravelOSState) -> dict:  # type: ignore[type-arg]
+    return await travel_style_agent.run(state)
 
 
-async def hotel_agent_node(state: TravelOSState) -> dict:
-    logger.info("hotel_agent_node_stub", trip_id=state.get("trip_id"))
-    return {"current_step": "validation"}
+async def itinerary_planner_node(state: TravelOSState) -> dict:  # type: ignore[type-arg]
+    return await itinerary_planner_agent.run(state)
 
 
-async def validation_node(state: TravelOSState) -> dict:
-    logger.info("validation_node_stub", trip_id=state.get("trip_id"))
-    return {"current_step": "conflict_detection"}
+async def hotel_agent_node(state: TravelOSState) -> dict:  # type: ignore[type-arg]
+    return await hotel_agent.run(state)
 
 
-async def conflict_detection_node(state: TravelOSState) -> dict:
-    logger.info("conflict_detection_node_stub", trip_id=state.get("trip_id"))
-    return {"current_step": "approval_gate", "replan_iterations": state.get("replan_iterations", 0)}
+async def validation_node(state: TravelOSState) -> dict:  # type: ignore[type-arg]
+    return await validation_node_module.run(state)
 
 
-async def approval_gate_node(state: TravelOSState) -> dict:
-    logger.info("approval_gate_node_stub", trip_id=state.get("trip_id"))
-    return {"current_step": "checkpoint_save"}
+async def conflict_detection_node(state: TravelOSState) -> dict:  # type: ignore[type-arg]
+    return await conflict_detection_node_module.run(state)
 
 
-async def checkpoint_save_node(state: TravelOSState) -> dict:
-    logger.info("checkpoint_save_node_stub", trip_id=state.get("trip_id"))
-    return {"current_step": "end"}
+async def approval_gate_node(state: TravelOSState) -> dict:  # type: ignore[type-arg]
+    return await approval_gate_module.run(state)
+
+
+async def checkpoint_save_node(state: TravelOSState, config: RunnableConfig) -> dict:  # type: ignore[type-arg]
+    return await checkpoint_save_module.run(state, config)
 
 
 # ── Conditional edge functions ────────────────────────────────────────────────
+
 
 def route_supervisor(state: TravelOSState) -> str:
     if state.get("error_state") and state.get("replan_iterations", 0) >= 3:
@@ -68,6 +68,7 @@ def route_conflict_detection(state: TravelOSState) -> str:
 
 
 # ── Graph assembly ────────────────────────────────────────────────────────────
+
 
 def build_trip_graph(checkpointer=None):  # type: ignore[no-untyped-def]
     """
@@ -89,20 +90,28 @@ def build_trip_graph(checkpointer=None):  # type: ignore[no-untyped-def]
 
     g.set_entry_point("supervisor")
 
-    g.add_conditional_edges("supervisor", route_supervisor, {
-        "travel_style": "travel_style",
-        "itinerary_planner": "itinerary_planner",
-        "error_recovery": "supervisor",
-        END: END,
-    })
+    g.add_conditional_edges(
+        "supervisor",
+        route_supervisor,
+        {
+            "travel_style": "travel_style",
+            "itinerary_planner": "itinerary_planner",
+            "error_recovery": "supervisor",
+            END: END,
+        },
+    )
     g.add_edge("travel_style", "itinerary_planner")
     g.add_edge("itinerary_planner", "hotel_agent")
     g.add_edge("hotel_agent", "validation")
     g.add_edge("validation", "conflict_detection")
-    g.add_conditional_edges("conflict_detection", route_conflict_detection, {
-        "itinerary_planner": "itinerary_planner",
-        "approval_gate": "approval_gate",
-    })
+    g.add_conditional_edges(
+        "conflict_detection",
+        route_conflict_detection,
+        {
+            "itinerary_planner": "itinerary_planner",
+            "approval_gate": "approval_gate",
+        },
+    )
     g.add_edge("approval_gate", "checkpoint_save")
     g.add_edge("checkpoint_save", END)
 

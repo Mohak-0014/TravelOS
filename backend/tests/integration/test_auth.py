@@ -3,10 +3,10 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.db.models import Preference, User
-
+from backend.db.models import Preference
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 async def _register(client: AsyncClient, email: str = "test@example.com") -> dict:
     resp = await client.post(
@@ -26,6 +26,7 @@ async def _login(client: AsyncClient, email: str = "test@example.com") -> str:
 
 # ── register ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_register_returns_201_with_user_out(client: AsyncClient) -> None:
     resp = await _register(client)
@@ -43,9 +44,7 @@ async def test_register_creates_preference_row(
 ) -> None:
     resp = await _register(client)
     user_id = resp.json()["id"]
-    result = await db_session.execute(
-        select(Preference).where(Preference.user_id == user_id)
-    )
+    result = await db_session.execute(select(Preference).where(Preference.user_id == user_id))
     assert result.scalar_one_or_none() is not None
 
 
@@ -58,6 +57,7 @@ async def test_register_duplicate_email_returns_422(client: AsyncClient) -> None
 
 
 # ── login ─────────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_login_returns_token(client: AsyncClient) -> None:
@@ -95,6 +95,7 @@ async def test_login_unknown_email_returns_401(client: AsyncClient) -> None:
 
 # ── /me ───────────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_get_me_with_valid_token_returns_200(client: AsyncClient) -> None:
     await _register(client)
@@ -112,13 +113,12 @@ async def test_get_me_without_token_returns_401(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_get_me_with_garbage_token_returns_401(client: AsyncClient) -> None:
-    resp = await client.get(
-        "/api/v1/auth/me", headers={"Authorization": "Bearer not.a.real.token"}
-    )
+    resp = await client.get("/api/v1/auth/me", headers={"Authorization": "Bearer not.a.real.token"})
     assert resp.status_code == 401
 
 
 # ── preferences ───────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_update_preferences_persists_values(client: AsyncClient) -> None:

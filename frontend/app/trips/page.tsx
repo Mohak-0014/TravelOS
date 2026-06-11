@@ -67,11 +67,11 @@ function TripCard({ trip }: { trip: TripOut }) {
 
 export default function TripsPage() {
   const router = useRouter();
-  const { token, user } = useAuthStore();
+  const { token, user, _hasHydrated } = useAuthStore();
 
   useEffect(() => {
-    if (!token) router.replace("/login");
-  }, [token, router]);
+    if (_hasHydrated && !token) router.replace("/login");
+  }, [_hasHydrated, token, router]);
 
   const { data: trips, isLoading, error } = useQuery<TripOut[]>({
     queryKey: ["trips"],
@@ -79,7 +79,7 @@ export default function TripsPage() {
     enabled: !!token,
   });
 
-  if (!token) return null;
+  if (!_hasHydrated) return null;
 
   return (
     <div className="min-h-screen bg-gray-50">

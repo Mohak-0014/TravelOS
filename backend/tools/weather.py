@@ -86,13 +86,15 @@ async def fetch_weather(
                 params={
                     "latitude": lat,
                     "longitude": lng,
-                    "daily": ",".join([
-                        "temperature_2m_max",
-                        "temperature_2m_min",
-                        "precipitation_sum",
-                        "precipitation_probability_max",
-                        "weathercode",
-                    ]),
+                    "daily": ",".join(
+                        [
+                            "temperature_2m_max",
+                            "temperature_2m_min",
+                            "precipitation_sum",
+                            "precipitation_probability_max",
+                            "weathercode",
+                        ]
+                    ),
                     "start_date": start_date.isoformat(),
                     "end_date": end_date.isoformat(),
                     "timezone": "auto",

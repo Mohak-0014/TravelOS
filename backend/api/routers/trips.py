@@ -1,12 +1,10 @@
-from datetime import date
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.dependencies import get_current_active_user
 from backend.db.base import get_db
-from backend.db.models import ItineraryItem, Trip, TravelerProfile, User
+from backend.db.models import ItineraryItem, TravelerProfile, Trip, User
 from backend.db.schemas import (
     ItineraryItemCreate,
     ItineraryItemOut,
@@ -22,11 +20,14 @@ router = APIRouter(prefix="/api/v1/trips", tags=["trips"])
 
 def _assert_owns(trip: Trip | None, user: User) -> Trip:
     if trip is None or trip.user_id != user.id:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Trip not found."})
+        raise HTTPException(
+            status_code=404, detail={"code": "NOT_FOUND", "message": "Trip not found."}
+        )
     return trip
 
 
 # ── Trip CRUD ─────────────────────────────────────────────────────────────────
+
 
 @router.post("", response_model=TripOut, status_code=status.HTTP_201_CREATED)
 async def create_trip(
@@ -139,6 +140,7 @@ async def cancel_trip(
 
 # ── Itinerary ─────────────────────────────────────────────────────────────────
 
+
 @router.get("/{trip_id}/itinerary", response_model=list[ItineraryItemOut])
 async def get_itinerary(
     trip_id: str,
@@ -199,13 +201,13 @@ async def update_itinerary_item(
     _assert_owns(result.scalar_one_or_none(), current_user)
 
     item_result = await db.execute(
-        select(ItineraryItem).where(
-            ItineraryItem.id == item_id, ItineraryItem.trip_id == trip_id
-        )
+        select(ItineraryItem).where(ItineraryItem.id == item_id, ItineraryItem.trip_id == trip_id)
     )
     item = item_result.scalar_one_or_none()
     if item is None:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Item not found."})
+        raise HTTPException(
+            status_code=404, detail={"code": "NOT_FOUND", "message": "Item not found."}
+        )
 
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(item, field, value)
@@ -226,13 +228,13 @@ async def delete_itinerary_item(
     _assert_owns(result.scalar_one_or_none(), current_user)
 
     item_result = await db.execute(
-        select(ItineraryItem).where(
-            ItineraryItem.id == item_id, ItineraryItem.trip_id == trip_id
-        )
+        select(ItineraryItem).where(ItineraryItem.id == item_id, ItineraryItem.trip_id == trip_id)
     )
     item = item_result.scalar_one_or_none()
     if item is None:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Item not found."})
+        raise HTTPException(
+            status_code=404, detail={"code": "NOT_FOUND", "message": "Item not found."}
+        )
 
     await db.delete(item)
     await db.commit()

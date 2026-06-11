@@ -1,12 +1,12 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 import httpx
+import pytest
 
 from backend.tools.places import Attraction, _element_to_attraction, search_attractions
 
-
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def _node(osm_id: int = 111, name: str = "Louvre Museum", tag: str = "museum") -> dict:
     return {
@@ -44,6 +44,7 @@ def _mock_client(payload: dict):
 
 # ── _element_to_attraction unit tests ────────────────────────────────────────
 
+
 def test_node_element_parsed_correctly() -> None:
     result = _element_to_attraction(_node())
     assert result is not None
@@ -76,7 +77,10 @@ def test_element_without_coordinates_returns_none() -> None:
 
 def test_historic_tag_used_when_tourism_absent() -> None:
     el = {
-        "type": "node", "id": 1, "lat": 48.0, "lon": 2.0,
+        "type": "node",
+        "id": 1,
+        "lat": 48.0,
+        "lon": 2.0,
         "tags": {"name": "Roman Ruins", "historic": "ruins"},
     }
     result = _element_to_attraction(el)
@@ -86,7 +90,10 @@ def test_historic_tag_used_when_tourism_absent() -> None:
 
 def test_website_tag_extracted() -> None:
     el = {
-        "type": "node", "id": 1, "lat": 48.0, "lon": 2.0,
+        "type": "node",
+        "id": 1,
+        "lat": 48.0,
+        "lon": 2.0,
         "tags": {"name": "Museum", "tourism": "museum", "website": "https://example.com"},
     }
     result = _element_to_attraction(el)
@@ -95,6 +102,7 @@ def test_website_tag_extracted() -> None:
 
 
 # ── search_attractions integration (mocked HTTP) ─────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_search_returns_attractions_from_overpass() -> None:

@@ -7,8 +7,10 @@ import type { UserOut } from "./api";
 interface AuthState {
   token: string | null;
   user: UserOut | null;
+  _hasHydrated: boolean;
   setAuth: (token: string, user: UserOut) => void;
   clearAuth: () => void;
+  setHasHydrated: (v: boolean) => void;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -16,9 +18,17 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       token: null,
       user: null,
+      _hasHydrated: false,
       setAuth: (token, user) => set({ token, user }),
       clearAuth: () => set({ token: null, user: null }),
+      setHasHydrated: (v) => set({ _hasHydrated: v }),
     }),
-    { name: "auth-store" },
+    {
+      name: "auth-store",
+      partialize: (state) => ({ token: state.token, user: state.user }),
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+      },
+    },
   ),
 );

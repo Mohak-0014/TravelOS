@@ -1,8 +1,8 @@
 from datetime import date
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 import httpx
+import pytest
 
 from backend.tools.weather import WeatherDay, fetch_weather
 
@@ -22,6 +22,7 @@ def _open_meteo_payload(codes: list[int] | None = None) -> dict:
 
 
 # ── happy path ────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_fetch_weather_returns_weather_days() -> None:
@@ -102,6 +103,7 @@ async def test_high_precip_prob_makes_day_adverse() -> None:
 
 
 # ── failure paths ──────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_fetch_weather_returns_empty_on_http_error() -> None:

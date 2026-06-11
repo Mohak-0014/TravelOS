@@ -1,3 +1,5 @@
+from datetime import UTC
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +14,9 @@ router = APIRouter(tags=["approvals"])
 
 def _assert_trip_owned(trip: Trip | None, user: User) -> Trip:
     if trip is None or trip.user_id != user.id:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Trip not found."})
+        raise HTTPException(
+            status_code=404, detail={"code": "NOT_FOUND", "message": "Trip not found."}
+        )
     return trip
 
 
@@ -44,7 +48,9 @@ async def get_approval(
     result = await db.execute(select(Approval).where(Approval.id == approval_id))
     approval = result.scalar_one_or_none()
     if approval is None:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Approval not found."})
+        raise HTTPException(
+            status_code=404, detail={"code": "NOT_FOUND", "message": "Approval not found."}
+        )
 
     # Verify ownership via trip
     trip_result = await db.execute(select(Trip).where(Trip.id == approval.trip_id))
@@ -63,7 +69,9 @@ async def resolve_approval(
     result = await db.execute(select(Approval).where(Approval.id == approval_id))
     approval = result.scalar_one_or_none()
     if approval is None:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Approval not found."})
+        raise HTTPException(
+            status_code=404, detail={"code": "NOT_FOUND", "message": "Approval not found."}
+        )
 
     if approval.status != "pending":
         raise HTTPException(
@@ -78,14 +86,17 @@ async def resolve_approval(
     if body.decision not in ("approved", "rejected"):
         raise HTTPException(
             status_code=422,
-            detail={"code": "VALIDATION_ERROR", "message": "decision must be 'approved' or 'rejected'."},
+            detail={
+                "code": "VALIDATION_ERROR",
+                "message": "decision must be 'approved' or 'rejected'.",
+            },
         )
 
     # Stub: update status only — full mutation logic wired in Week 9
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     approval.status = body.decision
-    approval.resolved_at = datetime.now(timezone.utc)
+    approval.resolved_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(approval)
 

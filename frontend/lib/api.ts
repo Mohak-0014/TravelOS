@@ -5,6 +5,7 @@ type Method = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
 interface RequestOptions {
   body?: unknown;
   params?: Record<string, string | number | boolean>;
+  token?: string; // explicit token override — used immediately after login before store is hydrated
 }
 
 class ApiError extends Error {
@@ -31,9 +32,9 @@ async function request<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  // Token is read fresh each call so it reflects the latest Zustand state persisted to localStorage
-  let token: string | null = null;
-  if (typeof window !== "undefined") {
+  // Explicit token takes priority (e.g. immediately after login before store persists to localStorage)
+  let token: string | null = options.token ?? null;
+  if (!token && typeof window !== "undefined") {
     try {
       const raw = localStorage.getItem("auth-store");
       if (raw) {
@@ -74,8 +75,8 @@ async function request<T>(
 }
 
 export const api = {
-  get: <T>(path: string, params?: Record<string, string | number | boolean>) =>
-    request<T>("GET", path, { params }),
+  get: <T>(path: string, params?: Record<string, string | number | boolean>, token?: string) =>
+    request<T>("GET", path, { params, token }),
 
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, { body }),
 

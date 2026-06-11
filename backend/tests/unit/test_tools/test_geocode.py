@@ -1,7 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 import httpx
+import pytest
 
 from backend.tools.geocode import GeoPoint, geocode
 
@@ -12,12 +12,18 @@ def _nominatim_response(lat: str = "48.8566", lon: str = "2.3522") -> list[dict]
 
 # ── cache hit ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_geocode_returns_cached_value() -> None:
     mock_cache = AsyncMock()
-    mock_cache.get = AsyncMock(return_value='{"lat": 48.8566, "lng": 2.3522, "display_name": "Paris"}')
+    mock_cache.get = AsyncMock(
+        return_value='{"lat": 48.8566, "lng": 2.3522, "display_name": "Paris"}'
+    )
 
-    with patch("backend.tools.geocode.redis_get_cached", return_value={"lat": 48.8566, "lng": 2.3522, "display_name": "Paris"}):
+    with patch(
+        "backend.tools.geocode.redis_get_cached",
+        return_value={"lat": 48.8566, "lng": 2.3522, "display_name": "Paris"},
+    ):
         result = await geocode("Paris", cache=mock_cache)
 
     assert result is not None
@@ -26,6 +32,7 @@ async def test_geocode_returns_cached_value() -> None:
 
 
 # ── cache miss → API call ──────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_geocode_calls_nominatim_on_cache_miss() -> None:
@@ -74,6 +81,7 @@ async def test_geocode_writes_to_cache_after_api_call() -> None:
 
 
 # ── failure paths ──────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_geocode_returns_none_on_http_error() -> None:

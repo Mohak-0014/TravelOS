@@ -30,15 +30,15 @@ out center {limit};
 
 
 class Attraction(BaseModel):
-    osm_id: str          # e.g. "node/12345678" or "way/87654321"
+    osm_id: str  # e.g. "node/12345678" or "way/87654321"
     name: str
     lat: float
     lng: float
-    kinds: str           # derived from OSM tag value (tourism=museum → "museum")
+    kinds: str  # derived from OSM tag value (tourism=museum → "museum")
     description: str | None = None
     website: str | None = None
     source_provider: str = "overpass"
-    source_ref: str      # same as osm_id
+    source_ref: str  # same as osm_id
 
 
 def _cache_key(lat: float, lng: float, radius_m: int) -> str:
@@ -70,10 +70,7 @@ def _element_to_attraction(el: dict) -> Attraction | None:
 
     # Derive category label from most specific tag
     kinds = (
-        tags.get("tourism")
-        or tags.get("historic")
-        or tags.get("amenity")
-        or "place_of_interest"
+        tags.get("tourism") or tags.get("historic") or tags.get("amenity") or "place_of_interest"
     )
 
     return Attraction(

@@ -1,7 +1,5 @@
 from datetime import timedelta
 
-import pytest
-
 from backend.core.security import (
     create_access_token,
     decode_access_token,

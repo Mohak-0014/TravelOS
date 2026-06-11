@@ -6,11 +6,10 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from backend.core.config import settings
-from backend.db.base import Base
-
 # Import all models so Alembic can detect them for autogenerate
 import backend.db.models  # noqa: F401
+from backend.core.config import settings
+from backend.db.base import Base
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)

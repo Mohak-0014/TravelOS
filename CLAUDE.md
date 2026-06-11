@@ -52,9 +52,28 @@ npm test
 ### Infrastructure
 
 ```bash
-docker compose -f infra/docker-compose.yml up -d        # local: postgres + redis + qdrant
-docker compose -f infra/docker-compose.prod.yml up -d   # EC2 prod
+# Local dev — start ONLY the three infra services, never the backend/celery services
+docker compose -f infra/docker-compose.yml up -d postgres redis qdrant
+
+# Full prod stack (EC2 only)
+docker compose -f infra/docker-compose.prod.yml up -d
 ```
+
+### Local dev server (from repo root, not backend/)
+
+```bash
+backend/.venv/Scripts/uvicorn backend.api.main:app --reload --port 8000
+```
+
+## Windows Dev Gotchas
+
+**PostgreSQL port conflict:** A native Windows PostgreSQL 18 service (`postgresql-x64-18`) owns port 5432. Docker postgres is mapped to **port 5433** (`infra/docker-compose.yml` `ports: "5433:5432"`) and `DATABASE_URL` in `.env` uses `localhost:5433`. Do not change these back to 5432.
+
+**Docker backend container:** `infra-backend-1` maps to port 8000 and will shadow the local uvicorn process. For local dev, never start the `backend` / `celery_worker` / `celery_beat` Docker services — always run `uvicorn` directly. Only start `postgres redis qdrant` via Docker.
+
+**pg_hba.conf trust auth:** `POSTGRES_HOST_AUTH_METHOD: trust` is set in `docker-compose.yml` because Docker Desktop on Windows (WSL2) routes port-forwarded connections through the bridge network IP, not `127.0.0.1`, so the standard loopback trust rules never match.
+
+**Run alembic from repo root:** Use `backend/.venv/Scripts/alembic` (not the venv-activated `alembic`) so the `backend` package resolves correctly on the Python path.
 
 ## Code Style
 

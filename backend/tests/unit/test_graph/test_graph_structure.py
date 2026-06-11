@@ -1,12 +1,12 @@
 import pytest
 from langgraph.checkpoint.memory import MemorySaver
 
+from backend.graphs.replan_graph import build_replan_graph
 from backend.graphs.state import TravelOSState
 from backend.graphs.trip_graph import build_trip_graph
-from backend.graphs.replan_graph import build_replan_graph
-
 
 # ── compilation ───────────────────────────────────────────────────────────────
+
 
 def test_trip_graph_compiles_without_error() -> None:
     graph = build_trip_graph(checkpointer=MemorySaver())
@@ -20,12 +20,19 @@ def test_replan_graph_compiles_without_error() -> None:
 
 # ── node presence ──────────────────────────────────────────────────────────────
 
+
 def test_trip_graph_has_all_required_nodes() -> None:
     graph = build_trip_graph(checkpointer=MemorySaver())
     node_names = set(graph.nodes.keys())
     expected = {
-        "supervisor", "travel_style", "itinerary_planner", "hotel_agent",
-        "validation", "conflict_detection", "approval_gate", "checkpoint_save",
+        "supervisor",
+        "travel_style",
+        "itinerary_planner",
+        "hotel_agent",
+        "validation",
+        "conflict_detection",
+        "approval_gate",
+        "checkpoint_save",
     }
     assert expected.issubset(node_names)
 
@@ -39,12 +46,14 @@ def test_replan_graph_has_all_required_nodes() -> None:
 
 # ── interrupt configuration ───────────────────────────────────────────────────
 
+
 def test_trip_graph_interrupts_before_approval_gate() -> None:
     graph = build_trip_graph(checkpointer=MemorySaver())
     assert "approval_gate" in graph.interrupt_before_nodes
 
 
 # ── stub nodes run without error ──────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_trip_graph_stub_run_completes() -> None:

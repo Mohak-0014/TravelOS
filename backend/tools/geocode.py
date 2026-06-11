@@ -1,5 +1,4 @@
 import hashlib
-from datetime import date
 
 import httpx
 from pydantic import BaseModel
