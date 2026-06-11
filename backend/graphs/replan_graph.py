@@ -1,37 +1,38 @@
 from langgraph.graph import END, StateGraph
 
+from backend.agents.weather import (
+    create_approvals,
+    impact_assessment,
+    weather_adaptation,
+    weather_check,
+)
 from backend.core.logging import get_logger
 from backend.graphs.state import TravelOSState
 
 logger = get_logger(__name__)
 
-# ── Stub nodes — fully implemented in Week 15 ─────────────────────────────────
 
-async def weather_check_node(state: TravelOSState) -> dict:
-    logger.info("weather_check_node_stub", trip_id=state.get("trip_id"))
-    return {"current_step": "impact_assessment"}
+async def weather_check_node(state: TravelOSState) -> dict:  # type: ignore[type-arg]
+    return await weather_check(state)
 
 
-async def impact_assessment_node(state: TravelOSState) -> dict:
-    logger.info("impact_assessment_node_stub", trip_id=state.get("trip_id"))
-    return {"current_step": "weather_adaptation"}
+async def impact_assessment_node(state: TravelOSState) -> dict:  # type: ignore[type-arg]
+    return await impact_assessment(state)
 
 
-async def weather_adaptation_node(state: TravelOSState) -> dict:
-    logger.info("weather_adaptation_node_stub", trip_id=state.get("trip_id"))
-    return {"current_step": "create_approvals"}
+async def weather_adaptation_node(state: TravelOSState) -> dict:  # type: ignore[type-arg]
+    return await weather_adaptation(state)
 
 
-async def create_approvals_node(state: TravelOSState) -> dict:
-    logger.info("create_approvals_node_stub", trip_id=state.get("trip_id"))
-    return {"current_step": "end"}
+async def create_approvals_node(state: TravelOSState) -> dict:  # type: ignore[type-arg]
+    return await create_approvals(state)
 
 
 def build_replan_graph(checkpointer=None):  # type: ignore[no-untyped-def]
     """
-    Replan graph: triggered by Celery Beat when adverse weather is detected.
-    Always ends by creating approval records — never mutates the itinerary directly.
-    Full implementation in Week 15.
+    Replan graph: triggered by Celery Beat when adverse weather is detected for a trip.
+    Flow: weather_check → impact_assessment → weather_adaptation → create_approvals → END
+    Never mutates the itinerary directly — all changes require user approval.
     """
     g = StateGraph(TravelOSState)
 
