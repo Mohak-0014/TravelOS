@@ -11,10 +11,17 @@ from sqlalchemy.exc import SQLAlchemyError
 from backend.core.config import settings
 from backend.core.logging import get_logger
 from backend.db.base import AsyncSessionLocal
-from backend.db.models import Approval, Trip
+from backend.db.models import Approval, ItineraryItem, Preference, Trip
 from backend.graphs.replan_graph import build_replan_graph
 from backend.graphs.state import TravelOSState
 from backend.graphs.trip_graph import build_trip_graph
+from backend.memory.embeddings import embed_text, preference_text, trip_memory_text
+from backend.memory.semantic import (
+    ensure_collections,
+    get_qdrant_client,
+    upsert_preferences,
+    upsert_trip_memory,
+)
 
 logger = get_logger(__name__)
 
@@ -299,17 +306,106 @@ def check_weather_and_replan(self, trip_id: str) -> dict:  # type: ignore[no-unt
 def embed_preferences_async(user_id: str) -> dict:  # type: ignore[no-untyped-def]
     """
     Generate and upsert preference embeddings for a user into Qdrant.
-    Stub — fully implemented in Week 11.
+    Triggered whenever a user saves/updates their preferences.
     """
-    logger.info("embed_preferences_async_stub", user_id=user_id)
-    return {"status": "stub", "user_id": user_id}
+    logger.info("embed_preferences_async_received", user_id=user_id)
+    try:
+        return asyncio.run(_run_embed_preferences(user_id))
+    except Exception as exc:
+        logger.error("embed_preferences_async_failed", user_id=user_id, error=str(exc))
+        return {"status": "error", "user_id": user_id, "error": str(exc)}
 
 
 @celery_app.task(name="backend.workflows.celery_tasks.embed_trip_summary_async")
 def embed_trip_summary_async(trip_id: str) -> dict:  # type: ignore[no-untyped-def]
     """
     Summarise and embed a completed trip into Qdrant trip_memories collection.
-    Stub — fully implemented in Week 12.
+    Triggered after a trip reaches 'planned' status.
     """
-    logger.info("embed_trip_summary_async_stub", trip_id=trip_id)
-    return {"status": "stub", "trip_id": trip_id}
+    logger.info("embed_trip_summary_async_received", trip_id=trip_id)
+    try:
+        return asyncio.run(_run_embed_trip(trip_id))
+    except Exception as exc:
+        logger.error("embed_trip_summary_async_failed", trip_id=trip_id, error=str(exc))
+        return {"status": "error", "trip_id": trip_id, "error": str(exc)}
+
+
+async def _run_embed_preferences(user_id: str) -> dict:  # type: ignore[return]
+    """Load preferences from DB, embed, and upsert into Qdrant."""
+    async with AsyncSessionLocal() as session:
+        pref_result = await session.execute(
+            select(Preference).where(Preference.user_id == user_id)
+        )
+        pref = pref_result.scalar_one_or_none()
+
+    if pref is None:
+        logger.warning("embed_preferences_no_pref_found", user_id=user_id)
+        return {"status": "skipped", "reason": "no preferences found", "user_id": user_id}
+
+    prefs_dict = {
+        "pace": pref.pace,
+        "luxury_tier": pref.luxury_tier,
+        "walking_tolerance": pref.walking_tolerance,
+        "interests": list(pref.interests or []),
+        "food_prefs": list(pref.food_prefs or []),
+        "budget_behavior": pref.budget_behavior,
+    }
+
+    text = preference_text(prefs_dict)
+    vector = embed_text(text)
+
+    client = get_qdrant_client()
+    try:
+        await ensure_collections(client)
+        await upsert_preferences(client, user_id, vector, {"text_summary": text, **prefs_dict})
+    finally:
+        await client.close()
+
+    logger.info("embed_preferences_complete", user_id=user_id)
+    return {"status": "ok", "user_id": user_id}
+
+
+async def _run_embed_trip(trip_id: str) -> dict:  # type: ignore[return]
+    """Load trip + itinerary from DB, embed a summary, and upsert into Qdrant."""
+    async with AsyncSessionLocal() as session:
+        trip = await session.get(Trip, trip_id)
+        if trip is None:
+            logger.warning("embed_trip_not_found", trip_id=trip_id)
+            return {"status": "skipped", "reason": "trip not found", "trip_id": trip_id}
+
+        items_result = await session.execute(
+            select(ItineraryItem)
+            .where(ItineraryItem.trip_id == trip_id)
+            .order_by(ItineraryItem.day_number, ItineraryItem.sort_order)
+        )
+        items = items_result.scalars().all()
+
+    style_tags: list[str] = []
+    item_titles = [i.title for i in items if i.item_type == "activity"]
+
+    text = trip_memory_text(
+        city=trip.destination_city,
+        country=trip.destination_country,
+        style_tags=style_tags,
+        item_titles=item_titles,
+    )
+    vector = embed_text(text)
+
+    payload = {
+        "destination_city": trip.destination_city,
+        "destination_country": trip.destination_country,
+        "start_date": trip.start_date.isoformat(),
+        "end_date": trip.end_date.isoformat(),
+        "num_travelers": trip.num_travelers,
+        "text_summary": text,
+    }
+
+    client = get_qdrant_client()
+    try:
+        await ensure_collections(client)
+        await upsert_trip_memory(client, trip_id, str(trip.user_id), vector, payload)
+    finally:
+        await client.close()
+
+    logger.info("embed_trip_complete", trip_id=trip_id)
+    return {"status": "ok", "trip_id": trip_id}
