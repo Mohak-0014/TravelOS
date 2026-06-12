@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
-import type { TripOut, ItineraryItemOut, ApprovalOut, ChatResponse, ChatSource } from "@/lib/api";
+import type { TripOut, ItineraryItemOut, ApprovalOut, ChatResponse, ChatSource, WeatherDay, HotelCandidateOut } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 
 const TripMap = dynamic(() => import("./TripMap"), {
@@ -56,11 +56,25 @@ export default function TripDetailPage() {
     enabled: !!token && !!tripId,
   });
 
+  const { data: weatherDays = [] } = useQuery<WeatherDay[]>({
+    queryKey: ["weather", tripId],
+    queryFn: () => api.get<WeatherDay[]>(`/api/v1/trips/${tripId}/weather`),
+    enabled: !!token && !!tripId,
+    staleTime: 30 * 60 * 1000,
+  });
+
   const { data: items = [] } = useQuery<ItineraryItemOut[]>({
     queryKey: ["itinerary", tripId],
     queryFn: () => api.get<ItineraryItemOut[]>(`/api/v1/trips/${tripId}/itinerary`),
     enabled: !!trip && trip.status !== "planning",
     staleTime: 10_000,
+  });
+
+  const { data: hotels = [] } = useQuery<HotelCandidateOut[]>({
+    queryKey: ["hotels", tripId],
+    queryFn: () => api.get<HotelCandidateOut[]>(`/api/v1/trips/${tripId}/hotels`),
+    enabled: !!token && !!tripId && !!trip && trip.status !== "planning",
+    staleTime: 60_000,
   });
 
   const { data: pendingApprovals = [] } = useQuery<ApprovalOut[]>({
@@ -386,6 +400,134 @@ export default function TripDetailPage() {
             </div>
           )}
         </div>
+        )}
+
+        {/* Hotels */}
+        {hotels.length > 0 && (
+          <div>
+            <h2 className="text-base font-semibold text-gray-900 mb-3">Hotel Options</h2>
+            <div className="flex flex-col gap-3">
+              {hotels.map((hotel) => (
+                <div
+                  key={hotel.id}
+                  className={`bg-white rounded-xl border p-4 flex gap-4 ${
+                    hotel.is_selected ? "border-blue-400 ring-1 ring-blue-300" : "border-gray-200"
+                  }`}
+                >
+                  {hotel.image_url && (
+                    <img
+                      src={hotel.image_url}
+                      alt={hotel.name}
+                      className="w-20 h-20 rounded-lg object-cover shrink-0"
+                    />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-900 leading-snug truncate">{hotel.name}</p>
+                        {hotel.star_rating != null && (
+                          <p className="text-xs text-amber-500 mt-0.5">
+                            {"★".repeat(Math.round(hotel.star_rating))}
+                            {"☆".repeat(Math.max(0, 5 - Math.round(hotel.star_rating)))}
+                            <span className="text-gray-400 ml-1">{hotel.star_rating.toFixed(1)}</span>
+                          </p>
+                        )}
+                        {hotel.address && (
+                          <p className="text-xs text-gray-400 truncate mt-0.5">{hotel.address}</p>
+                        )}
+                        <div className="flex flex-wrap gap-2 mt-1.5">
+                          {hotel.meal_plan && (
+                            <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                              {hotel.meal_plan}
+                            </span>
+                          )}
+                          {hotel.refundable != null && (
+                            <span
+                              className={`text-xs px-2 py-0.5 rounded-full ${
+                                hotel.refundable
+                                  ? "bg-green-100 text-green-700"
+                                  : "bg-red-50 text-red-600"
+                              }`}
+                            >
+                              {hotel.refundable ? "Refundable" : "Non-refundable"}
+                            </span>
+                          )}
+                          {hotel.is_selected && (
+                            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                              Selected
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {(hotel.price_per_night != null || hotel.price_total != null) && (
+                        <div className="text-right shrink-0">
+                          {hotel.price_per_night != null && (
+                            <p className="text-sm font-semibold text-gray-900 tabular-nums">
+                              {hotel.price_currency ?? ""} {hotel.price_per_night.toLocaleString()}
+                              <span className="text-xs font-normal text-gray-400">/night</span>
+                            </p>
+                          )}
+                          {hotel.price_total != null && (
+                            <p className="text-xs text-gray-500 tabular-nums">
+                              {hotel.price_currency ?? ""} {hotel.price_total.toLocaleString()} total
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Weather */}
+        {weatherDays.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <h2 className="text-base font-semibold text-gray-900">Weather</h2>
+              {weatherDays.some((d) => d.is_climate_normal) && (
+                <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                  Historical averages shown for dates beyond 14 days
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+              {weatherDays.map((day) => (
+                <div
+                  key={day.date}
+                  className={`rounded-xl border p-3 text-sm ${
+                    day.is_adverse
+                      ? "bg-red-50 border-red-200"
+                      : day.is_climate_normal
+                        ? "bg-amber-50 border-amber-200"
+                        : "bg-white border-gray-200"
+                  }`}
+                >
+                  <p className="text-xs text-gray-400 mb-1">
+                    {new Date(day.date + "T00:00:00").toLocaleDateString("en-US", {
+                      weekday: "short",
+                      month: "short",
+                      day: "numeric",
+                    })}
+                  </p>
+                  <p className="font-medium text-gray-800 leading-tight text-xs">
+                    {day.condition_label}
+                    {day.is_adverse && " ⚠️"}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {Math.round(day.temp_min_c)}–{Math.round(day.temp_max_c)}°C
+                  </p>
+                  {day.precipitation_mm > 0 && (
+                    <p className="text-xs text-blue-500 mt-0.5">
+                      💧 {day.precipitation_mm} mm
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* Map */}

@@ -178,6 +178,32 @@ class ApprovalOut(BaseModel):
     resolved_at: datetime | None
 
 
+# ── Hotels ───────────────────────────────────────────────────────────────────
+
+
+class HotelCandidateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    trip_id: str
+    provider: str
+    provider_hotel_id: str
+    name: str
+    star_rating: float | None
+    latitude: float | None
+    longitude: float | None
+    address: str | None
+    image_url: str | None
+    price_total: float | None
+    price_currency: str | None
+    price_per_night: float | None
+    meal_plan: str | None
+    refundable: bool | None
+    match_score: float | None
+    is_selected: bool
+    created_at: datetime
+
+
 # ── Concierge chat ─────────────────────────────────────────────────────────────
 
 

@@ -52,11 +52,12 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     prefs_dict = _preference_to_dict(pref)
     trip_context = _trip_to_context(trip)
 
-    profile = await _synthesize_profile(
-        prefs_dict, trip_context, state.get("traveler_profiles", [])
-    )
-
+    # Fetch past trips first so they can inform the profile synthesis
     embedding_hits = await _search_past_trips(user_id, prefs_dict)
+
+    profile = await _synthesize_profile(
+        prefs_dict, trip_context, state.get("traveler_profiles", []), embedding_hits
+    )
 
     logger.info(
         "travel_style_complete",
@@ -151,6 +152,7 @@ async def _synthesize_profile(
     prefs: dict,  # type: ignore[type-arg]
     trip_context: str,
     traveler_profiles: list[dict],  # type: ignore[type-arg]
+    past_trips: list[dict],  # type: ignore[type-arg]
 ) -> dict:  # type: ignore[type-arg]
     prefs_str = (
         json.dumps(prefs) if prefs else "No preferences set — assume versatile moderate traveler."
@@ -159,8 +161,26 @@ async def _synthesize_profile(
         f"\nTraveler details: {json.dumps(traveler_profiles)}" if traveler_profiles else ""
     )
 
+    past_trips_str = ""
+    if past_trips:
+        summaries: list[str] = []
+        for pt in past_trips[:3]:
+            city = pt.get("destination_city", "")
+            country = pt.get("destination_country", "")
+            tags = pt.get("style_tags") or []
+            loc = f"{city}, {country}" if country else city
+            tag_str = f" (style: {', '.join(tags[:3])})" if tags else ""
+            summaries.append(f"- {loc}{tag_str}")
+        past_trips_str = (
+            "\nPast trips (use to personalise the profile — avoid repeating the same activities):\n"
+            + "\n".join(summaries)
+        )
+
     user_message = (
-        f"Trip context: {trip_context}\n" f"User preferences: {prefs_str}" f"{profiles_str}"
+        f"Trip context: {trip_context}\n"
+        f"User preferences: {prefs_str}"
+        f"{profiles_str}"
+        f"{past_trips_str}"
     )
 
     try:

@@ -25,12 +25,20 @@ logger = get_logger(__name__)
 
 _VALID_ITEM_TYPES = frozenset({"activity", "meal", "transport", "lodging", "free"})
 
+# Items per day by pace — injected into the prompt and enforced post-parse
+_PACE_ITEMS_PER_DAY: dict[str, int] = {
+    "relaxed": 3,  # morning activity, lunch, afternoon activity
+    "moderate": 4,  # + dinner
+    "packed": 6,  # + early morning + evening activity
+}
+_DEFAULT_ITEMS_PER_DAY = 4
+
 _SYSTEM_PROMPT = """You are the Itinerary Planner for TravelOS, an AI travel planning system.
 Generate a realistic, day-by-day travel itinerary using the trip data, traveler style profile,
 weather forecast, and list of real attractions provided.
 
 Rules:
-- Generate EXACTLY 4 items per day: morning activity, lunch, afternoon activity, dinner.
+- Generate the exact number of items per day specified in the user message (varies by pace).
 - Use attractions from the provided list whenever possible (exact name, lat, lng, source_ref).
 - Schedule indoor activities (museums, galleries) on adverse weather days.
 - Respect the traveler's daily rhythm and pace from the style profile.
@@ -116,10 +124,15 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
         logger.warning("itinerary_planner_no_coords", trip_id=trip_id)
         weather_days, attractions = [], []
 
-    style_profile = (state.get("memory_context") or {}).get("travel_style_profile", {})
+    memory_context = state.get("memory_context") or {}
+    style_profile = memory_context.get("travel_style_profile", {})
+    prefs = memory_context.get("preferences") or {}
     budget_state = state.get("budget_state") or {}
+    pace = prefs.get("pace") or "moderate"
 
-    items = await _generate_itinerary(trip, style_profile, weather_days, attractions, budget_state)
+    items = await _generate_itinerary(
+        trip, style_profile, weather_days, attractions, budget_state, pace
+    )
 
     if items:
         await _persist_itinerary_items(trip_id, trip, items)
@@ -211,8 +224,12 @@ async def _generate_itinerary(
     weather_days: list[WeatherDay],
     attractions: list[Attraction],
     budget_state: dict,  # type: ignore[type-arg]
+    pace: str = "moderate",
 ) -> list[_ItemDraft]:
-    prompt = _build_prompt(trip, style_profile, weather_days, attractions, budget_state)
+    items_per_day = _PACE_ITEMS_PER_DAY.get(pace, _DEFAULT_ITEMS_PER_DAY)
+    prompt = _build_prompt(
+        trip, style_profile, weather_days, attractions, budget_state, items_per_day
+    )
     try:
         llm = _build_llm()
         response = await llm.ainvoke(
@@ -235,6 +252,7 @@ def _build_prompt(
     weather_days: list[WeatherDay],
     attractions: list[Attraction],
     budget_state: dict,  # type: ignore[type-arg]
+    items_per_day: int = _DEFAULT_ITEMS_PER_DAY,
 ) -> str:
     trip_days = (trip.end_date - trip.start_date).days + 1
     budget_str = (
@@ -289,10 +307,20 @@ def _build_prompt(
             "\n**Note**: No attraction data available — generate based on destination knowledge."
         )
 
+    if items_per_day <= 3:
+        structure = "morning activity, lunch (meal), afternoon activity"
+    elif items_per_day == 4:
+        structure = "morning activity, lunch (meal), afternoon activity, dinner (meal)"
+    else:
+        structure = (
+            "early morning activity, morning activity, lunch (meal), "
+            "afternoon activity, dinner (meal), evening activity"
+        )
+
     parts += [
         "",
-        f"Generate exactly 4 items per day for all {trip_days} day(s): "
-        "morning activity, lunch (meal), afternoon activity, dinner (meal). "
+        f"Generate exactly {items_per_day} items per day for all {trip_days} day(s): "
+        f"{structure}. "
         "Keep descriptions under 30 words. "
         "Prefer indoor venues on adverse weather days. "
         "Output only the JSON array — no markdown fences, no explanation.",

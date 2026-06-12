@@ -25,8 +25,13 @@ _TIER_TARGET_STARS: dict[str, float] = {
     "luxury": 4.5,
 }
 
-# Fraction of total budget allocated to lodging for per-night budget calculation
-_LODGING_BUDGET_FRACTION = 0.35
+# Lodging fraction of total budget, keyed by budget_behavior preference
+_LODGING_BUDGET_BY_BEHAVIOR: dict[str, float] = {
+    "frugal": 0.25,
+    "balanced": 0.35,
+    "splurge": 0.45,
+}
+_LODGING_BUDGET_FRACTION_DEFAULT = 0.35
 
 _SELECTION_SYSTEM = """You are the Hotel Selection Agent for TravelOS.
 Given a list of hotel candidates and a traveler profile, choose the single best hotel.
@@ -85,11 +90,18 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
             ],
         }
 
-    style_profile = (state.get("memory_context") or {}).get("travel_style_profile", {})
+    memory_context = state.get("memory_context") or {}
+    style_profile = memory_context.get("travel_style_profile", {})
+    prefs = memory_context.get("preferences") or {}
     budget_state = state.get("budget_state") or {}
     trip_nights = (trip.end_date - trip.start_date).days or 1
 
-    ranked = _rank_offers(offers, style_profile, budget_state, trip_nights)
+    direct_luxury_tier = prefs.get("luxury_tier")
+    budget_behavior = prefs.get("budget_behavior")
+
+    ranked = _rank_offers(
+        offers, style_profile, budget_state, trip_nights, direct_luxury_tier, budget_behavior
+    )
     top = ranked[:10]
 
     selected_idx = await _select_with_llm(top, style_profile, trip)
@@ -128,12 +140,19 @@ def _rank_offers(
     style_profile: dict,  # type: ignore[type-arg]
     budget_state: dict,  # type: ignore[type-arg]
     trip_nights: int,
+    direct_luxury_tier: str | None = None,
+    budget_behavior: str | None = None,
 ) -> list[HotelOffer]:
-    luxury_tier = style_profile.get("accommodation_preference", "")
-    # Infer tier from accommodation_preference text if explicit key absent
-    inferred_tier = _infer_tier(luxury_tier)
+    # Prefer the direct luxury_tier preference field; fall back to text inference
+    if direct_luxury_tier and direct_luxury_tier in _TIER_TARGET_STARS:
+        inferred_tier = direct_luxury_tier
+    else:
+        inferred_tier = _infer_tier(style_profile.get("accommodation_preference", ""))
 
-    budget_per_night = _compute_budget_per_night(budget_state, trip_nights)
+    lodging_fraction = _LODGING_BUDGET_BY_BEHAVIOR.get(
+        budget_behavior or "", _LODGING_BUDGET_FRACTION_DEFAULT
+    )
+    budget_per_night = _compute_budget_per_night(budget_state, trip_nights, lodging_fraction)
 
     scored: list[tuple[float, HotelOffer]] = []
     for offer in offers:
@@ -160,11 +179,12 @@ def _infer_tier(accommodation_pref: str) -> str:
 def _compute_budget_per_night(
     budget_state: dict,  # type: ignore[type-arg]
     trip_nights: int,
+    lodging_fraction: float = _LODGING_BUDGET_FRACTION_DEFAULT,
 ) -> float | None:
     total = budget_state.get("total")
     if not total:
         return None
-    return float(total) * _LODGING_BUDGET_FRACTION / trip_nights
+    return float(total) * lodging_fraction / trip_nights
 
 
 def _score_offer(

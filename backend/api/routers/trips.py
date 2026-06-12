@@ -4,8 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.dependencies import get_current_active_user
 from backend.db.base import get_db
-from backend.db.models import ItineraryItem, TravelerProfile, Trip, User
+from backend.db.models import HotelCandidate, ItineraryItem, TravelerProfile, Trip, User
 from backend.db.schemas import (
+    HotelCandidateOut,
     ItineraryItemCreate,
     ItineraryItemOut,
     ItineraryItemUpdate,
@@ -14,6 +15,7 @@ from backend.db.schemas import (
     TripUpdate,
 )
 from backend.tools.geocode import geocode
+from backend.tools.weather import WeatherDay, fetch_weather
 
 router = APIRouter(prefix="/api/v1/trips", tags=["trips"])
 
@@ -259,3 +261,45 @@ async def generate_itinerary(
 
     generate_itinerary_async.delay(str(trip.id), str(current_user.id))
     return {"status": "queued", "trip_id": str(trip.id)}
+
+
+# ── Hotels ───────────────────────────────────────────────────────────────────
+
+
+@router.get("/{trip_id}/hotels", response_model=list[HotelCandidateOut])
+async def get_trip_hotels(
+    trip_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[HotelCandidate]:
+    result = await db.execute(select(Trip).where(Trip.id == trip_id))
+    _assert_owns(result.scalar_one_or_none(), current_user)
+
+    hotels = await db.execute(
+        select(HotelCandidate)
+        .where(HotelCandidate.trip_id == trip_id)
+        .order_by(HotelCandidate.match_score.desc().nulls_last())
+    )
+    return list(hotels.scalars().all())
+
+
+# ── Weather ───────────────────────────────────────────────────────────────────
+
+
+@router.get("/{trip_id}/weather", response_model=list[WeatherDay])
+async def get_trip_weather(
+    trip_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[WeatherDay]:
+    result = await db.execute(select(Trip).where(Trip.id == trip_id))
+    trip = _assert_owns(result.scalar_one_or_none(), current_user)
+
+    lat, lng = trip.latitude, trip.longitude
+    if lat is None or lng is None:
+        geo = await geocode(f"{trip.destination_city}, {trip.destination_country or ''}")
+        if geo is None:
+            return []
+        lat, lng = geo.lat, geo.lng
+
+    return await fetch_weather(lat, lng, trip.start_date, trip.end_date)

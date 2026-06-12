@@ -157,6 +157,39 @@ export interface ChatResponse {
   sources: ChatSource[];
 }
 
+export interface HotelCandidateOut {
+  id: string;
+  trip_id: string;
+  provider: string;
+  provider_hotel_id: string;
+  name: string;
+  star_rating: number | null;
+  latitude: number | null;
+  longitude: number | null;
+  address: string | null;
+  image_url: string | null;
+  price_total: number | null;
+  price_currency: string | null;
+  price_per_night: number | null;
+  meal_plan: string | null;
+  refundable: boolean | null;
+  match_score: number | null;
+  is_selected: boolean;
+  created_at: string;
+}
+
+export interface WeatherDay {
+  date: string;
+  temp_min_c: number;
+  temp_max_c: number;
+  precipitation_mm: number;
+  precipitation_prob: number;
+  condition_code: number;
+  condition_label: string;
+  is_adverse: boolean;
+  is_climate_normal: boolean;
+}
+
 export interface ItineraryItemOut {
   id: string;
   trip_id: string;

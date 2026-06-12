@@ -347,6 +347,8 @@ def _build_system_prompt(
             parts.append(f"food={', '.join(pref.food_prefs)}")
         if pref.walking_tolerance:
             parts.append(f"walking={pref.walking_tolerance}")
+        if pref.budget_behavior:
+            parts.append(f"budget_behavior={pref.budget_behavior}")
         if parts:
             lines += ["## Traveler preferences", ", ".join(parts), ""]
 
