@@ -4,7 +4,7 @@ from backend.core.config import settings
 def test_settings_has_required_fields() -> None:
     assert hasattr(settings, "DATABASE_URL")
     assert hasattr(settings, "REDIS_URL")
-    assert hasattr(settings, "ANTHROPIC_API_KEY")
+    assert hasattr(settings, "GROQ_API_KEY")
     assert hasattr(settings, "JWT_SECRET_KEY")
     assert hasattr(settings, "JWT_ALGORITHM")
     assert hasattr(settings, "EMBEDDING_MODEL")

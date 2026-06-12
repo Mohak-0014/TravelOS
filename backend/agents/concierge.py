@@ -5,12 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 
-from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from backend.core.config import settings
+from backend.agents._llm import build_llm
 from backend.core.logging import get_logger
 from backend.db.base import AsyncSessionLocal
 from backend.db.models import HotelCandidate, ItineraryItem, Preference, Trip
@@ -60,13 +60,8 @@ _TOOL_SCHEMAS = [SearchAttractions, SearchRestaurants]
 # ── LLM ────────────────────────────────────────────────────────────────────────
 
 
-def _build_llm() -> ChatAnthropic:
-    return ChatAnthropic(  # type: ignore[call-arg]
-        model="claude-sonnet-4-6",
-        api_key=settings.ANTHROPIC_API_KEY,
-        max_tokens=1024,
-        temperature=0.3,
-    )
+def _build_llm() -> BaseChatModel:
+    return build_llm("large", temperature=0.3)
 
 
 # ── Main entry point ───────────────────────────────────────────────────────────
@@ -90,8 +85,11 @@ async def ask(trip_id: str, user_id: str, question: str) -> ConciergeResponse:
         system_prompt = _build_system_prompt(trip, items, hotel, pref, memory)
         llm = _build_llm().bind_tools(_TOOL_SCHEMAS)
 
-        messages: list = [SystemMessage(content=system_prompt), HumanMessage(content=question)]
-        all_sources: list[dict] = []  # type: ignore[type-arg]
+        messages: list[BaseMessage] = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=question),
+        ]
+        all_sources: list[dict[str, object]] = []
 
         for _ in range(_MAX_TOOL_ROUNDS):
             response = await llm.ainvoke(messages)
@@ -329,7 +327,7 @@ def _build_system_prompt(
     # Itinerary (titles only, capped at 5 items per day to limit tokens)
     if items:
         lines.append("## Itinerary")
-        by_day: dict[int, list[str]] = {}  # type: ignore[type-arg]
+        by_day: dict[int, list[str]] = {}
         for item in items:
             by_day.setdefault(item.day_number, []).append(f"{item.item_type}: {item.title}")
         for day, day_items in sorted(by_day.items()):

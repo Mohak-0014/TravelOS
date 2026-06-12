@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     QDRANT_PORT: int = 6333
 
     # LLM
-    ANTHROPIC_API_KEY: str = ""
+    GROQ_API_KEY: str = ""
 
     # External APIs
     LITEAPI_KEY: str = ""

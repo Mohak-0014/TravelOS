@@ -310,7 +310,8 @@ export default function TripDetailPage() {
           </div>
         )}
 
-        {/* Itinerary */}
+        {/* Itinerary — hidden until generation has been attempted */}
+        {trip.status !== "planning" && (
         <div>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-base font-semibold text-gray-900">Itinerary</h2>
@@ -328,13 +329,10 @@ export default function TripDetailPage() {
           {Object.keys(itemsByDay).length === 0 ? (
             <div className="bg-white rounded-xl border border-dashed border-gray-300 p-8 text-center">
               <p className="text-gray-500 text-sm">
-                {trip.status === "generating" ? "Building your itinerary…" : "No items yet."}
+                {trip.status === "generating"
+                  ? "Building your itinerary…"
+                  : "No items yet. Items will appear here once agents finish."}
               </p>
-              {trip.status !== "generating" && trip.status !== "planning" && (
-                <p className="text-gray-400 text-xs mt-1">
-                  Items added by agents will appear here day by day.
-                </p>
-              )}
             </div>
           ) : (
             <div className="flex flex-col gap-3">
@@ -388,6 +386,7 @@ export default function TripDetailPage() {
             </div>
           )}
         </div>
+        )}
 
         {/* Map */}
         {trip.latitude != null && trip.longitude != null && pinnedItems.length > 0 && (

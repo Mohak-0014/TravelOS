@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 
-from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import select
 
-from backend.core.config import settings
+from backend.agents._llm import build_llm
 from backend.core.logging import get_logger
 from backend.db.base import AsyncSessionLocal
 from backend.db.models import Preference, Trip
@@ -38,13 +38,8 @@ relaxation, sports, family_friendly, luxury, budget_conscious, solo, couple, gro
 moderate_pace, fast_pace, slow_pace, off_beaten_path, popular_attractions."""
 
 
-def _build_llm() -> ChatAnthropic:
-    return ChatAnthropic(  # type: ignore[call-arg]
-        model="claude-sonnet-4-6",
-        api_key=settings.ANTHROPIC_API_KEY,
-        max_tokens=512,
-        temperature=0.3,
-    )
+def _build_llm() -> BaseChatModel:
+    return build_llm("large", temperature=0.3)
 
 
 async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]

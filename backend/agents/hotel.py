@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 
-from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import delete, select
 
-from backend.core.config import settings
+from backend.agents._llm import build_llm
 from backend.core.logging import get_logger
 from backend.db.base import AsyncSessionLocal
 from backend.db.models import HotelCandidate, Trip
@@ -40,13 +40,8 @@ Respond ONLY with valid JSON (no other text):
 selected_index is the 0-based position in the candidates list."""
 
 
-def _build_llm() -> ChatAnthropic:
-    return ChatAnthropic(  # type: ignore[call-arg]
-        model="claude-haiku-4-5-20251001",
-        api_key=settings.ANTHROPIC_API_KEY,
-        max_tokens=256,
-        temperature=0,
-    )
+def _build_llm() -> BaseChatModel:
+    return build_llm("small", temperature=0.0)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

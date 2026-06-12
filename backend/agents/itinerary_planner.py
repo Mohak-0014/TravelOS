@@ -7,12 +7,12 @@ import json
 from datetime import date, datetime, timedelta
 from datetime import time as dt_time
 
-from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import delete, select
 
-from backend.core.config import settings
+from backend.agents._llm import build_llm
 from backend.core.logging import get_logger
 from backend.db.base import AsyncSessionLocal
 from backend.db.models import ItineraryItem, Trip
@@ -81,13 +81,8 @@ class _ItemDraft(BaseModel):
     sort_order: int = 0
 
 
-def _build_llm() -> ChatAnthropic:
-    return ChatAnthropic(  # type: ignore[call-arg]
-        model="claude-sonnet-4-6",
-        api_key=settings.ANTHROPIC_API_KEY,
-        max_tokens=8192,
-        temperature=0.7,
-    )
+def _build_llm() -> BaseChatModel:
+    return build_llm("large", temperature=0.7)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

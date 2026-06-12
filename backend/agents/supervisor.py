@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 
-from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from backend.core.config import settings
+from backend.agents._llm import build_llm
 from backend.core.logging import get_logger
 from backend.graphs.state import TravelOSState
 
@@ -29,13 +29,8 @@ Not recoverable: missing required fields, auth failures, repeated errors, data c
 _VALID_RETRY_NODES = frozenset({"travel_style", "itinerary_planner", "hotel_agent"})
 
 
-def _build_llm() -> ChatAnthropic:
-    return ChatAnthropic(  # type: ignore[call-arg]
-        model="claude-sonnet-4-6",
-        api_key=settings.ANTHROPIC_API_KEY,
-        max_tokens=256,
-        temperature=0,
-    )
+def _build_llm() -> BaseChatModel:
+    return build_llm("large", temperature=0.0)
 
 
 async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
