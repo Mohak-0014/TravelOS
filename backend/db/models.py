@@ -88,7 +88,7 @@ class Trip(Base):
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     destination_city: Mapped[str] = mapped_column(String(255), nullable=False)
-    destination_country: Mapped[str | None] = mapped_column(String(2))
+    destination_country: Mapped[str | None] = mapped_column(String(100))
     latitude: Mapped[float | None] = mapped_column(Double)
     longitude: Mapped[float | None] = mapped_column(Double)
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
