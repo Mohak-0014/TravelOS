@@ -64,11 +64,19 @@ def generate_itinerary_async(self, trip_id: str, user_id: str) -> dict:  # type:
       Phase 2: If no pending approvals, resume through approval_gate → checkpoint_save.
                If pending approvals, persist them and leave trip as awaiting_approval.
     """
+    from backend.db.base import engine
+
+    # asyncpg connections are bound to the event loop that created them.
+    # asyncio.run() creates a fresh event loop each call, so we must dispose
+    # the pool first to avoid "another operation is in progress" errors.
+    engine.sync_engine.dispose()
+
     logger.info("generate_itinerary_async_received", trip_id=trip_id, user_id=user_id)
     try:
         return asyncio.run(_run_trip_graph(trip_id, user_id))
     except Exception as exc:
         logger.error("generate_itinerary_async_failed", trip_id=trip_id, error=str(exc))
+        engine.sync_engine.dispose()
         asyncio.run(_set_trip_status(trip_id, "failed"))
         raise self.retry(exc=exc, countdown=30, max_retries=2) from exc
 
@@ -284,6 +292,9 @@ def check_weather_and_replan(self, trip_id: str) -> dict:  # type: ignore[no-unt
     Fetch fresh weather for a single trip and invoke the replan graph.
     Creates approval records for any outdoor items on adverse-weather days.
     """
+    from backend.db.base import engine
+
+    engine.sync_engine.dispose()
     logger.info("check_weather_and_replan_received", trip_id=trip_id)
     try:
         return asyncio.run(_run_replan_graph(trip_id))
@@ -301,6 +312,9 @@ def embed_preferences_async(user_id: str) -> dict:  # type: ignore[no-untyped-de
     Generate and upsert preference embeddings for a user into Qdrant.
     Triggered whenever a user saves/updates their preferences.
     """
+    from backend.db.base import engine
+
+    engine.sync_engine.dispose()
     logger.info("embed_preferences_async_received", user_id=user_id)
     try:
         return asyncio.run(_run_embed_preferences(user_id))
@@ -315,6 +329,9 @@ def embed_trip_summary_async(trip_id: str) -> dict:  # type: ignore[no-untyped-d
     Summarise and embed a completed trip into Qdrant trip_memories collection.
     Triggered after a trip reaches 'planned' status.
     """
+    from backend.db.base import engine
+
+    engine.sync_engine.dispose()
     logger.info("embed_trip_summary_async_received", trip_id=trip_id)
     try:
         return asyncio.run(_run_embed_trip(trip_id))
