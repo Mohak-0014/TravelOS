@@ -41,13 +41,6 @@ celery_app.conf.update(
     # Prevent runaway tasks from blocking workers
     task_time_limit=600,
     task_soft_time_limit=540,
-    # Route embedding tasks to low-priority queue, generation to high-priority
-    task_routes={
-        "backend.workflows.celery_tasks.embed_preferences_async": {"queue": "low"},
-        "backend.workflows.celery_tasks.embed_trip_summary_async": {"queue": "low"},
-        "backend.workflows.celery_tasks.generate_itinerary_async": {"queue": "high"},
-        "backend.workflows.celery_tasks.check_weather_and_replan": {"queue": "high"},
-    },
     beat_schedule={
         "check-weather-every-6h": {
             "task": "backend.workflows.celery_tasks.check_weather_and_replan_all",
@@ -333,9 +326,7 @@ def embed_trip_summary_async(trip_id: str) -> dict:  # type: ignore[no-untyped-d
 async def _run_embed_preferences(user_id: str) -> dict:  # type: ignore[return]
     """Load preferences from DB, embed, and upsert into Qdrant."""
     async with AsyncSessionLocal() as session:
-        pref_result = await session.execute(
-            select(Preference).where(Preference.user_id == user_id)
-        )
+        pref_result = await session.execute(select(Preference).where(Preference.user_id == user_id))
         pref = pref_result.scalar_one_or_none()
 
     if pref is None:

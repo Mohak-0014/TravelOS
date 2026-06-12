@@ -17,9 +17,10 @@ cd backend && python -m venv .venv && .venv\Scripts\activate && pip install -e "
 # Dev server
 uvicorn api.main:app --reload --port 8000
 
-# Celery (separate terminals)
-celery -A workflows.celery_tasks worker --loglevel=info
-celery -A workflows.celery_tasks beat --loglevel=info   # weather polling scheduler
+# Celery (separate terminals) — must run from repo root, not backend/
+# Windows requires --pool=solo; all tasks now use the default queue (no -Q flag needed)
+backend/.venv/Scripts/celery -A backend.workflows.celery_tasks worker --loglevel=info --pool=solo
+backend/.venv/Scripts/celery -A backend.workflows.celery_tasks beat --loglevel=info   # weather polling scheduler
 
 # Lint + format (ruff handles BOTH — no separate black/flake8)
 ruff format .

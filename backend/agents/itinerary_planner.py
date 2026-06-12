@@ -30,16 +30,17 @@ Generate a realistic, day-by-day travel itinerary using the trip data, traveler 
 weather forecast, and list of real attractions provided.
 
 Rules:
+- Generate EXACTLY 4 items per day: morning activity, lunch, afternoon activity, dinner.
 - Use attractions from the provided list whenever possible (exact name, lat, lng, source_ref).
 - Schedule indoor activities (museums, galleries) on adverse weather days.
 - Respect the traveler's daily rhythm and pace from the style profile.
 - Every item must have a valid item_type: activity | meal | transport | lodging | free
-- Meals should be realistic for the destination (breakfast, lunch, dinner cadence).
 - Times use "HH:MM" 24-hour format. Leave null if genuinely unknown.
 - est_cost is in the trip's currency. Omit (null) if unknown.
 - is_outdoor is true for parks, viewpoints, walking tours, outdoor sites.
+- Keep descriptions SHORT (under 30 words each) to avoid hitting output limits.
 
-Respond ONLY with a valid JSON array (no other text):
+Respond ONLY with a valid JSON array (no markdown, no explanation):
 [
   {
     "day_number": 1,
@@ -290,10 +291,11 @@ def _build_prompt(
 
     parts += [
         "",
-        f"Generate a complete itinerary for all {trip_days} day(s). "
-        "Include breakfast, key activities, lunch, afternoon activities, and dinner each day. "
+        f"Generate exactly 4 items per day for all {trip_days} day(s): "
+        "morning activity, lunch (meal), afternoon activity, dinner (meal). "
+        "Keep descriptions under 30 words. "
         "Prefer indoor venues on adverse weather days. "
-        "Output only the JSON array — no explanation.",
+        "Output only the JSON array — no markdown fences, no explanation.",
     ]
 
     return "\n".join(parts)
@@ -306,10 +308,19 @@ def _parse_items(raw: str, trip: Trip) -> list[_ItemDraft]:
     """Extract JSON array from LLM output, validate each item against trip dates."""
     try:
         start = raw.find("[")
-        end = raw.rfind("]") + 1
-        if start < 0 or end <= start:
+        if start < 0:
             return []
-        data = json.loads(raw[start:end])
+        end = raw.rfind("]") + 1
+        if end <= start:
+            # Truncated response (finish_reason=length) — recover complete objects up to last }
+            last_obj = raw.rfind("}")
+            if last_obj < start:
+                return []
+            end = last_obj + 1
+            raw = raw[start:end] + "]"
+        else:
+            raw = raw[start:end]
+        data = json.loads(raw)
     except json.JSONDecodeError:
         return []
 
