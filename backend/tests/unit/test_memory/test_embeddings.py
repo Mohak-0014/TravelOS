@@ -1,16 +1,13 @@
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from backend.memory.embeddings import (
-    _get_model,
     embed_text,
     preference_text,
     trip_memory_text,
 )
 
-
 # ── preference_text ───────────────────────────────────────────────────────────
+
 
 def test_preference_text_full_prefs() -> None:
     prefs = {
@@ -48,6 +45,7 @@ def test_preference_text_empty_lists() -> None:
 
 # ── trip_memory_text ──────────────────────────────────────────────────────────
 
+
 def test_trip_memory_text_full() -> None:
     text = trip_memory_text(
         city="Rome",
@@ -83,6 +81,7 @@ def test_trip_memory_text_caps_items_at_10() -> None:
 
 # ── embed_text ────────────────────────────────────────────────────────────────
 
+
 def test_embed_text_returns_384_floats() -> None:
     mock_model = MagicMock()
     import numpy as np
@@ -110,6 +109,7 @@ def test_embed_text_calls_encode_with_normalize() -> None:
 
 
 # ── _get_model lazy loading ───────────────────────────────────────────────────
+
 
 def test_get_model_lazy_loads_once() -> None:
     import backend.memory.embeddings as emb_module

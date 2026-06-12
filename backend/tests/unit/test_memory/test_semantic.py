@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -13,8 +13,8 @@ from backend.memory.semantic import (
     upsert_trip_memory,
 )
 
-
 # ── helpers ───────────────────────────────────────────────────────────────────
+
 
 def _mock_client() -> AsyncMock:
     client = AsyncMock()
@@ -39,6 +39,7 @@ def _fake_vector(dim: int = 384) -> list[float]:
 
 # ── _point_id ─────────────────────────────────────────────────────────────────
 
+
 def test_point_id_is_deterministic() -> None:
     id1 = _point_id("pref", "user-1")
     id2 = _point_id("pref", "user-1")
@@ -61,6 +62,7 @@ def test_point_id_is_valid_uuid_string() -> None:
 
 
 # ── ensure_collections ────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_ensure_collections_creates_when_missing() -> None:
@@ -95,6 +97,7 @@ async def test_ensure_collections_raises_on_error() -> None:
 
 
 # ── upsert_preferences ────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_upsert_preferences_calls_upsert() -> None:
@@ -135,6 +138,7 @@ async def test_upsert_preferences_raises_on_qdrant_error() -> None:
 
 # ── upsert_trip_memory ────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_upsert_trip_memory_calls_upsert() -> None:
     client = _mock_client()
@@ -165,6 +169,7 @@ async def test_upsert_trip_memory_idempotent() -> None:
 
 
 # ── search_trip_memories ──────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_search_trip_memories_returns_hits() -> None:
@@ -209,6 +214,7 @@ async def test_search_trip_memories_degrades_on_error() -> None:
 
 
 # ── search_preferences ────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_search_preferences_returns_hits() -> None:

@@ -11,7 +11,8 @@ from backend.tools import redis_get_cached, redis_set_cached
 logger = get_logger(__name__)
 
 _CACHE_TTL = 60 * 60 * 3  # 3 hours
-_FSQ_URL = "https://api.foursquare.com/v3/places/search"
+_FSQ_URL = "https://places-api.foursquare.com/places/search"
+_FSQ_VERSION = "2025-06-17"
 _OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 _USER_AGENT = "TravelOS/1.0 rj.mohaknahata@gmail.com"
 
@@ -71,7 +72,13 @@ async def search_restaurants(
     if results:
         await redis_set_cached(cache, key, [r.model_dump() for r in results], _CACHE_TTL)
 
-    logger.info("restaurants_search_ok", lat=lat, lng=lng, count=len(results), provider=results[0].source_provider if results else "none")  # noqa: E501
+    logger.info(
+        "restaurants_search_ok",
+        lat=lat,
+        lng=lng,
+        count=len(results),
+        provider=results[0].source_provider if results else "none",
+    )  # noqa: E501
     return results
 
 
@@ -90,9 +97,12 @@ async def _search_foursquare(
                     "radius": radius_m,
                     "categories": categories,
                     "limit": 20,
-                    "fields": "fsq_id,name,geocodes,categories,price,location",
                 },
-                headers={"Authorization": settings.FOURSQUARE_API_KEY},
+                headers={
+                    "Authorization": f"Bearer {settings.FOURSQUARE_API_KEY}",
+                    "X-Places-Api-Version": _FSQ_VERSION,
+                    "Accept": "application/json",
+                },
             )
             resp.raise_for_status()
             data = resp.json()
@@ -103,7 +113,9 @@ async def _search_foursquare(
     results: list[Restaurant] = []
     for place in data.get("results", []):
         try:
-            geo = place.get("geocodes", {}).get("main", {})
+            # New API: coordinates are direct fields, not nested under geocodes.main
+            place_lat = place.get("latitude", lat)
+            place_lng = place.get("longitude", lng)
             location = place.get("location", {})
             addr_parts = [
                 location.get("address"),
@@ -111,16 +123,18 @@ async def _search_foursquare(
                 location.get("country"),
             ]
             address = ", ".join(p for p in addr_parts if p) or None
+            # New API uses fsq_place_id instead of fsq_id
+            place_id = place.get("fsq_place_id") or place.get("fsq_id", "")
             results.append(
                 Restaurant(
-                    fsq_id=place["fsq_id"],
+                    fsq_id=place_id,
                     name=place.get("name", ""),
-                    lat=geo.get("latitude", lat),
-                    lng=geo.get("longitude", lng),
+                    lat=place_lat,
+                    lng=place_lng,
                     categories=[c.get("name", "") for c in place.get("categories", [])],
-                    price_level=place.get("price"),
+                    price_level=None,
                     address=address,
-                    source_ref=place["fsq_id"],
+                    source_ref=place_id,
                 )
             )
         except Exception:
@@ -133,8 +147,10 @@ async def _search_foursquare(
 
 
 async def _search_overpass(lat: float, lng: float, radius_m: int) -> list[Restaurant]:
-    amenity_filter = "".join(f'node["amenity"="{a}"](around:{radius_m},{lat},{lng});' for a in _OSM_AMENITIES)
-    query = f'[out:json][timeout:15];({amenity_filter});out body 25;'
+    amenity_filter = "".join(
+        f'node["amenity"="{a}"](around:{radius_m},{lat},{lng});' for a in _OSM_AMENITIES
+    )
+    query = f"[out:json][timeout:15];({amenity_filter});out body 25;"
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:

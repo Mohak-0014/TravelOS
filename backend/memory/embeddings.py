@@ -41,6 +41,7 @@ def embed_text(text: str) -> list[float]:
 
 # ── Text builders ─────────────────────────────────────────────────────────────
 
+
 def preference_text(prefs: dict) -> str:  # type: ignore[type-arg]
     """Build a short natural-language summary of user preferences for embedding."""
     parts: list[str] = []

@@ -35,6 +35,7 @@ def _point_id(namespace: str, name: str) -> str:
 
 # ── Collection bootstrap ──────────────────────────────────────────────────────
 
+
 async def ensure_collections(client: AsyncQdrantClient) -> None:
     """Create the two collections if they do not already exist."""
     for name in (COLLECTION_PREFERENCES, COLLECTION_TRIPS):
@@ -55,6 +56,7 @@ async def ensure_collections(client: AsyncQdrantClient) -> None:
 
 # ── Upsert ────────────────────────────────────────────────────────────────────
 
+
 async def upsert_preferences(
     client: AsyncQdrantClient,
     user_id: str,
@@ -66,7 +68,9 @@ async def upsert_preferences(
     try:
         await client.upsert(
             collection_name=COLLECTION_PREFERENCES,
-            points=[PointStruct(id=point_id, vector=vector, payload={"user_id": user_id, **payload})],
+            points=[
+                PointStruct(id=point_id, vector=vector, payload={"user_id": user_id, **payload})
+            ],
         )
         logger.info("qdrant_preferences_upserted", user_id=user_id)
     except Exception as exc:
@@ -101,6 +105,7 @@ async def upsert_trip_memory(
 
 
 # ── Search ────────────────────────────────────────────────────────────────────
+
 
 async def search_trip_memories(
     client: AsyncQdrantClient,
