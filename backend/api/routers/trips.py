@@ -245,7 +245,17 @@ async def generate_itinerary(
     trip_id: str,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, str]:
     result = await db.execute(select(Trip).where(Trip.id == trip_id))
-    _assert_owns(result.scalar_one_or_none(), current_user)
-    return {"status": "not_implemented"}
+    trip = _assert_owns(result.scalar_one_or_none(), current_user)
+
+    if trip.status not in ("planning", "failed"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "CONFLICT", "message": f"Trip is already {trip.status}."},
+        )
+
+    from backend.workflows.celery_tasks import generate_itinerary_async  # noqa: PLC0415
+
+    generate_itinerary_async.delay(str(trip.id), str(current_user.id))
+    return {"status": "queued", "trip_id": str(trip.id)}

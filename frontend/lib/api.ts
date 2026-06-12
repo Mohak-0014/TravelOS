@@ -132,6 +132,31 @@ export interface TripOut {
   updated_at: string;
 }
 
+export interface ApprovalOut {
+  id: string;
+  trip_id: string;
+  proposed_by: string;
+  change_type: string;
+  summary: string;
+  payload: Record<string, unknown>;
+  status: string;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export interface ChatSource {
+  type: string;
+  name: string;
+  lat?: number;
+  lng?: number;
+  [key: string]: unknown;
+}
+
+export interface ChatResponse {
+  answer: string;
+  sources: ChatSource[];
+}
+
 export interface ItineraryItemOut {
   id: string;
   trip_id: string;
