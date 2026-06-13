@@ -159,9 +159,12 @@ async def weather_adaptation(state: TravelOSState) -> dict:  # type: ignore[type
     trip = await _load_trip(trip_id)
     city = trip.destination_city if trip else "the destination"
 
+    memory_context = state.get("memory_context") or {}
+    style_profile: dict = memory_context.get("travel_style_profile") or {}  # type: ignore[type-arg]
+
     new_approvals: list[dict] = []  # type: ignore[type-arg]
     for item in affected_items:
-        alternative = await _generate_alternative(item, city)
+        alternative = await _generate_alternative(item, city, style_profile)
         if alternative:
             new_approvals.append(_build_approval(trip_id, item, alternative, weather_state))
 
@@ -314,13 +317,29 @@ async def _set_trip_awaiting_approval(trip_id: str) -> None:
 # ── LLM helpers ───────────────────────────────────────────────────────────────
 
 
-async def _generate_alternative(item: dict, city: str) -> dict | None:  # type: ignore[type-arg]
+async def _generate_alternative(
+    item: dict,  # type: ignore[type-arg]
+    city: str,
+    style_profile: dict | None = None,  # type: ignore[type-arg]
+) -> dict | None:  # type: ignore[type-arg]
+    profile = style_profile or {}
+    pref_lines = ""
+    for label, key in (
+        ("Activity preference", "activity_preference"),
+        ("Dining preference", "dining_preference"),
+        ("Budget priority", "budget_priority"),
+    ):
+        val = profile.get(key, "")
+        if val:
+            pref_lines += f"{label}: {val}\n"
+
     prompt = (
         f"City: {city}\n"
         f"Scheduled outdoor activity: {item.get('title')}\n"
         f"Description: {item.get('description', '')}\n"
-        f"Day: {item.get('item_date')}\n\n"
-        "Suggest a single indoor alternative for adverse weather on this day."
+        f"Day: {item.get('item_date')}\n"
+        + (f"\nTraveler preferences:\n{pref_lines}" if pref_lines else "")
+        + "\nSuggest a single indoor alternative for adverse weather on this day."
     )
     try:
         llm = _build_llm()

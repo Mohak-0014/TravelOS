@@ -61,3 +61,17 @@ app.include_router(preferences_router)
 app.include_router(trips_router)
 app.include_router(approvals_router)
 app.include_router(concierge_router)
+
+
+@app.on_event("startup")
+async def _init_qdrant_collections() -> None:
+    from backend.memory.semantic import ensure_collections, get_qdrant_client
+
+    client = get_qdrant_client()
+    try:
+        await ensure_collections(client)
+        logger.info("qdrant_collections_ready")
+    except Exception as exc:
+        logger.warning("qdrant_collections_init_failed", error=str(exc))
+    finally:
+        await client.close()

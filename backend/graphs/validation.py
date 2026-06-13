@@ -13,10 +13,17 @@ logger = get_logger(__name__)
 
 _VALID_ITEM_TYPES = frozenset({"activity", "meal", "transport", "lodging", "free"})
 
+# Minimum items per day before flagging for replan (pace_target - 1)
+_PACE_MIN_ITEMS: dict[str, int] = {"relaxed": 2, "moderate": 3, "packed": 5}
+
 
 async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     trip_id = state.get("trip_id", "unknown")
     raw_items: list[dict] = list(state.get("itinerary") or [])  # type: ignore[arg-type]
+
+    memory_context = state.get("memory_context") or {}
+    prefs = memory_context.get("preferences") or {}
+    pace = str(prefs.get("pace") or "moderate")
 
     logger.info("validation_start", trip_id=trip_id, item_count=len(raw_items))
 
@@ -39,6 +46,19 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
 
     if not cleaned:
         issues.append("Itinerary is empty after validation")
+
+    # Pace-based under-count check: flag days below pace_target - 1
+    min_items = _PACE_MIN_ITEMS.get(pace, 3)
+    day_counts: dict[int, int] = {}
+    for it in cleaned:
+        day_num = int(it.get("day_number", 1))
+        day_counts[day_num] = day_counts.get(day_num, 0) + 1
+    for day_num, count in sorted(day_counts.items()):
+        if count < min_items:
+            issues.append(
+                f"Day {day_num} has {count} item(s) — below pace minimum of {min_items}"
+                f" for '{pace}' pace"
+            )
 
     # Compute total planned cost and write it into budget_state for conflict detection
     estimated_total = sum(float(it.get("est_cost") or 0) for it in cleaned)

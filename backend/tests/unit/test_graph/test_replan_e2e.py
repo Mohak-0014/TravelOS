@@ -250,7 +250,7 @@ async def test_replan_graph_e2e_multiple_affected_items() -> None:
 
     call_count = 0
 
-    async def _alt_by_index(item: dict, city: str) -> dict:  # type: ignore[type-arg]
+    async def _alt_by_index(item: dict, city: str, style_profile: dict | None = None) -> dict:  # type: ignore[type-arg]
         nonlocal call_count
         call_count += 1
         return {

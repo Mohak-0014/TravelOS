@@ -162,6 +162,67 @@ async def test_run_preserves_existing_budget_state_keys() -> None:
     assert result["budget_state"]["spent"] == 100.0
 
 
+# ── pace under-count checks ───────────────────────────────────────────────────
+
+
+def _state_with_pace(pace: str, items: list) -> TravelOSState:  # type: ignore[type-arg]
+    return _base_state(
+        itinerary=items,
+        memory_context={"preferences": {"pace": pace}},
+    )
+
+
+@pytest.mark.asyncio
+async def test_pace_relaxed_flags_day_with_one_item() -> None:
+    # relaxed min = 2; one item on day 1 should be flagged
+    result = await run(_state_with_pace("relaxed", [_item("Solo activity", day_number=1)]))
+    msgs = result["agent_messages"][0].content
+    assert "Day 1" in msgs
+    assert "pace minimum" in msgs
+
+
+@pytest.mark.asyncio
+async def test_pace_relaxed_ok_with_two_items() -> None:
+    items = [_item("Morning", day_number=1), _item("Lunch", day_number=1, item_type="meal")]
+    result = await run(_state_with_pace("relaxed", items))
+    assert "pace minimum" not in result["agent_messages"][0].content
+
+
+@pytest.mark.asyncio
+async def test_pace_moderate_flags_day_below_three() -> None:
+    # moderate min = 3; two items should be flagged
+    items = [_item("A", day_number=1), _item("B", day_number=1)]
+    result = await run(_state_with_pace("moderate", items))
+    assert "Day 1" in result["agent_messages"][0].content
+    assert "pace minimum" in result["agent_messages"][0].content
+
+
+@pytest.mark.asyncio
+async def test_pace_packed_flags_day_below_five() -> None:
+    # packed min = 5; four items should be flagged
+    items = [_item(f"Item {i}", day_number=1) for i in range(4)]
+    result = await run(_state_with_pace("packed", items))
+    assert "Day 1" in result["agent_messages"][0].content
+
+
+@pytest.mark.asyncio
+async def test_pace_check_only_flags_sparse_days() -> None:
+    # Day 1 has 3 items (ok for moderate), day 2 has 1 item (flagged)
+    items = [_item(f"D1-{i}", day_number=1) for i in range(3)]
+    items += [_item("D2-only", day_number=2)]
+    result = await run(_state_with_pace("moderate", items))
+    content = result["agent_messages"][0].content
+    assert "Day 2" in content
+    assert "Day 1" not in content
+
+
+@pytest.mark.asyncio
+async def test_pace_defaults_to_moderate_when_missing() -> None:
+    # No pace in state — should default to moderate (min=3); one item flagged
+    result = await run(_base_state(itinerary=[_item("Only item")]))
+    assert "pace minimum" in result["agent_messages"][0].content
+
+
 # ── _validate_and_fix ─────────────────────────────────────────────────────────
 
 
