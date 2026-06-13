@@ -13,7 +13,7 @@ from sqlalchemy import select
 from backend.agents._llm import build_llm
 from backend.core.logging import get_logger
 from backend.db.base import AsyncSessionLocal
-from backend.db.models import Approval, HotelCandidate, ItineraryItem, Preference, Trip
+from backend.db.models import HotelCandidate, ItineraryItem, Preference, Trip
 from backend.memory.embeddings import embed_text
 from backend.memory.semantic import get_qdrant_client, search_preferences, search_trip_memories
 from backend.tools.places import search_attractions as _search_attractions
@@ -54,21 +54,7 @@ class SearchRestaurants(BaseModel):
     radius_m: int = Field(default=1000, description="Search radius in metres (200–5 000)")
 
 
-class ProposeItineraryChange(BaseModel):
-    """Propose swapping one itinerary item for a different activity. Use this when the
-    user asks you to change, replace, or swap something in their itinerary. The proposal
-    goes to an approval queue — tell the user it has been submitted, not that it is done."""
-
-    day: int = Field(description="Day number (1-indexed) of the item to replace")
-    item_index: int = Field(description="0-indexed position of the item within that day")
-    replacement_title: str = Field(description="Title of the proposed replacement activity")
-    replacement_description: str = Field(
-        description="Brief description of the replacement (under 50 words)"
-    )
-    reason: str = Field(description="Why you are proposing this change")
-
-
-_TOOL_SCHEMAS = [SearchAttractions, SearchRestaurants, ProposeItineraryChange]
+_TOOL_SCHEMAS = [SearchAttractions, SearchRestaurants]
 
 
 # ── LLM ────────────────────────────────────────────────────────────────────────
@@ -119,10 +105,7 @@ async def ask(trip_id: str, user_id: str, question: str) -> ConciergeResponse:
                 name: str = tc["name"]
                 args: dict = tc.get("args") or {}  # type: ignore[type-arg]
                 tc_id: str = tc.get("id") or ""
-                if name == "ProposeItineraryChange":
-                    result_text, sources = await _create_itinerary_change_proposal(trip_id, args)
-                else:
-                    result_text, sources = await _run_tool(name, args)
+                result_text, sources = await _run_tool(name, args)
                 all_sources.extend(sources)
                 messages.append(ToolMessage(content=result_text, tool_call_id=tc_id))
 
@@ -209,77 +192,6 @@ async def _run_tool(
         logger.warning("concierge_tool_error", name=name, error=str(exc))
 
     return json.dumps([]), []
-
-
-async def _create_itinerary_change_proposal(
-    trip_id: str,
-    args: dict,  # type: ignore[type-arg]
-) -> tuple[str, list[dict]]:  # type: ignore[type-arg]
-    """Create a pending Approval record for a concierge-proposed itinerary swap."""
-    day = int(args.get("day", 1))
-    item_index = int(args.get("item_index", 0))
-    replacement_title = str(args.get("replacement_title", ""))
-    replacement_description = str(args.get("replacement_description", ""))
-    reason = str(args.get("reason", ""))
-
-    try:
-        async with AsyncSessionLocal() as session:
-            # Load the current item at this position for a richer summary
-            items_result = await session.execute(
-                select(ItineraryItem)
-                .where(ItineraryItem.trip_id == trip_id, ItineraryItem.day_number == day)
-                .order_by(ItineraryItem.sort_order)
-            )
-            day_items = list(items_result.scalars().all())
-            current = day_items[item_index] if item_index < len(day_items) else None
-            current_title = current.title if current else f"item {item_index + 1}"
-            current_id = str(current.id) if current else None
-
-            summary = (
-                f'Day {day}: Replace "{current_title}" with "{replacement_title}". '
-                f"Reason: {reason}"
-            )
-            payload: dict = {  # type: ignore[type-arg]
-                "day": day,
-                "item_index": item_index,
-                "current": {"id": current_id, "title": current_title},
-                "replacement": {
-                    "title": replacement_title,
-                    "description": replacement_description,
-                },
-                "reason": reason,
-            }
-
-            session.add(
-                Approval(
-                    trip_id=trip_id,
-                    proposed_by="concierge",
-                    change_type="concierge_swap",
-                    summary=summary,
-                    payload=payload,
-                    status="pending",
-                )
-            )
-
-            # Flip trip status so the frontend approval banner activates
-            trip_result = await session.execute(select(Trip).where(Trip.id == trip_id))
-            trip_obj = trip_result.scalar_one_or_none()
-            if trip_obj is not None:
-                trip_obj.status = "awaiting_approval"
-
-            await session.commit()
-
-        logger.info(
-            "concierge_change_proposed",
-            trip_id=trip_id,
-            day=day,
-            title=replacement_title,
-        )
-        return json.dumps({"status": "proposed", "summary": summary}), []
-
-    except Exception as exc:
-        logger.error("concierge_change_proposal_failed", trip_id=trip_id, error=str(exc))
-        return json.dumps({"status": "error", "message": "Could not save the proposal."}), []
 
 
 # ── Context loading ────────────────────────────────────────────────────────────
@@ -372,8 +284,8 @@ def _build_system_prompt(
         "- If tools return no results, say so honestly — do not fabricate alternatives.",
         "- You may answer directly (without calling a tool) for questions about the itinerary,",
         "  trip logistics, packing advice, or general destination knowledge.",
-        "- To change, swap, or replace an itinerary item: call ProposeItineraryChange.",
-        "  Tell the user their request has been submitted for approval — do NOT say it is done.",
+        "- To change, swap, or replace an itinerary item: tell the user to use the Replace",
+        "  button next to each activity. You cannot modify the itinerary directly.",
         "",
     ]
 

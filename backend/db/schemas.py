@@ -159,6 +159,12 @@ class ItineraryItemOut(BaseModel):
 # ── Approvals ─────────────────────────────────────────────────────────────────
 
 
+class ApprovalCreate(BaseModel):
+    item_id: str
+    replacement_title: str
+    reason: str | None = None
+
+
 class ApprovalDecision(BaseModel):
     decision: str  # "approved" | "rejected"
     resolution_note: str | None = None

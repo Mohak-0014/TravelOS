@@ -135,6 +135,32 @@ export default function TripDetailPage() {
     }
   }
 
+  // ── Replace ───────────────────────────────────────────────────────────────────
+
+  const [replaceTarget, setReplaceTarget] = useState<string | null>(null);
+  const [replaceTitle, setReplaceTitle] = useState("");
+  const [replaceLoading, setReplaceLoading] = useState(false);
+
+  async function handleReplace(itemId: string) {
+    const title = replaceTitle.trim();
+    if (!title || replaceLoading) return;
+    setReplaceLoading(true);
+    try {
+      await api.post(`/api/v1/trips/${tripId}/approvals`, {
+        item_id: itemId,
+        replacement_title: title,
+      });
+      setReplaceTarget(null);
+      setReplaceTitle("");
+      queryClient.invalidateQueries({ queryKey: ["trip", tripId] });
+      queryClient.invalidateQueries({ queryKey: ["approvals", tripId, "pending"] });
+    } catch {
+      // leave form open on error
+    } finally {
+      setReplaceLoading(false);
+    }
+  }
+
   // ── Chat ──────────────────────────────────────────────────────────────────────
 
   const [chatOpen, setChatOpen] = useState(false);
@@ -367,30 +393,74 @@ export default function TripDetailPage() {
                       {[...dayItems]
                         .sort((a, b) => a.sort_order - b.sort_order)
                         .map((item) => (
-                          <div key={item.id} className="flex items-start gap-3 text-sm">
-                            <span className="text-gray-400 text-xs w-14 shrink-0 pt-0.5 tabular-nums">
-                              {item.start_time ?? "—"}
-                            </span>
-                            <span className="text-base w-5 shrink-0" title={item.item_type}>
-                              {ITEM_ICONS[item.item_type] ?? "📍"}
-                            </span>
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-gray-900 leading-snug">{item.title}</p>
-                              {item.address && (
-                                <p className="text-xs text-gray-400 truncate mt-0.5">
-                                  {item.address}
-                                </p>
-                              )}
-                              {item.description && (
-                                <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">
-                                  {item.description}
-                                </p>
-                              )}
-                            </div>
-                            {item.est_cost != null && (
-                              <span className="text-xs text-gray-500 shrink-0 tabular-nums">
-                                {item.est_cost_currency ?? ""} {item.est_cost}
+                          <div key={item.id} className="flex flex-col gap-1.5">
+                            <div className="flex items-start gap-3 text-sm">
+                              <span className="text-gray-400 text-xs w-14 shrink-0 pt-0.5 tabular-nums">
+                                {item.start_time ?? "—"}
                               </span>
+                              <span className="text-base w-5 shrink-0" title={item.item_type}>
+                                {ITEM_ICONS[item.item_type] ?? "📍"}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-gray-900 leading-snug">{item.title}</p>
+                                {item.address && (
+                                  <p className="text-xs text-gray-400 truncate mt-0.5">
+                                    {item.address}
+                                  </p>
+                                )}
+                                {item.description && (
+                                  <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">
+                                    {item.description}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                {item.est_cost != null && (
+                                  <span className="text-xs text-gray-500 tabular-nums">
+                                    {item.est_cost_currency ?? ""} {item.est_cost}
+                                  </span>
+                                )}
+                                <button
+                                  onClick={() => {
+                                    setReplaceTitle("");
+                                    setReplaceTarget(replaceTarget === item.id ? null : item.id);
+                                  }}
+                                  className="text-xs text-gray-400 hover:text-blue-600 transition-colors px-1.5 py-0.5 rounded hover:bg-blue-50"
+                                  title="Propose a replacement"
+                                >
+                                  Replace
+                                </button>
+                              </div>
+                            </div>
+                            {replaceTarget === item.id && (
+                              <div className="ml-[4.75rem] flex gap-2 items-center">
+                                <input
+                                  autoFocus
+                                  type="text"
+                                  value={replaceTitle}
+                                  onChange={(e) => setReplaceTitle(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") handleReplace(item.id);
+                                    if (e.key === "Escape") setReplaceTarget(null);
+                                  }}
+                                  placeholder="Replacement activity name…"
+                                  disabled={replaceLoading}
+                                  className="flex-1 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                                />
+                                <button
+                                  onClick={() => handleReplace(item.id)}
+                                  disabled={replaceLoading || !replaceTitle.trim()}
+                                  className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-40 transition-colors"
+                                >
+                                  {replaceLoading ? "…" : "Submit"}
+                                </button>
+                                <button
+                                  onClick={() => setReplaceTarget(null)}
+                                  className="text-xs text-gray-400 hover:text-gray-600"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
                             )}
                           </div>
                         ))}

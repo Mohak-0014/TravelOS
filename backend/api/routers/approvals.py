@@ -1,13 +1,13 @@
-from datetime import UTC
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.dependencies import get_current_active_user
 from backend.db.base import get_db
-from backend.db.models import Approval, Trip, User
-from backend.db.schemas import ApprovalDecision, ApprovalOut
+from backend.db.models import Approval, ItineraryItem, Trip, User
+from backend.db.schemas import ApprovalCreate, ApprovalDecision, ApprovalOut
 
 router = APIRouter(tags=["approvals"])
 
@@ -18,6 +18,57 @@ def _assert_trip_owned(trip: Trip | None, user: User) -> Trip:
             status_code=404, detail={"code": "NOT_FOUND", "message": "Trip not found."}
         )
     return trip
+
+
+@router.post(
+    "/api/v1/trips/{trip_id}/approvals",
+    response_model=ApprovalOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_approval(
+    trip_id: str,
+    body: ApprovalCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> Approval:
+    trip_result = await db.execute(select(Trip).where(Trip.id == trip_id))
+    trip = _assert_trip_owned(trip_result.scalar_one_or_none(), current_user)
+
+    item_result = await db.execute(
+        select(ItineraryItem).where(
+            ItineraryItem.id == body.item_id,
+            ItineraryItem.trip_id == trip_id,
+        )
+    )
+    item = item_result.scalar_one_or_none()
+    if item is None:
+        raise HTTPException(
+            status_code=404, detail={"code": "NOT_FOUND", "message": "Itinerary item not found."}
+        )
+
+    summary = f'Day {item.day_number}: Replace "{item.title}" with "{body.replacement_title}"'
+    if body.reason:
+        summary += f". Reason: {body.reason}"
+
+    approval = Approval(
+        trip_id=trip_id,
+        proposed_by="user",
+        change_type="user_replace",
+        summary=summary,
+        payload={
+            "item_id": body.item_id,
+            "day": item.day_number,
+            "current": {"id": str(item.id), "title": item.title},
+            "replacement": {"title": body.replacement_title},
+            "reason": body.reason or "",
+        },
+        status="pending",
+    )
+    db.add(approval)
+    trip.status = "awaiting_approval"
+    await db.commit()
+    await db.refresh(approval)
+    return approval
 
 
 @router.get("/api/v1/trips/{trip_id}/approvals", response_model=list[ApprovalOut])
@@ -92,11 +143,23 @@ async def resolve_approval(
             },
         )
 
-    # Stub: update status only — full mutation logic wired in Week 9
-    from datetime import datetime
-
     approval.status = body.decision
     approval.resolved_at = datetime.now(UTC)
+    await db.flush()
+
+    # Restore trip status to "planned" once all approvals are resolved
+    remaining = await db.execute(
+        select(Approval).where(
+            Approval.trip_id == approval.trip_id,
+            Approval.status == "pending",
+        )
+    )
+    if not remaining.scalars().all():
+        trip_result2 = await db.execute(select(Trip).where(Trip.id == approval.trip_id))
+        trip2 = trip_result2.scalar_one_or_none()
+        if trip2 is not None and trip2.status == "awaiting_approval":
+            trip2.status = "planned"
+
     await db.commit()
     await db.refresh(approval)
 
