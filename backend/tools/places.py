@@ -37,6 +37,7 @@ class Attraction(BaseModel):
     kinds: str  # derived from OSM tag value (tourism=museum → "museum")
     description: str | None = None
     website: str | None = None
+    opening_hours: str | None = None  # raw OSM opening_hours tag when present
     source_provider: str = "overpass"
     source_ref: str  # same as osm_id
 
@@ -81,6 +82,7 @@ def _element_to_attraction(el: dict) -> Attraction | None:
         kinds=kinds,
         description=tags.get("description"),
         website=tags.get("website") or tags.get("contact:website"),
+        opening_hours=tags.get("opening_hours"),
         source_ref=osm_id,
     )
 

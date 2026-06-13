@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 from datetime import date, datetime, timedelta
 from datetime import time as dt_time
 
@@ -32,6 +33,17 @@ _PACE_ITEMS_PER_DAY: dict[str, int] = {
     "packed": 6,  # + early morning + evening activity
 }
 _DEFAULT_ITEMS_PER_DAY = 4
+
+# Walking tolerance → max metres between consecutive same-day venues (task #4)
+_WALKING_TOLERANCE_M: dict[str, int] = {"low": 500, "medium": 2000, "high": 5000}
+
+# Type-based scheduling rules injected into the LLM prompt (task #5)
+_MEAL_RULES = "lunch 12:00–14:00 · dinner 19:00–22:00 · nightlife 21:00 or later"
+_SCHEDULING_RULES: tuple[tuple[str, str], ...] = (
+    ("museum/gallery/aquarium/zoo/theme_park", "09:00–17:00"),
+    ("viewpoint/artwork", "morning 08:00–11:00 or late afternoon 16:00–19:00"),
+    ("monument/ruins/castle/archaeological_site", "flexible, morning preferred"),
+)
 
 _SYSTEM_PROMPT = """You are the Itinerary Planner for TravelOS, an AI travel planning system.
 Generate a realistic, day-by-day travel itinerary using the trip data, traveler style profile,
@@ -90,6 +102,45 @@ class _ItemDraft(BaseModel):
     sort_order: int = 0
 
 
+def _cluster_attractions(
+    attractions: list[Attraction],
+) -> list[tuple[str, str, list[Attraction]]]:
+    """Bucket attractions into ~1 km grid cells; return (label, anchor_name, members) triples."""
+    if not attractions:
+        return []
+
+    _CELL_LAT = 0.009  # ≈ 1 km in latitude
+    _CELL_LNG = 0.011  # ≈ 1 km in longitude at mid-latitudes
+
+    cells: dict[tuple[int, int], list[Attraction]] = {}
+    for a in attractions:
+        key = (int(a.lat / _CELL_LAT), int(a.lng / _CELL_LNG))
+        cells.setdefault(key, []).append(a)
+
+    # Largest cluster gets label A, then B, C…
+    sorted_groups = sorted(cells.values(), key=len, reverse=True)
+    result: list[tuple[str, str, list[Attraction]]] = []
+    for i, group in enumerate(sorted_groups):
+        label = chr(ord("A") + i) if i < 26 else f"G{i + 1}"
+        result.append((label, group[0].name, group))
+    return result
+
+
+def _compass_direction(
+    center_lat: float, center_lng: float, point_lat: float, point_lng: float
+) -> str:
+    """Return an 8-point compass word for the bearing from center to point."""
+    dlat = point_lat - center_lat
+    dlng = point_lng - center_lng
+    if abs(dlat) < 1e-6 and abs(dlng) < 1e-6:
+        return "central"
+    angle = math.degrees(math.atan2(dlng, dlat))  # 0° = north, 90° = east
+    if angle < 0:
+        angle += 360
+    dirs = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"]
+    return dirs[int((angle + 22.5) / 45) % 8]
+
+
 def _build_llm() -> BaseChatModel:
     return build_llm("large", temperature=0.7)
 
@@ -129,9 +180,10 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     prefs = memory_context.get("preferences") or {}
     budget_state = state.get("budget_state") or {}
     pace = prefs.get("pace") or "moderate"
+    walking_tolerance = prefs.get("walking_tolerance") or "medium"
 
     items = await _generate_itinerary(
-        trip, style_profile, weather_days, attractions, budget_state, pace
+        trip, style_profile, weather_days, attractions, budget_state, pace, walking_tolerance
     )
 
     if items:
@@ -225,10 +277,17 @@ async def _generate_itinerary(
     attractions: list[Attraction],
     budget_state: dict,  # type: ignore[type-arg]
     pace: str = "moderate",
+    walking_tolerance: str = "medium",
 ) -> list[_ItemDraft]:
     items_per_day = _PACE_ITEMS_PER_DAY.get(pace, _DEFAULT_ITEMS_PER_DAY)
     prompt = _build_prompt(
-        trip, style_profile, weather_days, attractions, budget_state, items_per_day
+        trip,
+        style_profile,
+        weather_days,
+        attractions,
+        budget_state,
+        items_per_day,
+        walking_tolerance,
     )
     try:
         llm = _build_llm()
@@ -253,6 +312,7 @@ def _build_prompt(
     attractions: list[Attraction],
     budget_state: dict,  # type: ignore[type-arg]
     items_per_day: int = _DEFAULT_ITEMS_PER_DAY,
+    walking_tolerance: str = "medium",
 ) -> str:
     trip_days = (trip.end_date - trip.start_date).days + 1
     budget_str = (
@@ -293,19 +353,47 @@ def _build_prompt(
             )
 
     if attractions:
+        # City center for compass bearings; fall back to mean of attractions
+        if trip.latitude is not None and trip.longitude is not None:
+            center_lat, center_lng = float(trip.latitude), float(trip.longitude)
+        else:
+            center_lat = sum(a.lat for a in attractions) / len(attractions)
+            center_lng = sum(a.lng for a in attractions) / len(attractions)
+
+        clusters = _cluster_attractions(attractions)
         parts += [
             "",
-            f"**Real Attractions Near {trip.destination_city}** (use these in the itinerary)",
+            f"**Real Attractions Near {trip.destination_city}**"
+            " (grouped by walking zone — prefer same-day activities within one group)",
         ]
-        for a in attractions[:25]:  # cap to avoid prompt bloat
-            parts.append(
-                f"  - {a.name} [{a.kinds}] lat={a.lat:.4f} lng={a.lng:.4f} "
-                f"source_provider=overpass source_ref={a.source_ref}"
-            )
+        for label, anchor, members in clusters[:6]:  # cap at 6 clusters
+            clat = sum(a.lat for a in members) / len(members)
+            clng = sum(a.lng for a in members) / len(members)
+            direction = _compass_direction(center_lat, center_lng, clat, clng)
+            parts.append(f"  Group {label} — {direction}, near {anchor}")
+            for a in members[:6]:  # cap at 6 per cluster
+                hours_str = f" hours={a.opening_hours}" if a.opening_hours else ""
+                parts.append(
+                    f"    · {a.name} [{a.kinds}] lat={a.lat:.4f} lng={a.lng:.4f}"
+                    f" source_ref={a.source_ref}{hours_str}"
+                )
     else:
         parts.append(
             "\n**Note**: No attraction data available — generate based on destination knowledge."
         )
+
+    # Walking constraint (task #4)
+    tolerance_m = _WALKING_TOLERANCE_M.get(walking_tolerance, 2000)
+    parts += [
+        "",
+        f"**Walking Constraint**: Keep consecutive same-day venues within {tolerance_m} m."
+        " Assign activities from the same cluster to the same day where possible.",
+    ]
+
+    # Time-of-day scheduling guidelines (task #5)
+    parts += ["", "**Scheduling Guidelines**", f"  Meals: {_MEAL_RULES}"]
+    for kinds_str, window in _SCHEDULING_RULES:
+        parts.append(f"  {kinds_str} → {window}")
 
     if items_per_day <= 3:
         structure = "morning activity, lunch (meal), afternoon activity"

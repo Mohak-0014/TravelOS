@@ -7,6 +7,8 @@ from langchain_core.messages import AIMessage, SystemMessage
 from backend.agents.itinerary_planner import (
     _build_prompt,
     _build_weather_state,
+    _cluster_attractions,
+    _compass_direction,
     _default_itinerary,
     _item_to_dict,
     _ItemDraft,
@@ -513,3 +515,149 @@ def test_item_to_dict_roundtrips() -> None:
     assert d["day_number"] == 1
     assert d["title"] == "Test"
     assert d["item_type"] == "activity"
+
+
+# ── _cluster_attractions ──────────────────────────────────────────────────────
+
+
+def _make_attraction(name: str, lat: float, lng: float, kinds: str = "museum") -> Attraction:
+    osm_id = f"node/{hash(name) & 0xFFFF}"
+    return Attraction(osm_id=osm_id, name=name, lat=lat, lng=lng, kinds=kinds, source_ref=osm_id)
+
+
+def test_cluster_attractions_empty_returns_empty() -> None:
+    assert _cluster_attractions([]) == []
+
+
+def test_cluster_attractions_single_attraction_is_group_a() -> None:
+    clusters = _cluster_attractions([_make_attraction("Louvre", 48.860, 2.337)])
+    assert len(clusters) == 1
+    label, anchor, members = clusters[0]
+    assert label == "A"
+    assert anchor == "Louvre"
+    assert len(members) == 1
+
+
+def test_cluster_attractions_nearby_items_share_group() -> None:
+    # Both within the same ~1 km cell (cell 5428, 211)
+    a1 = _make_attraction("A", lat=48.853, lng=2.322)
+    a2 = _make_attraction("B", lat=48.858, lng=2.328)
+    clusters = _cluster_attractions([a1, a2])
+    assert len(clusters) == 1
+    assert len(clusters[0][2]) == 2
+
+
+def test_cluster_attractions_distant_items_in_separate_groups() -> None:
+    a1 = _make_attraction("Near", lat=48.853, lng=2.322)
+    a2 = _make_attraction("Far", lat=48.910, lng=2.390)
+    clusters = _cluster_attractions([a1, a2])
+    assert len(clusters) == 2
+
+
+def test_cluster_attractions_largest_group_is_labeled_a() -> None:
+    # 3 attractions in the same cell, 1 far away
+    close = [_make_attraction(f"C{i}", lat=48.853 + i * 0.001, lng=2.322) for i in range(3)]
+    far = [_make_attraction("Far", lat=48.910, lng=2.390)]
+    clusters = _cluster_attractions(close + far)
+    assert clusters[0][0] == "A"
+    assert len(clusters[0][2]) == 3
+
+
+def test_cluster_attractions_labels_are_sequential() -> None:
+    # Two separate cells → labels A and B
+    a1 = _make_attraction("Near", lat=48.853, lng=2.322)
+    a2 = _make_attraction("Far", lat=48.910, lng=2.390)
+    clusters = _cluster_attractions([a1, a2])
+    labels = [c[0] for c in clusters]
+    assert "A" in labels
+    assert "B" in labels
+
+
+# ── _compass_direction ────────────────────────────────────────────────────────
+
+
+def test_compass_north() -> None:
+    assert _compass_direction(0.0, 0.0, 0.01, 0.0) == "north"
+
+
+def test_compass_south() -> None:
+    assert _compass_direction(0.0, 0.0, -0.01, 0.0) == "south"
+
+
+def test_compass_east() -> None:
+    assert _compass_direction(0.0, 0.0, 0.0, 0.01) == "east"
+
+
+def test_compass_west() -> None:
+    assert _compass_direction(0.0, 0.0, 0.0, -0.01) == "west"
+
+
+def test_compass_northeast() -> None:
+    assert _compass_direction(0.0, 0.0, 0.01, 0.01) == "northeast"
+
+
+def test_compass_southwest() -> None:
+    assert _compass_direction(0.0, 0.0, -0.01, -0.01) == "southwest"
+
+
+def test_compass_central_when_same_point() -> None:
+    assert _compass_direction(1.0, 1.0, 1.0, 1.0) == "central"
+
+
+# ── _build_prompt — clustering and scheduling sections ────────────────────────
+
+
+def test_build_prompt_shows_group_labels_for_attractions() -> None:
+    trip = _mock_trip()
+    attractions = [_mock_attraction("Eiffel Tower", "attraction")]
+    prompt = _build_prompt(trip, {}, [], attractions, {})
+    assert "Group A" in prompt
+    assert "Eiffel Tower" in prompt
+
+
+def test_build_prompt_shows_opening_hours_when_present() -> None:
+    trip = _mock_trip()
+    a = Attraction(
+        osm_id="way/1",
+        name="Opera House",
+        lat=48.872,
+        lng=2.331,
+        kinds="attraction",
+        source_ref="way/1",
+        opening_hours="Mo-Sa 10:00-22:00",
+    )
+    prompt = _build_prompt(trip, {}, [], [a], {})
+    assert "Mo-Sa 10:00-22:00" in prompt
+
+
+def test_build_prompt_omits_hours_when_none() -> None:
+    trip = _mock_trip()
+    prompt = _build_prompt(trip, {}, [], [_mock_attraction()], {})
+    assert "hours=" not in prompt
+
+
+def test_build_prompt_includes_walking_constraint_low() -> None:
+    trip = _mock_trip()
+    prompt = _build_prompt(trip, {}, [], [], {}, walking_tolerance="low")
+    assert "500" in prompt
+
+
+def test_build_prompt_includes_walking_constraint_high() -> None:
+    trip = _mock_trip()
+    prompt = _build_prompt(trip, {}, [], [], {}, walking_tolerance="high")
+    assert "5000" in prompt
+
+
+def test_build_prompt_defaults_to_medium_walking_tolerance() -> None:
+    trip = _mock_trip()
+    prompt = _build_prompt(trip, {}, [], [], {})
+    assert "2000" in prompt
+
+
+def test_build_prompt_includes_scheduling_guidelines() -> None:
+    trip = _mock_trip()
+    prompt = _build_prompt(trip, {}, [], [], {})
+    assert "Scheduling Guidelines" in prompt
+    assert "12:00" in prompt  # lunch hint from _MEAL_RULES
+    assert "19:00" in prompt  # dinner hint
+    assert "09:00" in prompt  # museum window
