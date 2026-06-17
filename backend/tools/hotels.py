@@ -13,6 +13,7 @@ logger = get_logger(__name__)
 
 _CACHE_TTL = 60 * 60  # 1 hour
 _LITEAPI_HOTELS_URL = "https://api.liteapi.travel/v3.0/data/hotels"
+_LITEAPI_RATES_URL = "https://api.liteapi.travel/v3.0/hotels/rates"
 
 # Common destination → ISO-2 country code (expand as needed)
 _COUNTRY_CODES: dict[str, str] = {
@@ -171,6 +172,80 @@ def _cache_key(destination: str, check_in: date, check_out: date, guests: int) -
     return f"hotels:{hashlib.sha256(raw.encode()).hexdigest()}"
 
 
+async def _fetch_rates(
+    hotel_ids: list[str],
+    check_in: date,
+    check_out: date,
+    guests: int,
+) -> dict[str, tuple[float | None, float | None, str]]:
+    """
+    Fetch live rates from LiteAPI /v3.0/hotels/rates.
+    Returns {hotel_id: (price_per_night, price_total, currency)}.
+    Silently returns {} on any error — callers fall back to null prices.
+    """
+    if not settings.LITEAPI_KEY or not hotel_ids:
+        return {}
+
+    nights = (check_out - check_in).days or 1
+    params: list[tuple[str, str | int | float | bool | None]] = [
+        ("checkin", check_in.isoformat()),
+        ("checkout", check_out.isoformat()),
+        ("adults", guests),
+        ("currency", "USD"),
+    ]
+    for hid in hotel_ids:
+        params.append(("hotelIds[]", hid))
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                _LITEAPI_RATES_URL,
+                params=params,
+                headers={"X-API-Key": settings.LITEAPI_KEY},
+            )
+            if resp.status_code != 200:
+                logger.warning(
+                    "liteapi_rates_non200",
+                    status=resp.status_code,
+                    body=resp.text[:200],
+                )
+                return {}
+            data = resp.json()
+    except Exception as exc:
+        logger.warning("liteapi_rates_failed", error=str(exc))
+        return {}
+
+    result: dict[str, tuple[float | None, float | None, str]] = {}
+    for item in data.get("data", []):
+        hotel_id = str(item.get("hotelId", ""))
+        if not hotel_id:
+            continue
+        currency = item.get("currency", "USD") or "USD"
+
+        # Walk rooms → rates to find the cheapest room total
+        best_total: float | None = None
+        for room in item.get("rooms", []):
+            for rate in room.get("rates", []):
+                retail = rate.get("retailRate", {})
+                totals = retail.get("total", [])
+                if totals:
+                    amt = totals[0].get("amount")
+                    if amt is not None:
+                        try:
+                            val = float(amt)
+                            if best_total is None or val < best_total:
+                                best_total = val
+                        except (TypeError, ValueError):
+                            pass
+
+        if best_total is not None:
+            pn = round(best_total / nights, 2)
+            result[hotel_id] = (pn, round(best_total, 2), currency)
+
+    logger.info("liteapi_rates_ok", fetched=len(result), requested=len(hotel_ids))
+    return result
+
+
 async def _search_liteapi(
     destination: str,
     check_in: date,
@@ -230,6 +305,17 @@ async def _search_liteapi(
             continue
 
     logger.info("liteapi_search_ok", destination=destination, count=len(offers))
+
+    # Enrich with live rates
+    hotel_ids = [o.hotel_id for o in offers]
+    rates = await _fetch_rates(hotel_ids, check_in, check_out, guests)
+    for offer in offers:
+        if offer.hotel_id in rates:
+            pn, total, currency = rates[offer.hotel_id]
+            offer.price_per_night = pn
+            offer.price_total = total
+            offer.price_currency = currency
+
     return offers
 
 

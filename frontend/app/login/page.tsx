@@ -31,7 +31,7 @@ export default function LoginPage() {
       // Pass token explicitly — store isn't hydrated to localStorage yet at this point
       const user = await api.get<UserOut>("/api/v1/auth/me", undefined, tokenData.access_token);
       setAuth(tokenData.access_token, user);
-      router.push("/trips");
+      router.push(mode === "register" ? "/onboarding" : "/trips");
     } catch (err) {
       if (err instanceof ApiError) {
         const detail = err.detail as { message?: string } | null;
