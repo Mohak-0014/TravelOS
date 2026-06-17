@@ -186,6 +186,10 @@ export default function TripDetailPage() {
         ...prev,
         { role: "assistant", text: res.answer, sources: res.sources },
       ]);
+      if (res.proposal_id) {
+        queryClient.invalidateQueries({ queryKey: ["trip", tripId] });
+        queryClient.invalidateQueries({ queryKey: ["approvals", tripId, "pending"] });
+      }
     } catch {
       setChatMessages((prev) => [
         ...prev,

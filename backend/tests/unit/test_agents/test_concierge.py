@@ -4,7 +4,9 @@ import pytest
 
 from backend.agents.concierge import (
     ConciergeResponse,
+    ProposeItineraryChange,
     _build_system_prompt,
+    _create_itinerary_change_proposal,
     _extract_text,
     _load_memory_context,
     _load_trip_context,
@@ -128,6 +130,7 @@ async def test_ask_calls_search_attractions_tool() -> None:
         mock_tool.return_value = (
             '[{"name": "Louvre"}]',
             [{"type": "attraction", "name": "Louvre"}],
+            None,
         )
 
         llm_instance = MagicMock()
@@ -139,7 +142,7 @@ async def test_ask_calls_search_attractions_tool() -> None:
 
         result = await ask("trip-1", "user-1", "What museums are near me?")
 
-    mock_tool.assert_awaited_once_with("SearchAttractions", {"lat": 48.85, "lng": 2.35})
+    mock_tool.assert_awaited_once_with("SearchAttractions", {"lat": 48.85, "lng": 2.35}, "trip-1")
     assert len(result.sources) == 1
     assert result.sources[0]["name"] == "Louvre"
 
@@ -166,6 +169,7 @@ async def test_ask_calls_search_restaurants_tool() -> None:
         mock_tool.return_value = (
             '[{"name": "Le Relais"}]',
             [{"type": "restaurant", "name": "Le Relais"}],
+            None,
         )
 
         llm_instance = MagicMock()
@@ -178,7 +182,7 @@ async def test_ask_calls_search_restaurants_tool() -> None:
         result = await ask("trip-1", "user-1", "Best restaurant near my hotel?")
 
     mock_tool.assert_awaited_once_with(
-        "SearchRestaurants", {"lat": 48.86, "lng": 2.34, "radius_m": 500}
+        "SearchRestaurants", {"lat": 48.86, "lng": 2.34, "radius_m": 500}, "trip-1"
     )
     assert result.sources[0]["type"] == "restaurant"
 
@@ -201,7 +205,7 @@ async def test_ask_sources_accumulate_across_rounds() -> None:
     ):
         mock_ctx.return_value = (_mock_trip(), [], None)
         mock_mem.return_value = {"past_trips": [], "pref_hits": []}
-        mock_tool.side_effect = [("[]", src_a), ("[]", src_b)]
+        mock_tool.side_effect = [("[]", src_a, None), ("[]", src_b, None)]
 
         llm_instance = MagicMock()
         llm_instance.bind_tools.return_value = llm_instance
@@ -254,7 +258,9 @@ async def test_run_tool_attractions_returns_results() -> None:
     ]
     with patch("backend.agents.concierge._search_attractions", new_callable=AsyncMock) as mock_sa:
         mock_sa.return_value = places
-        result_text, sources = await _run_tool("SearchAttractions", {"lat": 48.86, "lng": 2.34})
+        result_text, sources, _ = await _run_tool(
+            "SearchAttractions", {"lat": 48.86, "lng": 2.34}, "trip-1"
+        )
 
     assert "Louvre" in result_text
     assert len(sources) == 1
@@ -278,7 +284,9 @@ async def test_run_tool_restaurants_returns_results() -> None:
     ]
     with patch("backend.agents.concierge._search_restaurants", new_callable=AsyncMock) as mock_sr:
         mock_sr.return_value = rests
-        result_text, sources = await _run_tool("SearchRestaurants", {"lat": 48.86, "lng": 2.34})
+        result_text, sources, _ = await _run_tool(
+            "SearchRestaurants", {"lat": 48.86, "lng": 2.34}, "trip-1"
+        )
 
     assert "Le Petit Bistro" in result_text
     assert sources[0]["type"] == "restaurant"
@@ -287,9 +295,10 @@ async def test_run_tool_restaurants_returns_results() -> None:
 
 @pytest.mark.asyncio
 async def test_run_tool_unknown_name_returns_empty() -> None:
-    result_text, sources = await _run_tool("UnknownTool", {"lat": 0.0, "lng": 0.0})
+    result_text, sources, pid = await _run_tool("UnknownTool", {"lat": 0.0, "lng": 0.0}, "trip-1")
     assert result_text == "[]"
     assert sources == []
+    assert pid is None
 
 
 @pytest.mark.asyncio
@@ -299,17 +308,20 @@ async def test_run_tool_on_exception_returns_empty() -> None:
         new_callable=AsyncMock,
         side_effect=Exception("timeout"),
     ):
-        result_text, sources = await _run_tool("SearchAttractions", {"lat": 0.0, "lng": 0.0})
+        result_text, sources, pid = await _run_tool(
+            "SearchAttractions", {"lat": 0.0, "lng": 0.0}, "trip-1"
+        )
 
     assert result_text == "[]"
     assert sources == []
+    assert pid is None
 
 
 @pytest.mark.asyncio
 async def test_run_tool_uses_default_radius() -> None:
     with patch("backend.agents.concierge._search_attractions", new_callable=AsyncMock) as mock_sa:
         mock_sa.return_value = []
-        await _run_tool("SearchAttractions", {"lat": 1.0, "lng": 2.0})
+        await _run_tool("SearchAttractions", {"lat": 1.0, "lng": 2.0}, "trip-1")
 
     _, call_kwargs = mock_sa.call_args
     # radius_m arg is positional (3rd)
@@ -505,3 +517,292 @@ def test_extract_text_ignores_non_text_blocks() -> None:
     assert _extract_text(msg) == ""
 
 
+# ── ProposeItineraryChange schema ─────────────────────────────────────────────
+
+
+def test_propose_schema_is_in_tool_schemas() -> None:
+    from backend.agents.concierge import _TOOL_SCHEMAS
+
+    names = [s.__name__ for s in _TOOL_SCHEMAS]
+    assert "ProposeItineraryChange" in names
+
+
+def test_propose_schema_fields_exist() -> None:
+    p = ProposeItineraryChange(
+        day=2,
+        item_index=1,
+        replacement_title="Art Museum",
+        replacement_description="A great indoor option.",
+        reason="Rain forecast",
+    )
+    assert p.day == 2
+    assert p.item_index == 1
+    assert p.replacement_title == "Art Museum"
+
+
+# ── _create_itinerary_change_proposal() ──────────────────────────────────────
+
+
+def _make_mock_session(day_items: list) -> AsyncMock:  # type: ignore[type-arg]
+    mock_trip_obj = MagicMock()
+    mock_trip_obj.status = "planned"
+
+    items_scalars = MagicMock()
+    items_scalars.scalars.return_value.all.return_value = day_items
+
+    trip_scalars = MagicMock()
+    trip_scalars.scalar_one_or_none.return_value = mock_trip_obj
+
+    async def _refresh(obj: object) -> None:
+        # SQLAlchemy column defaults run at INSERT time; simulate by setting id here
+        if getattr(obj, "id", None) is None:
+            obj.id = "test-approval-id"  # type: ignore[union-attr]
+
+    session = AsyncMock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=False)
+    session.execute = AsyncMock(side_effect=[items_scalars, trip_scalars])
+    session.add = MagicMock()
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock(side_effect=_refresh)
+    return session
+
+
+@pytest.mark.asyncio
+async def test_create_proposal_returns_proposed_status() -> None:
+    mock_item = MagicMock()
+    mock_item.title = "Outdoor Park Walk"
+    mock_item.id = "item-uuid-1"
+    session = _make_mock_session([mock_item])
+
+    with patch("backend.agents.concierge.AsyncSessionLocal", return_value=session):
+        result_json, approval_id = await _create_itinerary_change_proposal(
+            "trip-1",
+            {
+                "day": 1,
+                "item_index": 0,
+                "replacement_title": "Art Museum",
+                "replacement_description": "Indoor gallery.",
+                "reason": "Rain forecast",
+            },
+        )
+
+    import json
+
+    data = json.loads(result_json)
+    assert data["status"] == "proposed"
+    assert approval_id is not None
+
+
+@pytest.mark.asyncio
+async def test_create_proposal_summary_includes_current_and_replacement() -> None:
+    mock_item = MagicMock()
+    mock_item.title = "Outdoor Park Walk"
+    mock_item.id = "item-uuid-1"
+    session = _make_mock_session([mock_item])
+
+    with patch("backend.agents.concierge.AsyncSessionLocal", return_value=session):
+        result_json, _ = await _create_itinerary_change_proposal(
+            "trip-1",
+            {
+                "day": 2,
+                "item_index": 0,
+                "replacement_title": "National Gallery",
+                "replacement_description": "World-class art.",
+                "reason": "User requested indoor option",
+            },
+        )
+
+    import json
+
+    data = json.loads(result_json)
+    assert "Outdoor Park Walk" in data["summary"]
+    assert "National Gallery" in data["summary"]
+    assert "Day 2" in data["summary"]
+
+
+@pytest.mark.asyncio
+async def test_create_proposal_sets_trip_to_awaiting_approval() -> None:
+    mock_item = MagicMock()
+    mock_item.title = "Beach Walk"
+    mock_item.id = "item-uuid-2"
+
+    mock_trip_obj = MagicMock()
+    mock_trip_obj.status = "planned"
+
+    items_scalars = MagicMock()
+    items_scalars.scalars.return_value.all.return_value = [mock_item]
+    trip_scalars = MagicMock()
+    trip_scalars.scalar_one_or_none.return_value = mock_trip_obj
+
+    session = AsyncMock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=False)
+    session.execute = AsyncMock(side_effect=[items_scalars, trip_scalars])
+    session.add = MagicMock()
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
+
+    with patch("backend.agents.concierge.AsyncSessionLocal", return_value=session):
+        await _create_itinerary_change_proposal(
+            "trip-1",
+            {
+                "day": 1,
+                "item_index": 0,
+                "replacement_title": "Museum",
+                "replacement_description": "Indoor.",
+                "reason": "Weather",
+            },
+        )
+
+    assert mock_trip_obj.status == "awaiting_approval"
+
+
+@pytest.mark.asyncio
+async def test_create_proposal_adds_approval_record() -> None:
+    from backend.db.models import Approval
+
+    mock_item = MagicMock()
+    mock_item.title = "Canal Tour"
+    mock_item.id = "item-uuid-3"
+    session = _make_mock_session([mock_item])
+
+    with patch("backend.agents.concierge.AsyncSessionLocal", return_value=session):
+        await _create_itinerary_change_proposal(
+            "trip-1",
+            {
+                "day": 3,
+                "item_index": 0,
+                "replacement_title": "Science Museum",
+                "replacement_description": "Great for all ages.",
+                "reason": "User preference",
+            },
+        )
+
+    added = session.add.call_args[0][0]
+    assert isinstance(added, Approval)
+    assert added.proposed_by == "concierge"
+    assert added.change_type == "concierge_swap"
+    assert added.status == "pending"
+    assert added.payload["replacement"]["title"] == "Science Museum"
+
+
+@pytest.mark.asyncio
+async def test_create_proposal_returns_error_for_out_of_range_index() -> None:
+    mock_item = MagicMock()
+    mock_item.title = "Only Item"
+    mock_item.id = "item-uuid-4"
+    session = _make_mock_session([mock_item])
+
+    with patch("backend.agents.concierge.AsyncSessionLocal", return_value=session):
+        result_json, pid = await _create_itinerary_change_proposal(
+            "trip-1",
+            {
+                "day": 1,
+                "item_index": 5,  # only 1 item on this day
+                "replacement_title": "X",
+                "replacement_description": "Y",
+                "reason": "Z",
+            },
+        )
+
+    import json
+
+    data = json.loads(result_json)
+    assert data["status"] == "error"
+    assert pid is None
+
+
+@pytest.mark.asyncio
+async def test_create_proposal_falls_back_gracefully_on_db_error() -> None:
+    session = AsyncMock()
+    session.__aenter__ = AsyncMock(side_effect=Exception("DB down"))
+    session.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("backend.agents.concierge.AsyncSessionLocal", return_value=session):
+        result_json, pid = await _create_itinerary_change_proposal(
+            "trip-1",
+            {
+                "day": 1,
+                "item_index": 0,
+                "replacement_title": "X",
+                "replacement_description": "Y",
+                "reason": "Z",
+            },
+        )
+
+    import json
+
+    data = json.loads(result_json)
+    assert data["status"] == "error"
+    assert pid is None
+
+
+# ── ask() dispatches ProposeItineraryChange ────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_ask_dispatches_propose_change_tool() -> None:
+    tool_call = {
+        "name": "ProposeItineraryChange",
+        "args": {
+            "day": 1,
+            "item_index": 0,
+            "replacement_title": "Indoor Museum",
+            "replacement_description": "Great rainy-day option.",
+            "reason": "Rain forecast",
+        },
+        "id": "tc-propose",
+    }
+    final_answer = _fake_llm_response("I've submitted the change for your approval.")
+
+    with (
+        patch("backend.agents.concierge._load_trip_context", new_callable=AsyncMock) as mock_ctx,
+        patch("backend.agents.concierge._load_preferences", new_callable=AsyncMock),
+        patch("backend.agents.concierge._load_memory_context", new_callable=AsyncMock) as mock_mem,
+        patch("backend.agents.concierge._build_llm") as mock_build,
+        patch(
+            "backend.agents.concierge._create_itinerary_change_proposal", new_callable=AsyncMock
+        ) as mock_propose,
+    ):
+        mock_ctx.return_value = (_mock_trip(), [], None)
+        mock_mem.return_value = {"past_trips": [], "pref_hits": []}
+        mock_propose.return_value = (
+            '{"status": "proposed", "approval_id": "appr-1", "summary": "Day 1: Replace..."}',
+            "appr-1",
+        )
+
+        llm_instance = MagicMock()
+        llm_instance.bind_tools.return_value = llm_instance
+        llm_instance.ainvoke = AsyncMock(
+            side_effect=[_fake_llm_response(tool_calls=[tool_call]), final_answer]
+        )
+        mock_build.return_value = llm_instance
+
+        result = await ask("trip-1", "user-1", "Can you swap Day 1 activity for something indoors?")
+
+    mock_propose.assert_awaited_once_with("trip-1", tool_call["args"])
+    assert isinstance(result, ConciergeResponse)
+    assert result.proposal_id == "appr-1"
+
+
+# ── _build_system_prompt — propose-tool guidance ──────────────────────────────
+
+
+def test_build_system_prompt_mentions_propose_tool() -> None:
+    prompt = _build_system_prompt(None, [], None, None, {"past_trips": [], "pref_hits": []})
+    assert "ProposeItineraryChange" in prompt
+    assert "approval" in prompt.lower()
+
+
+def test_build_system_prompt_itinerary_shows_item_indices() -> None:
+    items = [
+        _mock_item("Eiffel Tower", day=1, kind="activity"),
+        _mock_item("Lunch at Café", day=1, kind="meal"),
+        _mock_item("Louvre Museum", day=2, kind="activity"),
+    ]
+    prompt = _build_system_prompt(
+        _mock_trip(), items, None, None, {"past_trips": [], "pref_hits": []}
+    )
+    assert "0. activity" in prompt
+    assert "1. meal" in prompt

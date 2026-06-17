@@ -13,7 +13,7 @@ from sqlalchemy import select
 from backend.agents._llm import build_llm
 from backend.core.logging import get_logger
 from backend.db.base import AsyncSessionLocal
-from backend.db.models import HotelCandidate, ItineraryItem, Preference, Trip
+from backend.db.models import Approval, HotelCandidate, ItineraryItem, Preference, Trip
 from backend.memory.embeddings import embed_text
 from backend.memory.semantic import get_qdrant_client, search_preferences, search_trip_memories
 from backend.tools.places import search_attractions as _search_attractions
@@ -30,6 +30,7 @@ _MAX_TOOL_ROUNDS = 3
 class ConciergeResponse(BaseModel):
     answer: str
     sources: list[dict]  # type: ignore[type-arg]
+    proposal_id: str | None = None
 
 
 # ── Tool input schemas (class name becomes the tool name via bind_tools) ───────
@@ -54,7 +55,27 @@ class SearchRestaurants(BaseModel):
     radius_m: int = Field(default=1000, description="Search radius in metres (200–5 000)")
 
 
-_TOOL_SCHEMAS = [SearchAttractions, SearchRestaurants]
+class ProposeItineraryChange(BaseModel):
+    """Propose replacing a specific itinerary item with an alternative. Use this when the
+    user explicitly asks to swap, change, or replace an activity, meal, or venue on a specific
+    day. This creates an approval request — the user will see a banner and must approve before
+    any change is applied. Do NOT call this speculatively; only when the user clearly asks to
+    make a change."""
+
+    day: int = Field(description="Day number (1-indexed) of the item to replace")
+    item_index: int = Field(
+        description="0-indexed position of the item within that day (0 = first item)"
+    )
+    replacement_title: str = Field(description="Title of the replacement activity or venue")
+    replacement_description: str = Field(
+        description="Brief description of the replacement and why it fits the trip"
+    )
+    reason: str = Field(
+        description="Why this replacement is better (e.g. 'rain forecast', 'user prefers indoor')"
+    )
+
+
+_TOOL_SCHEMAS = [SearchAttractions, SearchRestaurants, ProposeItineraryChange]
 
 
 # ── LLM ────────────────────────────────────────────────────────────────────────
@@ -72,8 +93,8 @@ async def ask(trip_id: str, user_id: str, question: str) -> ConciergeResponse:
     Answer a freeform question about the user's trip.
 
     Loads DB context (trip, itinerary, hotel, preferences) and past-trip memories from Qdrant,
-    then runs a Claude Sonnet tool-use loop that can call SearchAttractions or SearchRestaurants
-    to ground its answer in real API data.  Degrades gracefully on any infrastructure failure.
+    then runs a tool-use loop that can call SearchAttractions, SearchRestaurants, or
+    ProposeItineraryChange. Degrades gracefully on any infrastructure failure.
     """
     logger.info("concierge_ask", trip_id=trip_id, question_len=len(question))
 
@@ -90,6 +111,7 @@ async def ask(trip_id: str, user_id: str, question: str) -> ConciergeResponse:
             HumanMessage(content=question),
         ]
         all_sources: list[dict[str, object]] = []
+        proposal_id: str | None = None
 
         for _ in range(_MAX_TOOL_ROUNDS):
             response = await llm.ainvoke(messages)
@@ -99,21 +121,25 @@ async def ask(trip_id: str, user_id: str, question: str) -> ConciergeResponse:
             if not tool_calls:
                 answer = _extract_text(response)
                 logger.info("concierge_answered", trip_id=trip_id, sources=len(all_sources))
-                return ConciergeResponse(answer=answer, sources=all_sources)
+                return ConciergeResponse(
+                    answer=answer, sources=all_sources, proposal_id=proposal_id
+                )
 
             for tc in tool_calls:
                 name: str = tc["name"]
                 args: dict = tc.get("args") or {}  # type: ignore[type-arg]
                 tc_id: str = tc.get("id") or ""
-                result_text, sources = await _run_tool(name, args)
+                result_text, sources, pid = await _run_tool(name, args, trip_id)
                 all_sources.extend(sources)
+                if pid is not None:
+                    proposal_id = pid
                 messages.append(ToolMessage(content=result_text, tool_call_id=tc_id))
 
         # Max tool rounds exhausted — ask for a final synthesis without more tool calls
         final = await _build_llm().ainvoke(messages)
         answer = _extract_text(final)
         logger.info("concierge_max_rounds_synthesis", trip_id=trip_id)
-        return ConciergeResponse(answer=answer, sources=all_sources)
+        return ConciergeResponse(answer=answer, sources=all_sources, proposal_id=proposal_id)
 
     except Exception as exc:
         logger.error("concierge_failed", trip_id=trip_id, error=str(exc))
@@ -129,9 +155,14 @@ async def ask(trip_id: str, user_id: str, question: str) -> ConciergeResponse:
 async def _run_tool(
     name: str,
     args: dict,  # type: ignore[type-arg]
-) -> tuple[str, list[dict]]:  # type: ignore[type-arg]
-    """Dispatch a tool call by name and return (result_json, source_list)."""
+    trip_id: str,
+) -> tuple[str, list[dict], str | None]:  # type: ignore[type-arg]
+    """Dispatch a tool call by name. Returns (result_json, sources, proposal_id_or_None)."""
     try:
+        if name == "ProposeItineraryChange":
+            result_text, pid = await _create_itinerary_change_proposal(trip_id, args)
+            return result_text, [], pid
+
         lat = float(args.get("lat", 0.0))
         lng = float(args.get("lng", 0.0))
 
@@ -155,7 +186,7 @@ async def _run_tool(
                 ]
             )
             logger.info("concierge_tool_attractions", count=len(places))
-            return result, sources
+            return result, sources, None
 
         if name == "SearchRestaurants":
             radius = int(args.get("radius_m", 1000))
@@ -185,13 +216,91 @@ async def _run_tool(
                 ]
             )
             logger.info("concierge_tool_restaurants", count=len(restaurants))
-            return result, sources
+            return result, sources, None
 
         logger.warning("concierge_unknown_tool", name=name)
     except Exception as exc:
         logger.warning("concierge_tool_error", name=name, error=str(exc))
 
-    return json.dumps([]), []
+    return json.dumps([]), [], None
+
+
+async def _create_itinerary_change_proposal(
+    trip_id: str,
+    args: dict,  # type: ignore[type-arg]
+) -> tuple[str, str | None]:
+    """
+    Create a pending Approval record for a concierge-proposed itinerary swap.
+    Returns (result_json, approval_id_or_None).
+    """
+    try:
+        day = int(args.get("day", 0))
+        item_index = int(args.get("item_index", 0))
+        replacement_title = str(args.get("replacement_title", ""))
+        replacement_description = str(args.get("replacement_description", ""))
+        reason = str(args.get("reason", ""))
+
+        async with AsyncSessionLocal() as session:
+            items_result = await session.execute(
+                select(ItineraryItem)
+                .where(ItineraryItem.trip_id == trip_id, ItineraryItem.day_number == day)
+                .order_by(ItineraryItem.sort_order)
+            )
+            day_items = list(items_result.scalars().all())
+
+            if not day_items or item_index < 0 or item_index >= len(day_items):
+                return (
+                    json.dumps(
+                        {
+                            "status": "error",
+                            "reason": f"No item at day={day} index={item_index} "
+                            f"({len(day_items)} items on that day)",
+                        }
+                    ),
+                    None,
+                )
+
+            item = day_items[item_index]
+            summary = f'Day {day}: Replace "{item.title}" with "{replacement_title}"'
+            if reason:
+                summary += f". {reason}"
+
+            approval = Approval(
+                trip_id=trip_id,
+                proposed_by="concierge",
+                change_type="concierge_swap",
+                summary=summary,
+                payload={
+                    "item_id": str(item.id),
+                    "day": day,
+                    "current": {"id": str(item.id), "title": item.title},
+                    "replacement": {
+                        "title": replacement_title,
+                        "description": replacement_description,
+                    },
+                    "reason": reason,
+                },
+                status="pending",
+            )
+            session.add(approval)
+
+            trip_result = await session.execute(select(Trip).where(Trip.id == trip_id))
+            trip = trip_result.scalar_one_or_none()
+            if trip is not None:
+                trip.status = "awaiting_approval"
+
+            await session.commit()
+            await session.refresh(approval)
+
+        logger.info("concierge_proposal_created", trip_id=trip_id, approval_id=approval.id)
+        return (
+            json.dumps({"status": "proposed", "approval_id": approval.id, "summary": summary}),
+            approval.id,
+        )
+
+    except Exception as exc:
+        logger.error("concierge_proposal_failed", trip_id=trip_id, error=str(exc))
+        return json.dumps({"status": "error", "reason": str(exc)}), None
 
 
 # ── Context loading ────────────────────────────────────────────────────────────
@@ -284,8 +393,14 @@ def _build_system_prompt(
         "- If tools return no results, say so honestly — do not fabricate alternatives.",
         "- You may answer directly (without calling a tool) for questions about the itinerary,",
         "  trip logistics, packing advice, or general destination knowledge.",
-        "- To change, swap, or replace an itinerary item: tell the user to use the Replace",
-        "  button next to each activity. You cannot modify the itinerary directly.",
+        "",
+        "## Modifying the itinerary",
+        "- If the user explicitly asks to swap, replace, or change a specific activity on a",
+        "  specific day, call ProposeItineraryChange with the day number and item index.",
+        "- item_index is 0-based: the first item of a day is index 0.",
+        "- After calling ProposeItineraryChange, tell the user the proposal is pending their",
+        "  approval in the banner above the itinerary.",
+        "- Do NOT call ProposeItineraryChange unless the user has clearly requested a change.",
         "",
     ]
 
@@ -326,14 +441,18 @@ def _build_system_prompt(
             lines.append(f"Total price: {hotel.price_total} {hotel.price_currency or ''}")
         lines.append("")
 
-    # Itinerary (titles only, capped at 5 items per day to limit tokens)
+    # Itinerary (titles + indices so LLM can reference them)
     if items:
-        lines.append("## Itinerary")
-        by_day: dict[int, list[str]] = {}
+        lines.append("## Itinerary (day: index. type — title)")
+        by_day: dict[int, list[ItineraryItem]] = {}
         for item in items:
-            by_day.setdefault(item.day_number, []).append(f"{item.item_type}: {item.title}")
+            by_day.setdefault(item.day_number, []).append(item)
         for day, day_items in sorted(by_day.items()):
-            lines.append(f"Day {day}: " + " | ".join(day_items[:5]))
+            day_lines = [
+                f"  {i}. {it.item_type} — {it.title}" for i, it in enumerate(day_items[:6])
+            ]
+            lines.append(f"Day {day}:")
+            lines.extend(day_lines)
         lines.append("")
 
     # Traveler preferences (from DB)

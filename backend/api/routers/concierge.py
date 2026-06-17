@@ -30,4 +30,8 @@ async def chat(
         user_id=current_user.id,
         question=body.question,
     )
-    return ChatResponse(answer=response.answer, sources=response.sources)
+    return ChatResponse(
+        answer=response.answer,
+        sources=response.sources,
+        proposal_id=response.proposal_id,
+    )

@@ -145,6 +145,20 @@ async def resolve_approval(
 
     approval.status = body.decision
     approval.resolved_at = datetime.now(UTC)
+
+    # Apply the item change when approved
+    if body.decision == "approved" and approval.change_type in ("user_replace", "concierge_swap"):
+        item_id = approval.payload.get("item_id")
+        if item_id:
+            item_result = await db.execute(select(ItineraryItem).where(ItineraryItem.id == item_id))
+            item = item_result.scalar_one_or_none()
+            if item is not None:
+                replacement = approval.payload.get("replacement", {})
+                item.title = replacement.get("title", item.title)
+                desc = replacement.get("description")
+                if desc:
+                    item.description = desc
+
     await db.flush()
 
     # Restore trip status to "planned" once all approvals are resolved
