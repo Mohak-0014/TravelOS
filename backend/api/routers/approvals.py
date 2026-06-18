@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -158,6 +158,59 @@ async def resolve_approval(
                 desc = replacement.get("description")
                 if desc:
                     item.description = desc
+
+    elif body.decision == "approved" and approval.change_type == "event_add":
+        payload = approval.payload
+        event_date_str = payload.get("event_date")
+        day_number = payload.get("day_number", 1)
+
+        # Parse event_date and optional start_time from payload
+        try:
+            event_date = date.fromisoformat(event_date_str) if event_date_str else None
+        except (ValueError, TypeError):
+            event_date = None
+
+        start_time: time | None = None
+        raw_time = payload.get("start_time")
+        if raw_time:
+            try:
+                start_time = time.fromisoformat(raw_time)
+            except (ValueError, TypeError):
+                pass
+
+        if event_date is not None:
+            # Determine sort_order: place event at end of that day's items
+            existing = await db.execute(
+                select(ItineraryItem).where(
+                    ItineraryItem.trip_id == approval.trip_id,
+                    ItineraryItem.day_number == day_number,
+                )
+            )
+            day_items = existing.scalars().all()
+            next_sort = max((i.sort_order for i in day_items), default=-1) + 1
+
+            price_min = payload.get("price_min")
+            new_item = ItineraryItem(
+                trip_id=approval.trip_id,
+                day_number=day_number,
+                item_date=event_date,
+                start_time=start_time,
+                item_type="activity",
+                title=payload.get("event_name", "Event"),
+                description=(
+                    f"{payload.get('category', '')} at {payload.get('venue_name', '')}. "
+                    f"Tickets: {payload.get('url', '')}"
+                ).strip(),
+                latitude=payload.get("lat"),
+                longitude=payload.get("lng"),
+                source_provider=payload.get("source"),
+                source_ref=payload.get("url"),
+                est_cost=float(price_min) if price_min is not None else None,
+                est_cost_currency=payload.get("price_currency"),
+                is_outdoor=False,
+                sort_order=next_sort,
+            )
+            db.add(new_item)
 
     await db.flush()
 

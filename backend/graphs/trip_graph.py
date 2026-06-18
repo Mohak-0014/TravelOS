@@ -1,6 +1,7 @@
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 
+from backend.agents import events as events_agent
 from backend.agents import hotel as hotel_agent
 from backend.agents import itinerary_planner as itinerary_planner_agent
 from backend.agents import supervisor as supervisor_agent
@@ -31,6 +32,10 @@ async def itinerary_planner_node(state: TravelOSState) -> dict:  # type: ignore[
 
 async def hotel_agent_node(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     return await hotel_agent.run(state)
+
+
+async def events_agent_node(state: TravelOSState) -> dict:  # type: ignore[type-arg]
+    return await events_agent.run(state)
 
 
 async def validation_node(state: TravelOSState) -> dict:  # type: ignore[type-arg]
@@ -83,6 +88,7 @@ def build_trip_graph(checkpointer=None):  # type: ignore[no-untyped-def]
     g.add_node("travel_style", travel_style_node)
     g.add_node("itinerary_planner", itinerary_planner_node)
     g.add_node("hotel_agent", hotel_agent_node)
+    g.add_node("events_agent", events_agent_node)
     g.add_node("validation", validation_node)
     g.add_node("conflict_detection", conflict_detection_node)
     g.add_node("approval_gate", approval_gate_node)
@@ -102,7 +108,8 @@ def build_trip_graph(checkpointer=None):  # type: ignore[no-untyped-def]
     )
     g.add_edge("travel_style", "itinerary_planner")
     g.add_edge("itinerary_planner", "hotel_agent")
-    g.add_edge("hotel_agent", "validation")
+    g.add_edge("hotel_agent", "events_agent")
+    g.add_edge("events_agent", "validation")
     g.add_edge("validation", "conflict_detection")
     g.add_conditional_edges(
         "conflict_detection",

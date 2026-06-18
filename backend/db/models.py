@@ -172,6 +172,7 @@ class ItineraryItem(Base):
     est_cost_currency: Mapped[str | None] = mapped_column(String(3))
     is_outdoor: Mapped[bool] = mapped_column(Boolean, default=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    conflict_warning: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

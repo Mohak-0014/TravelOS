@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     LITEAPI_KEY: str = ""
     HOTELSNL_API_KEY: str = ""
     FOURSQUARE_API_KEY: str = ""
+    TICKETMASTER_API_KEY: str = ""
+    EVENTBRITE_TOKEN: str = ""
     # Overpass API (OpenStreetMap) — no key required
 
     # Auth

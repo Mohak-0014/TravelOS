@@ -154,6 +154,7 @@ class ItineraryItemOut(BaseModel):
     est_cost_currency: str | None
     is_outdoor: bool
     sort_order: int
+    conflict_warning: str | None = None
 
 
 # ── Approvals ─────────────────────────────────────────────────────────────────

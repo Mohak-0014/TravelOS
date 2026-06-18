@@ -66,6 +66,13 @@ def _handle_fresh_run(state: TravelOSState, trip_id: str) -> dict:  # type: igno
         updates["weather_state"] = {"risk_flags": [], "last_checked": None}
     if not state.get("hotel_state"):
         updates["hotel_state"] = {"candidates": [], "selected": None}
+    if not state.get("events_state"):
+        updates["events_state"] = {
+            "fetched": 0,
+            "filtered": 0,
+            "proposed": [],
+            "conflict_warnings": 0,
+        }
 
     return updates
 
