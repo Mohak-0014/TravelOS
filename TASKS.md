@@ -35,7 +35,7 @@ Last updated: 2026-06-13
 
 | # | Task | File(s) | Notes |
 |---|---|---|---|
-| 10 | **Local Events agent** | `backend/agents/events.py` (new), `backend/graphs/trip_graph.py` | Fetch events for city + date range from Ticketmaster API (free tier) or Eventbrite after `itinerary_planner`. Create approval proposals for notable events ("Jazz Festival on Day 2 — add evening performance?"). Flag venue closures on event days. |
+| ~~10~~ | ~~Local Events agent~~ | ~~`backend/agents/events.py`~~ | ~~Done: Ticketmaster + Eventbrite dual fetch, embedding scoring, gap detection, conflict warnings, 24 tests, 478 total passing. commit ba05c50~~ |
 | 11 | **Budget Optimizer agent** | `backend/agents/budget_optimizer.py` (new), `backend/graphs/trip_graph.py` | After `hotel_agent`: compute estimated spend per category (lodging/activities/meals/transport), compare to `budget_total`. If >15% over → propose specific swaps (replace paid attraction with free one, downgrade hotel tier). If well under → suggest upgrades. All changes through approval gate. |
 
 ### Long-Term / Learning
