@@ -20,6 +20,7 @@ from backend.db.models import ItineraryItem, Trip
 from backend.graphs.state import TravelOSState
 from backend.tools.geocode import geocode
 from backend.tools.places import Attraction, search_attractions
+from backend.tools.restaurants import Restaurant, search_restaurants
 from backend.tools.weather import WeatherDay, fetch_weather
 
 logger = get_logger(__name__)
@@ -167,13 +168,14 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     # Fetch weather and attractions in parallel — both degrade gracefully to []
     if coords:
         lat, lng = coords
-        weather_days, attractions = await asyncio.gather(
+        weather_days, attractions, restaurants = await asyncio.gather(
             fetch_weather(lat, lng, trip.start_date, trip.end_date),
             search_attractions(lat, lng, radius_m=5000, limit=30),
+            search_restaurants(lat, lng, radius_m=2000),
         )
     else:
         logger.warning("itinerary_planner_no_coords", trip_id=trip_id)
-        weather_days, attractions = [], []
+        weather_days, attractions, restaurants = [], [], []
 
     memory_context = state.get("memory_context") or {}
     style_profile = memory_context.get("travel_style_profile", {})
@@ -183,7 +185,14 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     walking_tolerance = prefs.get("walking_tolerance") or "medium"
 
     items = await _generate_itinerary(
-        trip, style_profile, weather_days, attractions, budget_state, pace, walking_tolerance
+        trip,
+        style_profile,
+        weather_days,
+        attractions,
+        restaurants,
+        budget_state,
+        pace,
+        walking_tolerance,
     )
 
     if items:
@@ -275,6 +284,7 @@ async def _generate_itinerary(
     style_profile: dict,  # type: ignore[type-arg]
     weather_days: list[WeatherDay],
     attractions: list[Attraction],
+    restaurants: list[Restaurant],
     budget_state: dict,  # type: ignore[type-arg]
     pace: str = "moderate",
     walking_tolerance: str = "medium",
@@ -285,6 +295,7 @@ async def _generate_itinerary(
         style_profile,
         weather_days,
         attractions,
+        restaurants,
         budget_state,
         items_per_day,
         walking_tolerance,
@@ -297,7 +308,7 @@ async def _generate_itinerary(
         raw = str(response.content) if hasattr(response, "content") else str(response)
         items = _parse_items(raw, trip)
         if items:
-            return items
+            return _assign_real_restaurants(items, restaurants)
         logger.warning("itinerary_planner_empty_parse", trip_id=str(trip.id))
     except Exception as exc:
         logger.error("itinerary_planner_llm_error", error=str(exc))
@@ -310,6 +321,7 @@ def _build_prompt(
     style_profile: dict,  # type: ignore[type-arg]
     weather_days: list[WeatherDay],
     attractions: list[Attraction],
+    restaurants: list[Restaurant],
     budget_state: dict,  # type: ignore[type-arg]
     items_per_day: int = _DEFAULT_ITEMS_PER_DAY,
     walking_tolerance: str = "medium",
@@ -415,6 +427,46 @@ def _build_prompt(
     ]
 
     return "\n".join(parts)
+
+
+# ── Restaurant assignment ─────────────────────────────────────────────────────
+
+
+def _assign_real_restaurants(
+    items: list[_ItemDraft], restaurants: list[Restaurant]
+) -> list[_ItemDraft]:
+    """Replace LLM meal placeholders with real restaurants, cycling through the fetched list."""
+    if not restaurants:
+        return items
+    idx = 0
+    result: list[_ItemDraft] = []
+    for item in items:
+        if item.item_type == "meal":
+            r = restaurants[idx % len(restaurants)]
+            idx += 1
+            result.append(
+                _ItemDraft(
+                    day_number=item.day_number,
+                    item_date=item.item_date,
+                    start_time=item.start_time,
+                    end_time=item.end_time,
+                    item_type="meal",
+                    title=r.name,
+                    description=r.categories[0] if r.categories else None,
+                    latitude=r.lat,
+                    longitude=r.lng,
+                    address=r.address,
+                    source_provider=r.source_provider,
+                    source_ref=r.source_ref,
+                    est_cost=item.est_cost,
+                    est_cost_currency=item.est_cost_currency,
+                    is_outdoor=False,
+                    sort_order=item.sort_order,
+                )
+            )
+        else:
+            result.append(item)
+    return result
 
 
 # ── Parsing & validation ──────────────────────────────────────────────────────

@@ -8,7 +8,7 @@ import type { ItineraryItemOut } from "@/lib/api";
 // CSS dot marker avoids the broken default webpack/leaflet icon issue
 const dotIcon = L.divIcon({
   className: "",
-  html: '<div style="width:11px;height:11px;background:#2563eb;border-radius:50%;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.45)"></div>',
+  html: '<div style="width:11px;height:11px;background:#60a5fa;border-radius:50%;border:2px solid rgba(255,255,255,0.9);box-shadow:0 0 8px rgba(59,130,246,0.8),0 1px 4px rgba(0,0,0,0.6)"></div>',
   iconSize: [11, 11],
   iconAnchor: [5, 5],
   popupAnchor: [0, -8],
@@ -26,7 +26,7 @@ export default function TripMap({ items, centerLat, centerLng }: Props) {
       center={[centerLat, centerLng]}
       zoom={13}
       scrollWheelZoom={false}
-      style={{ height: "300px", width: "100%", borderRadius: "0.75rem" }}
+      style={{ height: "220px", width: "100%", borderRadius: "0" }}
     >
       <TileLayer
         attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
