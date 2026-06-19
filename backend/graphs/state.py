@@ -26,6 +26,7 @@ class TravelOSState(TypedDict):
     budget_state: dict  # keys: total, spent, by_category, breach_pct
     hotel_state: dict  # keys: candidates, selected
     events_state: dict  # keys: fetched, filtered, proposed, conflict_warnings
+    packing_state: dict  # keys: categories, status
 
     # Semantic memory context injected by Travel Style agent
     memory_context: dict  # keys: preferences, embedding_hits, past_trips

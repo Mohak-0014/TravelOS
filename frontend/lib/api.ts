@@ -130,6 +130,7 @@ export interface TripOut {
   budget_total: number | null;
   budget_currency: string;
   status: string;
+  packing_list: { categories: Record<string, string[]>; destination_specific?: string[] } | null;
   created_at: string;
   updated_at: string;
 }

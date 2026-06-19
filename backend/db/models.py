@@ -97,6 +97,7 @@ class Trip(Base):
     budget_total: Mapped[float | None] = mapped_column(Numeric(12, 2))
     budget_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="planning")
+    packing_list: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     langgraph_thread_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

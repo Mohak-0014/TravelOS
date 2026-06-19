@@ -97,6 +97,7 @@ class TripOut(BaseModel):
     budget_total: float | None
     budget_currency: str
     status: str
+    packing_list: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
 
