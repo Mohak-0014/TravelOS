@@ -15,8 +15,8 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "TravelOS",
-  description: "AI-native multi-agent travel operating system",
+  title: "TravelOS — Your AI Travel Brain",
+  description: "The travel planning system that remembers you and gets smarter every trip.",
 };
 
 export default function RootLayout({
@@ -25,8 +25,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50`}>
+    <html lang="en" className="dark">
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-space-900 text-slate-100`}
+      >
         <Providers>{children}</Providers>
       </body>
     </html>

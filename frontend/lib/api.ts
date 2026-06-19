@@ -210,4 +210,5 @@ export interface ItineraryItemOut {
   est_cost_currency: string | null;
   is_outdoor: boolean;
   sort_order: number;
+  conflict_warning: string | null;
 }

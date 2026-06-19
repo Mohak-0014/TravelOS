@@ -329,28 +329,180 @@ export default function TripDetailPage() {
             <h2 className="text-sm font-semibold text-orange-900">
               Pending approvals ({pendingApprovals.length})
             </h2>
-            {pendingApprovals.map((a) => (
-              <div key={a.id} className="bg-white rounded-lg border border-orange-200 p-4">
-                <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">
-                  {a.change_type.replace(/_/g, " ")}
-                </p>
-                <p className="text-sm text-gray-800 mb-3">{a.summary}</p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => handleDecision(a.id, "approved")}
-                    className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors"
-                  >
-                    Approve
-                  </button>
-                  <button
-                    onClick={() => handleDecision(a.id, "rejected")}
-                    className="text-xs bg-white border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    Reject
-                  </button>
+            {pendingApprovals.map((a) =>
+              a.change_type === "event_add" ? (
+                <div key={a.id} className="bg-white rounded-lg border border-orange-200 p-4">
+                  <div className="flex gap-3">
+                    {!!(a.payload.image_url) && (
+                      <img
+                        src={a.payload.image_url as string}
+                        alt={a.payload.event_name as string}
+                        className="w-16 h-16 rounded-lg object-cover shrink-0"
+                      />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span
+                          className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                            a.payload.source === "ticketmaster"
+                              ? "bg-blue-100 text-blue-700"
+                              : "bg-purple-100 text-purple-700"
+                          }`}
+                        >
+                          {a.payload.source === "ticketmaster" ? "Ticketmaster" : "Eventbrite"}
+                        </span>
+                        <span className="text-xs text-gray-400">{a.payload.category as string}</span>
+                      </div>
+                      <p className="font-medium text-gray-900 text-sm leading-snug">
+                        {a.payload.event_name as string}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Day {a.payload.day_number as number} · {a.payload.venue_name as string}
+                      </p>
+                      {!!(a.payload.start_time) && (
+                        <p className="text-xs text-gray-400">{a.payload.start_time as string}</p>
+                      )}
+                      {a.payload.price_min != null && (
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {a.payload.price_currency as string}{" "}
+                          {(a.payload.price_min as number).toFixed(0)}
+                          {a.payload.price_max !== a.payload.price_min
+                            ? `–${(a.payload.price_max as number).toFixed(0)}`
+                            : ""}
+                        </p>
+                      )}
+                      <p className="text-xs text-gray-600 mt-1.5 line-clamp-2">{a.summary}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 mt-3">
+                    <button
+                      onClick={() => handleDecision(a.id, "approved")}
+                      className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors"
+                    >
+                      Add to itinerary
+                    </button>
+                    <button
+                      onClick={() => handleDecision(a.id, "rejected")}
+                      className="text-xs bg-white border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      Skip
+                    </button>
+                    {!!(a.payload.url) && (
+                      <a
+                        href={a.payload.url as string}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-blue-600 hover:underline ml-auto"
+                      >
+                        View event ↗
+                      </a>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ) : a.change_type === "budget_swap" ? (
+                <div key={a.id} className="bg-white rounded-lg border border-orange-200 p-4">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">
+                      Over Budget
+                    </span>
+                    <span className="text-xs text-gray-400">Budget Optimizer</span>
+                  </div>
+                  <div className="flex flex-col gap-1 mb-2">
+                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                      <span className="line-through">
+                        {(a.payload.current as { title: string }).title}
+                        {a.payload.est_cost_original != null
+                          ? ` · ${a.payload.currency as string} ${(a.payload.est_cost_original as number).toFixed(0)}`
+                          : ""}
+                      </span>
+                      <span className="text-gray-300">→</span>
+                      <span className="text-gray-700 font-medium">
+                        {(a.payload.replacement as { title: string }).title}
+                      </span>
+                    </div>
+                    {(a.payload.replacement as { description?: string }).description && (
+                      <p className="text-xs text-gray-500 line-clamp-2">
+                        {(a.payload.replacement as { description: string }).description}
+                      </p>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 mb-3 italic">{a.payload.reason as string}</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleDecision(a.id, "approved")}
+                      className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors"
+                    >
+                      Accept swap
+                    </button>
+                    <button
+                      onClick={() => handleDecision(a.id, "rejected")}
+                      className="text-xs bg-white border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      Keep original
+                    </button>
+                  </div>
+                </div>
+              ) : a.change_type === "budget_upgrade" ? (
+                <div key={a.id} className="bg-white rounded-lg border border-orange-200 p-4">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-medium">
+                      Under Budget
+                    </span>
+                    <span className="text-xs text-gray-400">Budget Optimizer</span>
+                    {a.payload.budget_remaining != null && (
+                      <span className="text-xs text-gray-400 ml-auto">
+                        {a.payload.currency as string}{" "}
+                        {(a.payload.budget_remaining as number).toFixed(0)} remaining
+                      </span>
+                    )}
+                  </div>
+                  <p className="font-medium text-gray-900 text-sm mb-0.5">
+                    {a.payload.title as string}
+                  </p>
+                  {(a.payload.description as string) && (
+                    <p className="text-xs text-gray-500 line-clamp-2 mb-1">
+                      {a.payload.description as string}
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-500 mb-3 italic">{a.payload.reason as string}</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleDecision(a.id, "approved")}
+                      className="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700 transition-colors"
+                    >
+                      Sounds great
+                    </button>
+                    <button
+                      onClick={() => handleDecision(a.id, "rejected")}
+                      className="text-xs bg-white border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      Not interested
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div key={a.id} className="bg-white rounded-lg border border-orange-200 p-4">
+                  <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">
+                    {a.change_type.replace(/_/g, " ")}
+                  </p>
+                  <p className="text-sm text-gray-800 mb-3">{a.summary}</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleDecision(a.id, "approved")}
+                      className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => handleDecision(a.id, "rejected")}
+                      className="text-xs bg-white border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              )
+            )}
           </div>
         )}
 
@@ -464,6 +616,12 @@ export default function TripDetailPage() {
                                 >
                                   Cancel
                                 </button>
+                              </div>
+                            )}
+                            {item.conflict_warning && (
+                              <div className="ml-[4.75rem] flex items-start gap-1.5 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                                <span className="shrink-0">⚠️</span>
+                                <span>{item.conflict_warning}</span>
                               </div>
                             )}
                           </div>

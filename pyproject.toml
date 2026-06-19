@@ -70,3 +70,9 @@ ignore_errors = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["backend/tests"]
+
+[tool.coverage.run]
+concurrency = ["greenlet", "thread"]
+
+[tool.coverage.report]
+omit = ["backend/.venv/*", "backend/tests/*", "*/migrations/*"]
