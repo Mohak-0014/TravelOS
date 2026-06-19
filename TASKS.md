@@ -54,9 +54,12 @@ Last updated: 2026-06-19
 
 | # | Task | File(s) | Notes |
 |---|---|---|---|
-| 17 | **Packing List agent** | `backend/agents/packing.py` (new), `frontend/app/trips/[tripId]/page.tsx` | Generate context-aware packing list from destination climate, trip duration, activities in itinerary. UI: collapsible checklist panel on trip detail with category grouping (clothing, electronics, documents). |
-| 18 | **Agent Activity Log drawer** | `frontend/components/ui/ActivityDrawer.tsx` (new), `frontend/app/trips/[tripId]/page.tsx` | Slide-in right drawer showing real-time agent run log (which agents ran, what tools they called, timings). Poll `GET /trips/{id}/run-log` endpoint. Useful for debugging and transparency. |
+| ~~17~~ | ~~Packing List agent~~ | ~~`backend/agents/packing_list.py`, `frontend/app/trips/[tripId]/page.tsx`~~ | ~~Done: Haiku LLM generates categorized checklist (Clothing/Electronics/Documents/Health/Accessories/Destination-Specific), season-aware, packing_state in graph, Trip.packing_list JSON column (migration b1df5cfd3ec3), collapsible checklist UI with per-item checkboxes and progress bar, 11 tests, 528 total. commit 1201158~~ |
+| ~~18~~ | ~~Agent Activity Log drawer~~ | ~~`frontend/app/trips/[tripId]/page.tsx`~~ | ~~Done: full-height spring-animated right-edge drawer, groups messages by agent, color-coded per agent, sidebar teaser with 3-event preview. commit 1201158~~ |
 | 19 | **Share Trip link** | `frontend/app/trips/[tripId]/share/page.tsx` (new), `backend/api/routers/trips.py` | Generate a public read-only share URL (`/trips/{id}/share?token=...`). Backend: create a signed short-lived token. Frontend: public page showing itinerary summary without requiring auth. |
+| 20 | **Onboarding / Travel DNA wizard** | `frontend/app/onboarding/page.tsx` (new), `backend/api/routers/auth.py` | Post-register multi-step wizard to seed user preferences (pace, luxury_tier, interests, food_prefs, budget_behavior). Currently skipped — new users have no pref data and agents fall back to defaults. |
+| 21 | **Real-time status polling** | `frontend/app/trips/[tripId]/page.tsx` | When trip.status === "generating", poll every 3s via TanStack Query refetchInterval. Currently page shows old state until user manually refreshes. |
+| 22 | **Quick-wins: tasks #2, #7, #8** | `backend/api/main.py`, `backend/agents/weather.py`, `backend/graphs/validation.py` | #2: Qdrant collections init on startup. #7: weather agent uses travel_style_profile for activity replacements. #8: validation flags under-count days. All small. |
 
 ---
 
