@@ -1,6 +1,6 @@
 # TravelOS — Next Steps Task List
 
-Last updated: 2026-06-13
+Last updated: 2026-06-19
 
 ## Priority Order
 
@@ -16,7 +16,7 @@ Last updated: 2026-06-13
 
 | # | Task | File(s) | Notes |
 |---|---|---|---|
-| 3 | **Build Approval UI (approve/reject pending changes)** | `frontend/app/trips/[tripId]/page.tsx` | Fetch `GET /trips/{id}/approvals`, render a banner per pending approval with Approve/Reject buttons wired to existing `POST /trips/{id}/approvals/{id}/approve` and `/reject` endpoints. Completes the approval gate loop. |
+| ~~3~~ | ~~Build Approval UI (approve/reject pending changes)~~ | ~~`frontend/app/trips/[tripId]/page.tsx`~~ | ~~Done: approval banner with Approve/Reject wired to existing endpoints, dark-space redesign of Trip Detail page.~~ |
 
 ### Itinerary Quality Improvements
 
@@ -36,19 +36,27 @@ Last updated: 2026-06-13
 | # | Task | File(s) | Notes |
 |---|---|---|---|
 | ~~10~~ | ~~Local Events agent~~ | ~~`backend/agents/events.py`~~ | ~~Done: Ticketmaster + Eventbrite dual fetch, embedding scoring, gap detection, conflict warnings, 24 tests, 478 total passing. commit ba05c50~~ |
-| 11 | **Budget Optimizer agent** | `backend/agents/budget_optimizer.py` (new), `backend/graphs/trip_graph.py` | After `hotel_agent`: compute estimated spend per category (lodging/activities/meals/transport), compare to `budget_total`. If >15% over → propose specific swaps (replace paid attraction with free one, downgrade hotel tier). If well under → suggest upgrades. All changes through approval gate. |
+| ~~11~~ | ~~Budget Optimizer agent~~ | ~~`backend/agents/budget_optimizer.py`~~ | ~~Done: spend-per-category breakdown, >15% over threshold triggers swap proposals via approval gate, injected into trip_graph after hotel_agent.~~ |
 
 ### Long-Term / Learning
 
 | # | Task | File(s) | Notes |
 |---|---|---|---|
-| 12 | **Rejection feedback learning loop** | `backend/db/models.py`, `backend/agents/travel_style.py`, Alembic migration | Add `user_feedback` table (trip_id, change_type, context_tags, accepted bool). Write on approve/reject. Inject top 3 recent rejections into Travel Style prompt ("User previously rejected museum suggestions for rain days — they prefer cafes"). |
+| ~~12~~ | ~~Rejection feedback learning loop~~ | ~~`backend/db/models.py`, `backend/agents/travel_style.py`, Alembic migration~~ | ~~Done: user_feedback table, write on approve/reject, top-3 recent rejections injected into Travel Style prompt. Migration `5845b0bf9c6e`.~~ |
 
 ### Testing
 
 | # | Task | File(s) | Notes |
 |---|---|---|---|
 | ~~9~~ | ~~Boost API router test coverage to >80%~~ | ~~`backend/tests/`~~ | ~~Done: 71 router tests, 100% coverage across all 5 routers (284 stmts). 453 total unit tests passing.~~ |
+
+### Frontend — Next Session
+
+| # | Task | File(s) | Notes |
+|---|---|---|---|
+| 17 | **Packing List agent** | `backend/agents/packing.py` (new), `frontend/app/trips/[tripId]/page.tsx` | Generate context-aware packing list from destination climate, trip duration, activities in itinerary. UI: collapsible checklist panel on trip detail with category grouping (clothing, electronics, documents). |
+| 18 | **Agent Activity Log drawer** | `frontend/components/ui/ActivityDrawer.tsx` (new), `frontend/app/trips/[tripId]/page.tsx` | Slide-in right drawer showing real-time agent run log (which agents ran, what tools they called, timings). Poll `GET /trips/{id}/run-log` endpoint. Useful for debugging and transparency. |
+| 19 | **Share Trip link** | `frontend/app/trips/[tripId]/share/page.tsx` (new), `backend/api/routers/trips.py` | Generate a public read-only share URL (`/trips/{id}/share?token=...`). Backend: create a signed short-lived token. Frontend: public page showing itinerary summary without requiring auth. |
 
 ---
 
@@ -62,3 +70,10 @@ Last updated: 2026-06-13
 - [x] Frontend: hotels endpoint + hotel cards UI
 - [x] Schema fix: `destination_country` widened from `varchar(2)` → `varchar(100)` (migration `d5a69b21efbb`)
 - [x] GitHub repo: https://github.com/Mohak-0014/TravelOS
+- [x] Task #3: Trip Detail Page full redesign (dark-space theme, approval banners, itinerary, hotels, weather)
+- [x] Task #11: Budget Optimizer agent wired into graph
+- [x] Task #12: Rejection feedback learning loop (user_feedback table + Travel Style injection)
+- [x] Task #13: Profile / Travel DNA page (dark-space redesign)
+- [x] Task #14: Landing / marketing page (dark-space redesign)
+- [x] Task #15: Trips list page redesign (globe panel, status chips, staggered cards)
+- [x] Task #16: Trip Creation page redesign (4-step wizard, AnimatePresence, budget tier badge)
