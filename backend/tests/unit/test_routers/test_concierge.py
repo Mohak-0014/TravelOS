@@ -1,4 +1,5 @@
 """Unit tests for the concierge chat router."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
@@ -16,9 +17,7 @@ async def _auth(client: AsyncClient, email: str = "concierge@test.com") -> str:
         "/api/v1/auth/register",
         json={"email": email, "password": "Pass1234!", "full_name": "Chat User"},
     )
-    resp = await client.post(
-        "/api/v1/auth/login", json={"email": email, "password": "Pass1234!"}
-    )
+    resp = await client.post("/api/v1/auth/login", json={"email": email, "password": "Pass1234!"})
     return resp.json()["access_token"]
 
 

@@ -459,7 +459,7 @@ def test_parse_time_invalid_returns_none() -> None:
 
 def test_build_prompt_includes_destination() -> None:
     trip = _mock_trip()
-    prompt = _build_prompt(trip, {}, [], [], {})
+    prompt = _build_prompt(trip, {}, [], [], [], {})
     assert "Paris" in prompt
     assert "FR" in prompt
 
@@ -475,7 +475,7 @@ def test_build_prompt_includes_style_tags_when_present() -> None:
         "daily_rhythm": "x",
         "budget_priority": "x",
     }
-    prompt = _build_prompt(trip, style, [], [], {})
+    prompt = _build_prompt(trip, style, [], [], [], {})
     assert "culture" in prompt
     assert "food" in prompt
 
@@ -483,20 +483,20 @@ def test_build_prompt_includes_style_tags_when_present() -> None:
 def test_build_prompt_flags_adverse_weather() -> None:
     trip = _mock_trip()
     weather = [_mock_weather(date(2026, 7, 1), is_adverse=True)]
-    prompt = _build_prompt(trip, {}, weather, [], {})
+    prompt = _build_prompt(trip, {}, weather, [], [], {})
     assert "ADVERSE" in prompt
 
 
 def test_build_prompt_includes_attraction_names() -> None:
     trip = _mock_trip()
     attractions = [_mock_attraction("Eiffel Tower", "attraction")]
-    prompt = _build_prompt(trip, {}, [], attractions, {})
+    prompt = _build_prompt(trip, {}, [], attractions, [], {})
     assert "Eiffel Tower" in prompt
 
 
 def test_build_prompt_note_when_no_attractions() -> None:
     trip = _mock_trip()
-    prompt = _build_prompt(trip, {}, [], [], {})
+    prompt = _build_prompt(trip, {}, [], [], [], {})
     assert "No attraction data available" in prompt
 
 
@@ -610,7 +610,7 @@ def test_compass_central_when_same_point() -> None:
 def test_build_prompt_shows_group_labels_for_attractions() -> None:
     trip = _mock_trip()
     attractions = [_mock_attraction("Eiffel Tower", "attraction")]
-    prompt = _build_prompt(trip, {}, [], attractions, {})
+    prompt = _build_prompt(trip, {}, [], attractions, [], {})
     assert "Group A" in prompt
     assert "Eiffel Tower" in prompt
 
@@ -626,37 +626,37 @@ def test_build_prompt_shows_opening_hours_when_present() -> None:
         source_ref="way/1",
         opening_hours="Mo-Sa 10:00-22:00",
     )
-    prompt = _build_prompt(trip, {}, [], [a], {})
+    prompt = _build_prompt(trip, {}, [], [a], [], {})
     assert "Mo-Sa 10:00-22:00" in prompt
 
 
 def test_build_prompt_omits_hours_when_none() -> None:
     trip = _mock_trip()
-    prompt = _build_prompt(trip, {}, [], [_mock_attraction()], {})
+    prompt = _build_prompt(trip, {}, [], [_mock_attraction()], [], {})
     assert "hours=" not in prompt
 
 
 def test_build_prompt_includes_walking_constraint_low() -> None:
     trip = _mock_trip()
-    prompt = _build_prompt(trip, {}, [], [], {}, walking_tolerance="low")
+    prompt = _build_prompt(trip, {}, [], [], [], {}, walking_tolerance="low")
     assert "500" in prompt
 
 
 def test_build_prompt_includes_walking_constraint_high() -> None:
     trip = _mock_trip()
-    prompt = _build_prompt(trip, {}, [], [], {}, walking_tolerance="high")
+    prompt = _build_prompt(trip, {}, [], [], [], {}, walking_tolerance="high")
     assert "5000" in prompt
 
 
 def test_build_prompt_defaults_to_medium_walking_tolerance() -> None:
     trip = _mock_trip()
-    prompt = _build_prompt(trip, {}, [], [], {})
+    prompt = _build_prompt(trip, {}, [], [], [], {})
     assert "2000" in prompt
 
 
 def test_build_prompt_includes_scheduling_guidelines() -> None:
     trip = _mock_trip()
-    prompt = _build_prompt(trip, {}, [], [], {})
+    prompt = _build_prompt(trip, {}, [], [], [], {})
     assert "Scheduling Guidelines" in prompt
     assert "12:00" in prompt  # lunch hint from _MEAL_RULES
     assert "19:00" in prompt  # dinner hint

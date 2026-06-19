@@ -1,4 +1,5 @@
 """Unit tests for the trips router."""
+
 from __future__ import annotations
 
 from datetime import date
@@ -16,9 +17,7 @@ async def _auth(client: AsyncClient, email: str = "trips@test.com") -> str:
         "/api/v1/auth/register",
         json={"email": email, "password": "Pass1234!", "full_name": "Tripper"},
     )
-    resp = await client.post(
-        "/api/v1/auth/login", json={"email": email, "password": "Pass1234!"}
-    )
+    resp = await client.post("/api/v1/auth/login", json={"email": email, "password": "Pass1234!"})
     return resp.json()["access_token"]
 
 
@@ -123,9 +122,7 @@ async def test_list_trips_returns_own_only(client: AsyncClient) -> None:
 async def test_list_trips_excludes_cancelled(client: AsyncClient) -> None:
     token = await _auth(client, "cancel_list@test.com")
     trip = await _create_trip(client, token)
-    await client.delete(
-        f"/api/v1/trips/{trip['id']}", headers={"Authorization": f"Bearer {token}"}
-    )
+    await client.delete(f"/api/v1/trips/{trip['id']}", headers={"Authorization": f"Bearer {token}"})
     resp = await client.get("/api/v1/trips", headers={"Authorization": f"Bearer {token}"})
     assert all(t["id"] != trip["id"] for t in resp.json())
 
@@ -344,9 +341,7 @@ async def test_generate_non_planning_status_409(
     token = await _auth(client, "gen409@test.com")
     trip = await _create_trip(client, token)
 
-    await db_session.execute(
-        update(Trip).where(Trip.id == trip["id"]).values(status="generating")
-    )
+    await db_session.execute(update(Trip).where(Trip.id == trip["id"]).values(status="generating"))
     await db_session.commit()
 
     resp = await client.post(
@@ -440,9 +435,7 @@ async def test_get_weather_no_coords_geocode_fails_returns_empty(
 
 
 @pytest.mark.asyncio
-async def test_get_weather_with_trip_coords(
-    client: AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_get_weather_with_trip_coords(client: AsyncClient, db_session: AsyncSession) -> None:
     from sqlalchemy import update
 
     from backend.db.models import Trip
@@ -504,8 +497,10 @@ async def test_get_weather_geocodes_when_no_coords(client: AsyncClient) -> None:
         )
     ]
 
-    with patch("backend.api.routers.trips.geocode", new_callable=AsyncMock) as mock_geo, \
-         patch("backend.api.routers.trips.fetch_weather", new_callable=AsyncMock) as mock_fw:
+    with (
+        patch("backend.api.routers.trips.geocode", new_callable=AsyncMock) as mock_geo,
+        patch("backend.api.routers.trips.fetch_weather", new_callable=AsyncMock) as mock_fw,
+    ):
         mock_geo.return_value = None  # create_trip: no coords
         trip = await _create_trip(client, token)
 

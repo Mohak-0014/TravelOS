@@ -328,7 +328,7 @@ def test_open_slots_day_with_evening_item_excluded() -> None:
     )
     dates = [s[1] for s in slots]
     assert date(2026, 7, 10) not in dates  # has 20:00 item
-    assert date(2026, 7, 11) in dates      # no evening item
+    assert date(2026, 7, 11) in dates  # no evening item
 
 
 def test_open_slots_day_with_only_morning_item_is_open() -> None:
@@ -347,9 +347,7 @@ def test_open_slots_day_with_only_morning_item_is_open() -> None:
 
 
 def test_open_slots_empty_itinerary_all_days_open() -> None:
-    slots = _find_open_evening_slots(
-        [], trip_start=date(2026, 7, 10), trip_end=date(2026, 7, 12)
-    )
+    slots = _find_open_evening_slots([], trip_start=date(2026, 7, 10), trip_end=date(2026, 7, 12))
     assert len(slots) == 3
 
 

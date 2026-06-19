@@ -1,4 +1,5 @@
 """Unit tests for auth + preferences router."""
+
 import pytest
 from httpx import AsyncClient
 
@@ -116,9 +117,7 @@ async def test_get_me_no_token_401(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_get_me_invalid_token_401(client: AsyncClient) -> None:
-    resp = await client.get(
-        "/api/v1/auth/me", headers={"Authorization": "Bearer not.a.real.token"}
-    )
+    resp = await client.get("/api/v1/auth/me", headers={"Authorization": "Bearer not.a.real.token"})
     assert resp.status_code == 401
 
 
@@ -217,9 +216,7 @@ async def test_update_preferences_require_auth(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_inactive_user_forbidden_403(
-    client: AsyncClient, db_session
-) -> None:
+async def test_inactive_user_forbidden_403(client: AsyncClient, db_session) -> None:
     """Inactive users get 403 on protected endpoints (covers dependencies.py:41)."""
     from sqlalchemy import update
 
@@ -238,9 +235,7 @@ async def test_inactive_user_forbidden_403(
 
 
 @pytest.mark.asyncio
-async def test_get_preferences_not_found_if_no_row(
-    client: AsyncClient, db_session
-) -> None:
+async def test_get_preferences_not_found_if_no_row(client: AsyncClient, db_session) -> None:
     """GET /preferences returns 404 if the preference row was deleted (covers auth.py:99)."""
     from sqlalchemy import delete, select
 
@@ -249,9 +244,7 @@ async def test_get_preferences_not_found_if_no_row(
     token = await _auth(client, "nopref@test.com")
 
     # Delete the auto-created preference row
-    result = await db_session.execute(
-        select(User).where(User.email == "nopref@test.com")
-    )
+    result = await db_session.execute(select(User).where(User.email == "nopref@test.com"))
     user = result.scalar_one()
     await db_session.execute(delete(Preference).where(Preference.user_id == user.id))
     await db_session.commit()
@@ -262,9 +255,7 @@ async def test_get_preferences_not_found_if_no_row(
 
 
 @pytest.mark.asyncio
-async def test_update_preferences_creates_row_if_missing(
-    client: AsyncClient, db_session
-) -> None:
+async def test_update_preferences_creates_row_if_missing(client: AsyncClient, db_session) -> None:
     """PUT /preferences auto-creates the pref row if it was deleted (covers auth.py:114-115)."""
     from sqlalchemy import delete, select
 

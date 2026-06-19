@@ -264,12 +264,20 @@ async def test_delete_itinerary_item(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_generate_itinerary_returns_not_implemented(client: AsyncClient) -> None:
+async def test_generate_itinerary_queues_celery_task(client: AsyncClient) -> None:
+    from unittest.mock import MagicMock, patch
+
     token = await _auth(client)
     trip = await _create_trip(client, token)
-    resp = await client.post(
-        f"/api/v1/trips/{trip['id']}/itinerary/generate",
-        headers={"Authorization": f"Bearer {token}"},
-    )
+
+    with patch("backend.workflows.celery_tasks.generate_itinerary_async") as mock_task:
+        mock_task.delay.return_value = MagicMock(id="test-task-id")
+        resp = await client.post(
+            f"/api/v1/trips/{trip['id']}/itinerary/generate",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
     assert resp.status_code == 200
-    assert resp.json()["status"] == "not_implemented"
+    assert resp.json()["status"] == "queued"
+    assert resp.json()["trip_id"] == trip["id"]
+    mock_task.delay.assert_called_once()

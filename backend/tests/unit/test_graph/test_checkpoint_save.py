@@ -55,9 +55,23 @@ def _make_trip_mock(trip_id: str = "trip-cs") -> MagicMock:
     return trip
 
 
-def _make_session_mock(trip: MagicMock | None = None):
+def _make_execute_result(has_pending: bool = False) -> MagicMock:
+    """Return a mock scalars().first() chain for the Approval query."""
+    first_value = MagicMock() if has_pending else None
+    scalars_mock = MagicMock()
+    scalars_mock.first.return_value = first_value
+    result = MagicMock()
+    result.scalars.return_value = scalars_mock
+    return result
+
+
+def _make_session_mock(
+    trip: MagicMock | None = None,
+    has_pending_approval: bool = False,
+):
     session = AsyncMock()
     session.get.return_value = trip
+    session.execute = AsyncMock(return_value=_make_execute_result(has_pending_approval))
     session.commit = AsyncMock()
 
     ctx = AsyncMock()
@@ -72,7 +86,7 @@ def _make_session_mock(trip: MagicMock | None = None):
 @pytest.mark.asyncio
 async def test_run_sets_status_planned_when_no_pending() -> None:
     trip = _make_trip_mock()
-    session, ctx = _make_session_mock(trip)
+    session, ctx = _make_session_mock(trip, has_pending_approval=False)
     with patch("backend.graphs.checkpoint_save.AsyncSessionLocal", return_value=ctx):
         await run(_base_state(), _config())
     assert trip.status == "planned"
@@ -81,19 +95,20 @@ async def test_run_sets_status_planned_when_no_pending() -> None:
 @pytest.mark.asyncio
 async def test_run_sets_status_awaiting_approval_when_pending_exists() -> None:
     trip = _make_trip_mock()
-    session, ctx = _make_session_mock(trip)
+    # DB query returns a pending approval — status must become awaiting_approval
+    session, ctx = _make_session_mock(trip, has_pending_approval=True)
     with patch("backend.graphs.checkpoint_save.AsyncSessionLocal", return_value=ctx):
-        await run(_base_state(approval_queue=[_pending_approval()]), _config())
+        await run(_base_state(), _config())
     assert trip.status == "awaiting_approval"
 
 
 @pytest.mark.asyncio
-async def test_run_sets_status_planned_when_approval_is_not_pending() -> None:
-    resolved = {**_pending_approval(), "status": "approved"}
+async def test_run_sets_status_planned_when_no_db_pending() -> None:
     trip = _make_trip_mock()
-    session, ctx = _make_session_mock(trip)
+    session, ctx = _make_session_mock(trip, has_pending_approval=False)
     with patch("backend.graphs.checkpoint_save.AsyncSessionLocal", return_value=ctx):
-        await run(_base_state(approval_queue=[resolved]), _config())
+        await run(_base_state(approval_queue=[_pending_approval()]), _config())
+    # approval_queue is ignored — DB result (no pending) determines status
     assert trip.status == "planned"
 
 

@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 from backend.memory.embeddings import (
     embed_text,
+    feedback_text,
     preference_text,
     trip_memory_text,
 )
@@ -106,6 +107,43 @@ def test_embed_text_calls_encode_with_normalize() -> None:
         embed_text("hello world")
 
     mock_model.encode.assert_called_once_with("hello world", normalize_embeddings=True)
+
+
+# ── feedback_text ─────────────────────────────────────────────────────────────
+
+
+def test_feedback_text_rejected() -> None:
+    text = feedback_text(
+        decision="rejected",
+        change_type="budget_swap",
+        context_tags=["budget_swap", "Museum Island"],
+        summary="Replace Museum Island with free park",
+    )
+    assert "rejected" in text
+    assert "budget_swap" in text
+    assert "Museum Island" in text
+
+
+def test_feedback_text_approved() -> None:
+    text = feedback_text(
+        decision="approved",
+        change_type="event_add",
+        context_tags=["event_add", "Music"],
+        summary="Jazz festival Day 3",
+    )
+    assert "approved" in text
+    assert "Jazz festival" in text
+
+
+def test_feedback_text_empty_tags() -> None:
+    text = feedback_text(
+        decision="rejected",
+        change_type="budget_exceed",
+        context_tags=[],
+        summary="Over budget warning",
+    )
+    assert "rejected" in text
+    assert "budget_exceed" in text
 
 
 # ── _get_model lazy loading ───────────────────────────────────────────────────

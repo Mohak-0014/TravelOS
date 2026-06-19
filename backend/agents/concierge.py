@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
@@ -75,7 +76,36 @@ class ProposeItineraryChange(BaseModel):
     )
 
 
-_TOOL_SCHEMAS = [SearchAttractions, SearchRestaurants, ProposeItineraryChange]
+class ProposeAddItem(BaseModel):
+    """Propose adding a brand-new activity, restaurant, or venue to a specific day. Use this
+    when the user asks to ADD something to their plan (not replace an existing item). Creates
+    an approval request — the user must approve before the item is inserted."""
+
+    day: int = Field(description="Day number (1-indexed) to add the item to")
+    title: str = Field(description="Title of the new activity or venue")
+    description: str = Field(description="Brief description of the activity and why it fits")
+    reason: str = Field(description="Why this addition suits the traveller's style or the trip")
+
+
+_TOOL_SCHEMAS = [SearchAttractions, SearchRestaurants, ProposeItineraryChange, ProposeAddItem]
+
+# Keywords that signal the user wants to add something to their plan
+_ADD_RE = re.compile(r"\b(add|include|put|insert|schedule|book)\b", re.IGNORECASE)
+# Keywords that signal the user wants to replace/swap something
+_REPLACE_RE = re.compile(
+    r"\b(replace|swap|change|switch|remove|cancel|drop|delete)\b", re.IGNORECASE
+)
+# Must also reference the plan/itinerary to avoid false positives
+_PLAN_RE = re.compile(r"\b(day \d|day\d|plan|itinerary|schedule|trip|my trip)\b", re.IGNORECASE)
+
+
+def _detect_mod_type(question: str) -> str | None:
+    """Return 'add', 'replace', or None based on clear modification keywords."""
+    if _ADD_RE.search(question) and _PLAN_RE.search(question):
+        return "add"
+    if _REPLACE_RE.search(question) and _PLAN_RE.search(question):
+        return "replace"
+    return None
 
 
 # ── LLM ────────────────────────────────────────────────────────────────────────
@@ -104,7 +134,17 @@ async def ask(trip_id: str, user_id: str, question: str) -> ConciergeResponse:
         memory = await _load_memory_context(user_id, question)
 
         system_prompt = _build_system_prompt(trip, items, hotel, pref, memory)
-        llm = _build_llm().bind_tools(_TOOL_SCHEMAS)
+
+        # Detect modification intent and force the appropriate tool so the model can't refuse
+        mod_type = _detect_mod_type(question)
+        if mod_type == "add":
+            llm = _build_llm().bind_tools([ProposeAddItem], tool_choice="any")
+            logger.info("concierge_forced_tool", trip_id=trip_id, tool="ProposeAddItem")
+        elif mod_type == "replace":
+            llm = _build_llm().bind_tools([ProposeItineraryChange], tool_choice="any")
+            logger.info("concierge_forced_tool", trip_id=trip_id, tool="ProposeItineraryChange")
+        else:
+            llm = _build_llm().bind_tools(_TOOL_SCHEMAS)
 
         messages: list[BaseMessage] = [
             SystemMessage(content=system_prompt),
@@ -135,7 +175,12 @@ async def ask(trip_id: str, user_id: str, question: str) -> ConciergeResponse:
                     proposal_id = pid
                 messages.append(ToolMessage(content=result_text, tool_call_id=tc_id))
 
-        # Max tool rounds exhausted — ask for a final synthesis without more tool calls
+            # After a modification tool call that created a proposal, break immediately
+            # and synthesize with the unbound LLM — the forced llm would 400 on re-entry
+            if proposal_id is not None:
+                break
+
+        # Synthesis — always uses unbound LLM (no tool_choice) so Groq won't reject it
         final = await _build_llm().ainvoke(messages)
         answer = _extract_text(final)
         logger.info("concierge_max_rounds_synthesis", trip_id=trip_id)
@@ -161,6 +206,10 @@ async def _run_tool(
     try:
         if name == "ProposeItineraryChange":
             result_text, pid = await _create_itinerary_change_proposal(trip_id, args)
+            return result_text, [], pid
+
+        if name == "ProposeAddItem":
+            result_text, pid = await _create_add_item_proposal(trip_id, args)
             return result_text, [], pid
 
         lat = float(args.get("lat", 0.0))
@@ -303,6 +352,59 @@ async def _create_itinerary_change_proposal(
         return json.dumps({"status": "error", "reason": str(exc)}), None
 
 
+async def _create_add_item_proposal(
+    trip_id: str,
+    args: dict,  # type: ignore[type-arg]
+) -> tuple[str, str | None]:
+    """Create a pending Approval record for a concierge-proposed new itinerary item."""
+    try:
+        day = int(args.get("day", 1))
+        title = str(args.get("title", "")).strip()
+        description = str(args.get("description", ""))
+        reason = str(args.get("reason", ""))
+
+        if not title:
+            return json.dumps({"status": "error", "reason": "title is required"}), None
+
+        async with AsyncSessionLocal() as session:
+            trip_result = await session.execute(select(Trip).where(Trip.id == trip_id))
+            trip = trip_result.scalar_one_or_none()
+            if trip is None:
+                return json.dumps({"status": "error", "reason": "trip not found"}), None
+
+            summary = f'Day {day}: Add "{title}"'
+            if reason:
+                summary += f". {reason}"
+
+            approval = Approval(
+                trip_id=trip_id,
+                proposed_by="concierge",
+                change_type="concierge_add",
+                summary=summary,
+                payload={
+                    "day": day,
+                    "title": title,
+                    "description": description,
+                    "reason": reason,
+                },
+                status="pending",
+            )
+            session.add(approval)
+            trip.status = "awaiting_approval"
+            await session.commit()
+            await session.refresh(approval)
+
+        logger.info("concierge_add_proposed", trip_id=trip_id, approval_id=approval.id)
+        return (
+            json.dumps({"status": "proposed", "approval_id": str(approval.id), "summary": summary}),
+            str(approval.id),
+        )
+
+    except Exception as exc:
+        logger.error("concierge_add_proposal_failed", trip_id=trip_id, error=str(exc))
+        return json.dumps({"status": "error", "reason": str(exc)}), None
+
+
 # ── Context loading ────────────────────────────────────────────────────────────
 
 
@@ -394,13 +496,18 @@ def _build_system_prompt(
         "- You may answer directly (without calling a tool) for questions about the itinerary,",
         "  trip logistics, packing advice, or general destination knowledge.",
         "",
-        "## Modifying the itinerary",
-        "- If the user explicitly asks to swap, replace, or change a specific activity on a",
-        "  specific day, call ProposeItineraryChange with the day number and item index.",
-        "- item_index is 0-based: the first item of a day is index 0.",
-        "- After calling ProposeItineraryChange, tell the user the proposal is pending their",
-        "  approval in the banner above the itinerary.",
-        "- Do NOT call ProposeItineraryChange unless the user has clearly requested a change.",
+        "## Modifying the itinerary — you CAN do this, use the tools",
+        "- You have the ability to propose itinerary changes. When the user asks, ALWAYS call",
+        "  the appropriate tool — never say you cannot modify the itinerary.",
+        "- To ADD a new item (e.g. 'add a museum', 'include X', 'put Y on day 2', 'can you",
+        "  add Z'), call ProposeAddItem with: day (number), title, description, reason.",
+        "- To REPLACE or SWAP an existing item, call ProposeItineraryChange with: day number,",
+        "  item_index (0-based, first item = 0), replacement_title, replacement_description,"
+        " reason.",
+        "- After calling either tool, confirm to the user: 'I've proposed adding/replacing X —",
+        "  check the approval banner above the itinerary to confirm.'",
+        "- NEVER tell the user to click a Replace button or modify the UI themselves.",
+        "- Only call these tools when the user explicitly requests a change to the itinerary.",
         "",
     ]
 
