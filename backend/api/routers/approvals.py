@@ -132,7 +132,7 @@ async def resolve_approval(
     body: ApprovalDecision,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, object]:
     result = await db.execute(select(Approval).where(Approval.id == approval_id))
     approval = result.scalar_one_or_none()
     if approval is None:

@@ -445,18 +445,22 @@ async def _run_embed_feedback(feedback_id: str) -> dict:  # type: ignore[return]
             logger.warning("embed_feedback_not_found", feedback_id=feedback_id)
             return {"status": "skipped", "reason": "not found", "feedback_id": feedback_id}
 
-        fb_dict = {
-            "decision": fb.decision,
-            "change_type": fb.change_type,
-            "context_tags": list(fb.context_tags or []),
-            "summary": fb.summary,
+        _decision = str(fb.decision or "")
+        _change_type = str(fb.change_type or "")
+        _context_tags: list[str] = [str(t) for t in (fb.context_tags or [])]
+        _summary = str(fb.summary or "")
+        fb_dict: dict[str, object] = {
+            "decision": _decision,
+            "change_type": _change_type,
+            "context_tags": _context_tags,
+            "summary": _summary,
         }
 
     text = feedback_text(
-        decision=fb_dict["decision"],
-        change_type=fb_dict["change_type"],
-        context_tags=fb_dict["context_tags"],
-        summary=fb_dict["summary"],
+        decision=_decision,
+        change_type=_change_type,
+        context_tags=_context_tags,
+        summary=_summary,
     )
     vector = embed_text(text)
 

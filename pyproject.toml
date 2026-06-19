@@ -51,6 +51,7 @@ include = ["backend*"]
 line-length = 100
 target-version = "py311"
 fix = true
+exclude = ["backend/.venv/", "e2e_*.py", "verify_*.py", "seed_*.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

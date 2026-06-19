@@ -1,92 +1,73 @@
 "use client";
 
-import { useRef, useMemo } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
-import * as THREE from "three";
+import { Component, ReactNode, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 
-function Stars({ count = 2000 }: { count?: number }) {
-  const ref = useRef<THREE.Points>(null);
+// ── CSS fallback (no WebGL / SSR) ─────────────────────────────────────────────
 
-  const { positions, sizes } = useMemo(() => {
-    const positions = new Float32Array(count * 3);
-    const sizes = new Float32Array(count);
-    for (let i = 0; i < count; i++) {
-      positions[i * 3] = (Math.random() - 0.5) * 200;
-      positions[i * 3 + 1] = (Math.random() - 0.5) * 200;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * 200;
-      sizes[i] = Math.random() * 1.5 + 0.3;
-    }
-    return { positions, sizes };
-  }, [count]);
-
-  useFrame(({ clock }) => {
-    if (!ref.current) return;
-    ref.current.rotation.y = clock.getElapsedTime() * 0.015;
-    ref.current.rotation.x = Math.sin(clock.getElapsedTime() * 0.008) * 0.05;
-  });
-
+function StarFieldCSS({ className = "" }: { className?: string }) {
   return (
-    <points ref={ref}>
-      <bufferGeometry>
-        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
-        <bufferAttribute attach="attributes-size" args={[sizes, 1]} />
-      </bufferGeometry>
-      <pointsMaterial
-        size={0.4}
-        sizeAttenuation
-        color="#a5b4fc"
-        transparent
-        opacity={0.7}
-        fog={false}
-      />
-    </points>
+    <div
+      className={`absolute inset-0 pointer-events-none ${className}`}
+      style={{
+        zIndex: 0,
+        background: [
+          "radial-gradient(ellipse at 20% 30%, rgba(59,130,246,0.06) 0%, transparent 60%)",
+          "radial-gradient(ellipse at 80% 70%, rgba(139,92,246,0.05) 0%, transparent 50%)",
+        ].join(", "),
+      }}
+    />
   );
 }
 
-function NebulaDust() {
-  const ref = useRef<THREE.Points>(null);
-  const count = 300;
+// ── Error boundary wrapping the dynamic Three.js canvas ───────────────────────
 
-  const positions = useMemo(() => {
-    const arr = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      const r = Math.random() * 60 + 20;
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.random() * Math.PI;
-      arr[i * 3] = r * Math.sin(phi) * Math.cos(theta);
-      arr[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta) * 0.3;
-      arr[i * 3 + 2] = r * Math.cos(phi);
-    }
-    return arr;
-  }, []);
-
-  useFrame(({ clock }) => {
-    if (!ref.current) return;
-    ref.current.rotation.y = clock.getElapsedTime() * 0.025;
-  });
-
-  return (
-    <points ref={ref}>
-      <bufferGeometry>
-        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
-      </bufferGeometry>
-      <pointsMaterial size={1.2} color="#3b82f6" transparent opacity={0.25} sizeAttenuation fog={false} />
-    </points>
-  );
+class ThreeBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { failed: false };
+  }
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    if (this.state.failed) return <StarFieldCSS />;
+    return this.props.children;
+  }
 }
+
+// ── Dynamically load Three.js canvas only when WebGL is available ─────────────
+
+const StarFieldWebGL = dynamic(
+  () =>
+    import("./StarFieldWebGL").catch(() => ({
+      default: StarFieldCSS,
+    })),
+  { ssr: false, loading: () => <StarFieldCSS /> }
+);
+
+// ── Public API ────────────────────────────────────────────────────────────────
 
 export default function StarField({ className = "" }: { className?: string }) {
+  const [webgl, setWebgl] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    try {
+      const canvas = document.createElement("canvas");
+      const ctx =
+        canvas.getContext("webgl") ?? canvas.getContext("experimental-webgl");
+      setWebgl(!!ctx);
+    } catch {
+      setWebgl(false);
+    }
+  }, []);
+
+  // During SSR / before hydration: show CSS
+  if (webgl === null || !webgl) return <StarFieldCSS className={className} />;
+
   return (
-    <div className={`absolute inset-0 pointer-events-none ${className}`} style={{ zIndex: 0 }}>
-      <Canvas
-        camera={{ position: [0, 0, 50], fov: 75 }}
-        style={{ background: "transparent" }}
-        dpr={[1, 1.5]}
-      >
-        <Stars count={1800} />
-        <NebulaDust />
-        <fog attach="fog" args={["#080812", 80, 200]} />
-      </Canvas>
-    </div>
+    <ThreeBoundary>
+      <StarFieldWebGL className={className} />
+    </ThreeBoundary>
   );
 }

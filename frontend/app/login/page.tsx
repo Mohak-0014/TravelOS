@@ -28,7 +28,7 @@ export default function LoginPage() {
   const [fullName, setFullName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const tagline = TAGLINES[Math.floor(Date.now() / 5000) % TAGLINES.length];
+  const [tagline] = useState(() => TAGLINES[Math.floor(Date.now() / 5000) % TAGLINES.length]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -83,7 +83,7 @@ export default function LoginPage() {
             <Compass className="w-7 h-7 text-white" />
           </motion.div>
           <h1 className="text-2xl font-bold gradient-text mb-1">TravelOS</h1>
-          <p className="text-sm text-slate-500">{tagline}</p>
+          <p className="text-sm text-slate-500" suppressHydrationWarning>{tagline}</p>
         </div>
 
         {/* Glass card */}
