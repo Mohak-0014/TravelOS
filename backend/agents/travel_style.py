@@ -14,7 +14,7 @@ from backend.db.base import AsyncSessionLocal
 from backend.db.models import Preference, Trip
 from backend.graphs.state import TravelOSState
 from backend.memory.embeddings import embed_text, preference_text
-from backend.memory.semantic import get_qdrant_client, search_trip_memories
+from backend.memory.semantic import get_qdrant_client, search_feedback, search_trip_memories
 
 logger = get_logger(__name__)
 
@@ -52,11 +52,12 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     prefs_dict = _preference_to_dict(pref)
     trip_context = _trip_to_context(trip)
 
-    # Fetch past trips first so they can inform the profile synthesis
+    # Fetch past trips and approval feedback to personalise the profile
     embedding_hits = await _search_past_trips(user_id, prefs_dict)
+    feedback_hits = await _search_feedback(user_id, prefs_dict, trip_context)
 
     profile = await _synthesize_profile(
-        prefs_dict, trip_context, state.get("traveler_profiles", []), embedding_hits
+        prefs_dict, trip_context, state.get("traveler_profiles", []), embedding_hits, feedback_hits
     )
 
     logger.info(
@@ -64,6 +65,7 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
         trip_id=trip_id,
         style_tags=profile.get("style_tags"),
         embedding_hits=len(embedding_hits),
+        feedback_hits=len(feedback_hits),
     )
 
     updates: dict = {  # type: ignore[type-arg]
@@ -153,6 +155,7 @@ async def _synthesize_profile(
     trip_context: str,
     traveler_profiles: list[dict],  # type: ignore[type-arg]
     past_trips: list[dict],  # type: ignore[type-arg]
+    feedback_hits: list[dict] | None = None,  # type: ignore[type-arg]
 ) -> dict:  # type: ignore[type-arg]
     prefs_str = (
         json.dumps(prefs) if prefs else "No preferences set — assume versatile moderate traveler."
@@ -176,11 +179,33 @@ async def _synthesize_profile(
             + "\n".join(summaries)
         )
 
+    feedback_str = ""
+    if feedback_hits:
+        rejected = [f for f in feedback_hits if f.get("decision") == "rejected"]
+        accepted = [f for f in feedback_hits if f.get("decision") == "approved"]
+        lines: list[str] = []
+        if rejected:
+            lines.append(
+                "Previously REJECTED (avoid similar suggestions): "
+                + "; ".join(f["summary"][:70] for f in rejected[:4])
+            )
+        if accepted:
+            lines.append(
+                "Previously ACCEPTED (user welcomed these): "
+                + "; ".join(f["summary"][:70] for f in accepted[:4])
+            )
+        if lines:
+            feedback_str = (
+                "\nUser approval history (respect rejections, reinforce acceptances):\n"
+                + "\n".join(lines)
+            )
+
     user_message = (
         f"Trip context: {trip_context}\n"
         f"User preferences: {prefs_str}"
         f"{profiles_str}"
         f"{past_trips_str}"
+        f"{feedback_str}"
     )
 
     try:
@@ -246,4 +271,29 @@ async def _search_past_trips(
         return hits
     except Exception as exc:
         logger.warning("travel_style_embedding_search_failed", user_id=user_id, error=str(exc))
+        return []
+
+
+async def _search_feedback(
+    user_id: str,
+    prefs: dict,  # type: ignore[type-arg]
+    trip_context: str,
+) -> list[dict]:  # type: ignore[type-arg]
+    """
+    Embed the current trip context and search Qdrant user_feedback for semantically similar
+    past approve/reject decisions from this user.
+    Degrades gracefully to [] when Qdrant is unavailable or no feedback exists yet.
+    """
+    try:
+        prefs_str = preference_text(prefs) if prefs else "unspecified preferences"
+        query = f"{trip_context} {prefs_str}"
+        vector = embed_text(query)
+        client = get_qdrant_client()
+        try:
+            hits = await search_feedback(client, vector, user_id, limit=8)
+        finally:
+            await client.close()
+        return hits
+    except Exception as exc:
+        logger.warning("travel_style_feedback_search_failed", user_id=user_id, error=str(exc))
         return []

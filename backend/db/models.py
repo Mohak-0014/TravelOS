@@ -279,6 +279,34 @@ class WeatherSnapshot(Base):
     trip: Mapped["Trip"] = relationship(back_populates="weather_snapshots")
 
 
+class UserFeedback(Base):
+    """Records every approve/reject decision for learning the user's preferences over time."""
+
+    __tablename__ = "user_feedback"
+    __table_args__ = (
+        Index("idx_user_feedback_user_id", "user_id"),
+        Index("idx_user_feedback_created_at", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    trip_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("trips.id", ondelete="CASCADE"), nullable=False
+    )
+    approval_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("approvals.id", ondelete="CASCADE"), nullable=False
+    )
+    change_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    decision: Mapped[str] = mapped_column(String(16), nullable=False)  # approved | rejected
+    context_tags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class EventLog(Base):
     __tablename__ = "event_logs"
     __table_args__ = (

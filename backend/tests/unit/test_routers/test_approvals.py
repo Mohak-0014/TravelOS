@@ -1,9 +1,49 @@
 """Unit tests for the approvals router."""
+
 from __future__ import annotations
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.api.routers.approvals import _extract_context_tags
+
+# ── _extract_context_tags ─────────────────────────────────────────────────────
+
+
+def test_extract_tags_budget_swap() -> None:
+    payload = {"current": {"title": "Museum Island", "id": "abc"}, "replacement": {"title": "Park"}}
+    tags = _extract_context_tags("budget_swap", payload)
+    assert "budget_swap" in tags
+    assert "Museum Island" in tags
+
+
+def test_extract_tags_event_add() -> None:
+    payload = {"event_name": "Jazz Festival", "category": "Music", "url": "http://..."}
+    tags = _extract_context_tags("event_add", payload)
+    assert "event_add" in tags
+    assert "Jazz Festival" in tags
+    assert "Music" in tags
+
+
+def test_extract_tags_concierge_add() -> None:
+    payload = {"title": "Boat Tour", "day": 2, "description": "Nice boat ride"}
+    tags = _extract_context_tags("concierge_add", payload)
+    assert "concierge_add" in tags
+    assert "Boat Tour" in tags
+
+
+def test_extract_tags_no_duplicates() -> None:
+    # change_type also appears as a 'category' in payload — should be deduplicated
+    payload = {"category": "budget_swap"}
+    tags = _extract_context_tags("budget_swap", payload)
+    assert tags.count("budget_swap") == 1
+
+
+def test_extract_tags_empty_payload() -> None:
+    tags = _extract_context_tags("budget_exceed", {})
+    assert tags == ["budget_exceed"]
+
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -13,9 +53,7 @@ async def _auth(client: AsyncClient, email: str = "approvals@test.com") -> str:
         "/api/v1/auth/register",
         json={"email": email, "password": "Pass1234!", "full_name": "Approver"},
     )
-    resp = await client.post(
-        "/api/v1/auth/login", json={"email": email, "password": "Pass1234!"}
-    )
+    resp = await client.post("/api/v1/auth/login", json={"email": email, "password": "Pass1234!"})
     return resp.json()["access_token"]
 
 

@@ -5,11 +5,27 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.dependencies import get_current_active_user
+from backend.core.logging import get_logger
 from backend.db.base import get_db
-from backend.db.models import Approval, ItineraryItem, Trip, User
+from backend.db.models import Approval, ItineraryItem, Trip, User, UserFeedback
 from backend.db.schemas import ApprovalCreate, ApprovalDecision, ApprovalOut
 
+logger = get_logger(__name__)
+
 router = APIRouter(tags=["approvals"])
+
+
+def _extract_context_tags(change_type: str, payload: dict) -> list[str]:  # type: ignore[type-arg]
+    """Pull semantic labels from an approval payload for feedback embedding."""
+    tags: list[str] = [change_type]
+    current = payload.get("current")
+    if isinstance(current, dict) and current.get("title"):
+        tags.append(current["title"])
+    for key in ("title", "event_name", "category"):
+        val = payload.get(key)
+        if val and isinstance(val, str):
+            tags.append(val)
+    return [t for t in dict.fromkeys(tags) if t]  # deduplicate, preserve order
 
 
 def _assert_trip_owned(trip: Trip | None, user: User) -> Trip:
@@ -147,7 +163,11 @@ async def resolve_approval(
     approval.resolved_at = datetime.now(UTC)
 
     # Apply the item change when approved
-    if body.decision == "approved" and approval.change_type in ("user_replace", "concierge_swap"):
+    if body.decision == "approved" and approval.change_type in (
+        "user_replace",
+        "concierge_swap",
+        "budget_swap",
+    ):
         item_id = approval.payload.get("item_id")
         if item_id:
             item_result = await db.execute(select(ItineraryItem).where(ItineraryItem.id == item_id))
@@ -158,6 +178,33 @@ async def resolve_approval(
                 desc = replacement.get("description")
                 if desc:
                     item.description = desc
+
+    elif body.decision == "approved" and approval.change_type == "concierge_add":
+        payload = approval.payload
+        day_number = int(payload.get("day", 1))
+
+        existing = await db.execute(
+            select(ItineraryItem).where(
+                ItineraryItem.trip_id == approval.trip_id,
+                ItineraryItem.day_number == day_number,
+            )
+        )
+        day_items = existing.scalars().all()
+        next_sort = max((i.sort_order for i in day_items), default=-1) + 1
+        item_date = day_items[0].item_date if day_items else None
+
+        db.add(
+            ItineraryItem(
+                trip_id=approval.trip_id,
+                day_number=day_number,
+                item_date=item_date,
+                item_type="activity",
+                title=payload.get("title", "New Activity"),
+                description=payload.get("description") or None,
+                is_outdoor=False,
+                sort_order=next_sort,
+            )
+        )
 
     elif body.decision == "approved" and approval.change_type == "event_add":
         payload = approval.payload
@@ -229,5 +276,28 @@ async def resolve_approval(
 
     await db.commit()
     await db.refresh(approval)
+
+    # Record feedback for the learning loop
+    try:
+        context_tags = _extract_context_tags(approval.change_type, approval.payload or {})
+        feedback = UserFeedback(
+            user_id=str(current_user.id),
+            trip_id=str(approval.trip_id),
+            approval_id=str(approval.id),
+            change_type=approval.change_type,
+            decision=body.decision,
+            context_tags=context_tags,
+            summary=approval.summary or "",
+        )
+        db.add(feedback)
+        await db.commit()
+        await db.refresh(feedback)
+
+        # Embed the feedback vector in Celery (CPU-heavy — never in request path)
+        from backend.workflows.celery_tasks import embed_feedback_async  # noqa: PLC0415
+
+        embed_feedback_async.delay(str(feedback.id))
+    except Exception as exc:
+        logger.warning("feedback_write_failed", approval_id=approval_id, error=str(exc))
 
     return {"id": approval.id, "status": approval.status}

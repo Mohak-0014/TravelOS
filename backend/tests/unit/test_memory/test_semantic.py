@@ -3,12 +3,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from backend.memory.semantic import (
+    COLLECTION_FEEDBACK,
     COLLECTION_PREFERENCES,
     COLLECTION_TRIPS,
     _point_id,
     ensure_collections,
+    search_feedback,
     search_preferences,
     search_trip_memories,
+    upsert_feedback,
     upsert_preferences,
     upsert_trip_memory,
 )
@@ -71,10 +74,11 @@ async def test_ensure_collections_creates_when_missing() -> None:
 
     await ensure_collections(client)
 
-    assert client.create_collection.await_count == 2
+    assert client.create_collection.await_count == 3
     created_names = {c.kwargs["collection_name"] for c in client.create_collection.call_args_list}
     assert COLLECTION_PREFERENCES in created_names
     assert COLLECTION_TRIPS in created_names
+    assert COLLECTION_FEEDBACK in created_names
 
 
 @pytest.mark.asyncio
@@ -236,5 +240,122 @@ async def test_search_preferences_degrades_on_error() -> None:
     client.search = AsyncMock(side_effect=Exception("timeout"))
 
     hits = await search_preferences(client, _fake_vector(), "user-1")
+
+    assert hits == []
+
+
+# ── upsert_feedback ───────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_upsert_feedback_writes_to_feedback_collection() -> None:
+    client = _mock_client()
+    payload = {
+        "decision": "rejected",
+        "change_type": "budget_swap",
+        "summary": "Replace Museum Island",
+        "context_tags": ["budget_swap", "Museum Island"],
+    }
+
+    await upsert_feedback(client, "appr-1", "user-1", _fake_vector(), payload)
+
+    client.upsert.assert_awaited_once()
+    call_kwargs = client.upsert.call_args.kwargs
+    assert call_kwargs["collection_name"] == COLLECTION_FEEDBACK
+    point = call_kwargs["points"][0]
+    assert point.payload["user_id"] == "user-1"
+    assert point.payload["decision"] == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_upsert_feedback_idempotent_same_approval_id() -> None:
+    client = _mock_client()
+
+    await upsert_feedback(client, "appr-1", "user-1", _fake_vector(), {})
+    await upsert_feedback(client, "appr-1", "user-1", _fake_vector(), {})
+
+    ids = [c.kwargs["points"][0].id for c in client.upsert.call_args_list]
+    assert ids[0] == ids[1]
+
+
+@pytest.mark.asyncio
+async def test_upsert_feedback_different_approvals_different_ids() -> None:
+    client = _mock_client()
+
+    await upsert_feedback(client, "appr-1", "user-1", _fake_vector(), {})
+    await upsert_feedback(client, "appr-2", "user-1", _fake_vector(), {})
+
+    ids = [c.kwargs["points"][0].id for c in client.upsert.call_args_list]
+    assert ids[0] != ids[1]
+
+
+@pytest.mark.asyncio
+async def test_upsert_feedback_raises_on_qdrant_error() -> None:
+    client = _mock_client()
+    client.upsert = AsyncMock(side_effect=Exception("connection refused"))
+
+    with pytest.raises(Exception, match="connection refused"):
+        await upsert_feedback(client, "appr-1", "user-1", _fake_vector(), {})
+
+
+# ── search_feedback ───────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_search_feedback_returns_hits_with_score() -> None:
+    client = _mock_client()
+    client.search = AsyncMock(
+        return_value=[
+            _scored_point(
+                {
+                    "user_id": "u1",
+                    "decision": "rejected",
+                    "change_type": "budget_swap",
+                    "summary": "Replace Museum Island",
+                    "context_tags": ["budget_swap"],
+                },
+                0.91,
+            ),
+            _scored_point(
+                {
+                    "user_id": "u1",
+                    "decision": "approved",
+                    "change_type": "event_add",
+                    "summary": "Jazz festival on Day 3",
+                    "context_tags": ["event_add", "Music"],
+                },
+                0.78,
+            ),
+        ]
+    )
+
+    hits = await search_feedback(client, _fake_vector(), "u1", limit=5)
+
+    assert len(hits) == 2
+    assert hits[0]["decision"] == "rejected"
+    assert hits[0]["score"] == 0.91
+    assert hits[1]["decision"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_search_feedback_filters_by_user_id() -> None:
+    client = _mock_client()
+    client.search = AsyncMock(return_value=[])
+
+    await search_feedback(client, _fake_vector(), "user-99", limit=4)
+
+    call_kwargs = client.search.call_args.kwargs
+    assert call_kwargs["collection_name"] == COLLECTION_FEEDBACK
+    assert call_kwargs["limit"] == 4
+    filt = call_kwargs["query_filter"]
+    assert filt.must[0].match.value == "user-99"
+
+
+@pytest.mark.asyncio
+async def test_search_feedback_degrades_on_error() -> None:
+    client = _mock_client()
+    client.search = AsyncMock(side_effect=Exception("qdrant down"))
+
+    hits = await search_feedback(client, _fake_vector(), "user-1")
 
     assert hits == []

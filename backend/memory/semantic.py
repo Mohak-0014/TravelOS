@@ -21,6 +21,7 @@ logger = get_logger(__name__)
 
 COLLECTION_PREFERENCES = "user_preferences"
 COLLECTION_TRIPS = "trip_memories"
+COLLECTION_FEEDBACK = "user_feedback"
 _VECTOR_SIZE = settings.EMBEDDING_DIM  # 384
 
 
@@ -37,8 +38,8 @@ def _point_id(namespace: str, name: str) -> str:
 
 
 async def ensure_collections(client: AsyncQdrantClient) -> None:
-    """Create the two collections if they do not already exist."""
-    for name in (COLLECTION_PREFERENCES, COLLECTION_TRIPS):
+    """Create the three collections if they do not already exist."""
+    for name in (COLLECTION_PREFERENCES, COLLECTION_TRIPS, COLLECTION_FEEDBACK):
         try:
             exists = await client.collection_exists(name)
             if not exists:
@@ -168,4 +169,63 @@ async def search_preferences(
         return hits
     except Exception as exc:
         logger.warning("qdrant_pref_search_failed", user_id=user_id, error=str(exc))
+        return []
+
+
+async def upsert_feedback(
+    client: AsyncQdrantClient,
+    approval_id: str,
+    user_id: str,
+    vector: list[float],
+    payload: dict,  # type: ignore[type-arg]
+) -> None:
+    """Upsert a feedback event vector. Idempotent — same approval_id overwrites."""
+    point_id = _point_id("feedback", approval_id)
+    try:
+        await client.upsert(
+            collection_name=COLLECTION_FEEDBACK,
+            points=[
+                PointStruct(
+                    id=point_id,
+                    vector=vector,
+                    payload={"user_id": user_id, **payload},
+                )
+            ],
+        )
+        logger.info("qdrant_feedback_upserted", approval_id=approval_id, user_id=user_id)
+    except Exception as exc:
+        logger.error("qdrant_upsert_feedback_failed", approval_id=approval_id, error=str(exc))
+        raise
+
+
+async def search_feedback(
+    client: AsyncQdrantClient,
+    vector: list[float],
+    user_id: str,
+    limit: int = 10,
+) -> list[dict]:  # type: ignore[type-arg]
+    """
+    Search user_feedback for semantically similar past decisions belonging to user_id.
+    Returns payload dicts sorted by relevance with an added 'score' key.
+    Degrades gracefully to [] on any error.
+    """
+    try:
+        results = await client.search(
+            collection_name=COLLECTION_FEEDBACK,
+            query_vector=vector,
+            query_filter=Filter(
+                must=[FieldCondition(key="user_id", match=MatchValue(value=user_id))]
+            ),
+            limit=limit,
+            with_payload=True,
+        )
+        hits = []
+        for r in results:
+            payload = dict(r.payload or {})
+            payload["score"] = round(r.score, 4)
+            hits.append(payload)
+        logger.info("qdrant_feedback_search_ok", user_id=user_id, hits=len(hits))
+        return hits
+    except Exception as exc:
+        logger.warning("qdrant_feedback_search_failed", user_id=user_id, error=str(exc))
         return []

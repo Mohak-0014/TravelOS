@@ -11,14 +11,15 @@ from sqlalchemy.exc import SQLAlchemyError
 from backend.core.config import settings
 from backend.core.logging import get_logger
 from backend.db.base import AsyncSessionLocal
-from backend.db.models import Approval, ItineraryItem, Preference, Trip
+from backend.db.models import Approval, ItineraryItem, Preference, Trip, UserFeedback
 from backend.graphs.replan_graph import build_replan_graph
 from backend.graphs.state import TravelOSState
 from backend.graphs.trip_graph import build_trip_graph
-from backend.memory.embeddings import embed_text, preference_text, trip_memory_text
+from backend.memory.embeddings import embed_text, feedback_text, preference_text, trip_memory_text
 from backend.memory.semantic import (
     ensure_collections,
     get_qdrant_client,
+    upsert_feedback,
     upsert_preferences,
     upsert_trip_memory,
 )
@@ -417,3 +418,62 @@ async def _run_embed_trip(trip_id: str) -> dict:  # type: ignore[return]
 
     logger.info("embed_trip_complete", trip_id=trip_id)
     return {"status": "ok", "trip_id": trip_id}
+
+
+@celery_app.task(name="backend.workflows.celery_tasks.embed_feedback_async")
+def embed_feedback_async(feedback_id: str) -> dict:  # type: ignore[no-untyped-def]
+    """
+    Embed a UserFeedback record and upsert into the Qdrant user_feedback collection.
+    Triggered after every approve/reject decision in the approvals router.
+    """
+    from backend.db.base import engine
+
+    engine.sync_engine.dispose()
+    logger.info("embed_feedback_async_received", feedback_id=feedback_id)
+    try:
+        return asyncio.run(_run_embed_feedback(feedback_id))
+    except Exception as exc:
+        logger.error("embed_feedback_async_failed", feedback_id=feedback_id, error=str(exc))
+        return {"status": "error", "feedback_id": feedback_id, "error": str(exc)}
+
+
+async def _run_embed_feedback(feedback_id: str) -> dict:  # type: ignore[return]
+    """Load UserFeedback from DB, embed, and upsert into Qdrant."""
+    async with AsyncSessionLocal() as session:
+        fb = await session.get(UserFeedback, feedback_id)
+        if fb is None:
+            logger.warning("embed_feedback_not_found", feedback_id=feedback_id)
+            return {"status": "skipped", "reason": "not found", "feedback_id": feedback_id}
+
+        fb_dict = {
+            "decision": fb.decision,
+            "change_type": fb.change_type,
+            "context_tags": list(fb.context_tags or []),
+            "summary": fb.summary,
+        }
+
+    text = feedback_text(
+        decision=fb_dict["decision"],
+        change_type=fb_dict["change_type"],
+        context_tags=fb_dict["context_tags"],
+        summary=fb_dict["summary"],
+    )
+    vector = embed_text(text)
+
+    payload = {
+        "feedback_id": feedback_id,
+        "decision": fb_dict["decision"],
+        "change_type": fb_dict["change_type"],
+        "context_tags": fb_dict["context_tags"],
+        "summary": fb_dict["summary"],
+    }
+
+    client = get_qdrant_client()
+    try:
+        await ensure_collections(client)
+        await upsert_feedback(client, str(fb.approval_id), str(fb.user_id), vector, payload)
+    finally:
+        await client.close()
+
+    logger.info("embed_feedback_complete", feedback_id=feedback_id)
+    return {"status": "ok", "feedback_id": feedback_id}

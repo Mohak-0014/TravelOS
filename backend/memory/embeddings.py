@@ -62,6 +62,17 @@ def preference_text(prefs: dict) -> str:  # type: ignore[type-arg]
     return "Traveler profile — " + "; ".join(parts) if parts else "Traveler profile — unspecified"
 
 
+def feedback_text(
+    decision: str,
+    change_type: str,
+    context_tags: list[str],
+    summary: str,
+) -> str:
+    """Build a natural-language summary of an approval decision for embedding."""
+    tag_str = " ".join(context_tags) if context_tags else change_type
+    return f"User {decision} {change_type}: {summary}. Tags: {tag_str}"
+
+
 def trip_memory_text(
     city: str,
     country: str | None,
