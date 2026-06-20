@@ -1,60 +1,74 @@
-# TravelOS — Session Update (2026-06-19)
+# TravelOS — Session Update (2026-06-20)
+
+## Headline
+
+- **Full UI redesign**: dark "galaxy/space" theme → light **"Golden Hour"** travel theme.
+- **Trip sharing shipped** (public share links, calendar export, hotel selection, cover photos) — committed `bdf6f7f`.
+- **Two grounding/quality bug fixes**: packing-list truncation recovery, and English place names in itineraries.
+
+---
 
 ## What was done this session
 
-### Commits (newest first)
+### 1. "Golden Hour" UI redesign ✅ (uncommitted)
 
-| Commit | Summary |
-|--------|---------|
-| `1201158` | `feat(packing-list)`: Packing List agent (task #17) + Agent Activity Drawer (task #18) |
-| `4f511f7` | `fix(starfield)`: WebGL resilience, login hydration mismatch, mypy type fixes |
+Replaced the dark galaxy aesthetic with a warm, light, travel-inspired system (sunrise sky, sand/cream surfaces, sunset coral, golden amber, ocean teal).
 
----
+**Foundation (the keystone — re-themes the app via tokens)**
+- `frontend/tailwind.config.ts`: `space-*` → cream/sand surface ramp; `electric` → sky azure; `coral` → sunset (primary); `gold` → amber; `emerald` → teal-green; **inverted the `slate` scale** so existing `text-slate-100` (was light-on-dark) becomes ink-on-light automatically; warm `purple` remap; travel animations (`cloud-drift`, `sun-pulse`, `sway`).
+- `frontend/app/globals.css`: light glass-cards, coral buttons, light inputs/badges, warm `gradient-text`, `route-dash` flight-path utility, paper-grain texture.
+- `frontend/app/layout.tsx`: fonts swapped Geist → **Fraunces** (display serif) + **Plus Jakarta Sans** (body) via `next/font/google`.
 
-### Detailed work
+**Travel motifs (replace the 3D galaxy)**
+- New `frontend/components/travel/SkyScene.tsx`: dawn sky gradient, glowing sun, drifting clouds, a plane looping a dotted arc, paper-cut mountain + ocean horizon.
+- Deleted `components/3d/StarField.tsx`, `StarFieldWebGL.tsx`, `TravelGlobe.tsx`.
 
-#### 1. Packing List Agent — task #17 ✅
+**Per-page redesign** (all surfaces converted, ~152 `white/X` overlays → ink, hero overlays fixed for white-text legibility)
+- Landing: SkyScene hero + scroll parallax + **scroll-linked plane** flying across the 8-agent pipeline.
+- Login / Onboarding: SkyScene backgrounds; selected-state contrast fixed.
+- NavBar: frosted-cream bar, plane logo, coral active states.
+- Trips list: sunny destination banners + hand-built **SVG "Your World" globe** with coral pins.
+- Trip detail, Profile, Wizard, Share, TripMap (coral teardrop marker).
 
-**Backend** (`backend/agents/packing_list.py` — new)
-- Haiku LLM generates a categorized packing checklist from: trip destination/dates, planned activities from itinerary, weather risk flags, trip duration, number of travelers
-- Season-aware using N/S hemisphere logic (`_season()`)
-- Strips markdown fences from LLM output safely
-- Writes result to `Trip.packing_list` JSON column
-- Added `packing_state: dict` to `TravelOSState`
-- Node inserted in graph: `events_agent → packing_list → validation`
+**Verification**: `npm run type-check` clean, `npm run lint` clean, Playwright visual QA on all 9 surfaces + mobile, no console errors.
 
-**Database**
-- New `packing_list` JSON column on `trips` table
-- Alembic migration: `b1df5cfd3ec3_add_packing_list_to_trips.py` — applied
+### 2. Trip sharing + calendar + hotels + cover photos ✅ (commit `bdf6f7f`)
 
-**Frontend** (`frontend/app/trips/[tripId]/page.tsx`)
-- `PackingListPanel` component: collapsible checklist with AnimatePresence expand/collapse, per-item checkbox toggle, progress bar, category icons (Clothing, Electronics, Documents, etc.)
-- Left nav "Packing" jump link when list is available
-- `packing_list` field added to `TripOut` TypeScript interface in `lib/api.ts`
-- Agent pipeline steps updated to include "Packing List"
+- Public share router `GET /api/v1/share/{token}`; `POST /api/v1/trips/{id}/share` mints a 30-day token.
+- `share_token` + `cover_image_url` columns on `trips` (migrations `545e5bb6b304`, `f3f5215ec0b8`).
+- `ShareTripOut` schema; read-only `frontend/app/share/[token]/page.tsx`.
+- Calendar export `GET .../calendar.ics`; hotel selection `POST .../hotels/{id}/select`.
+- Unsplash destination cover photos (gradient fallback); `UNSPLASH_ACCESS_KEY` in `.env.example`.
+- EditTripModal + delete confirmation wired into trip detail.
+- **Fix**: approval resolve call corrected to `POST /api/v1/approvals/{id}` (was a non-existent `/trips/{id}/approvals/{id}/resolve`) — Approve/Not-interested buttons now work.
+- ⚠️ Committed locally but **not pushed** (direct push to `master` blocked by safety classifier; pushing manually).
 
-**Tests**: 11 new unit tests in `test_packing_list.py`; **528 total unit tests passing**
+### 3. Packing-list truncation bug fix ✅ (uncommitted)
 
----
+**Symptom**: Tokyo trip showed no packing section; Delhi did.
+**Root cause**: the small Groq model over-generated and the JSON response was **truncated mid-string** → `json.loads` "Unterminated string" → the agent caught it and silently skipped packing (`packing_list = NULL`).
+**Fix** (`backend/agents/packing_list.py`, `backend/agents/_llm.py`):
+- `build_llm(..., max_tokens=…)` added; packing capped at 2048 so the model can't run away.
+- Robust fence/preamble stripping (`_strip_fences`).
+- JSON **salvage** (`_repair_truncated_json`, `_safe_parse`): recovers a partial list from a truncated response instead of discarding everything.
+- One stricter **retry** on an unusable response.
+- 7 new unit tests (now **18** in `test_packing_list.py`, all pass).
+- Backfilled Tokyo's packing list (6 categories, 44 items).
 
-#### 2. Agent Activity Log Drawer — task #18 ✅
+### 4. English place names in itineraries ✅ (uncommitted)
 
-**Frontend** (`frontend/app/trips/[tripId]/page.tsx`)
-- Upgraded `AgentActivityPanel` from a 12-line sidebar widget to a full-height right-edge slide-in drawer
-- Spring-animated (`type: "spring"`) with backdrop blur overlay
-- Groups consecutive messages by agent — no duplicate headers
-- Each agent gets a color-coded emoji badge + display name (9 agents mapped in `AGENT_DISPLAY`)
-- Sidebar card now shows last-3-events preview and "View all X events" link
-- Timeline connector lines between agent groups
+**Symptom**: Tokyo itinerary titles were in Japanese (e.g. "アーティゾン美術館").
+**Root cause**: OSM lookups preferred the local-language `name` tag over `name:en`.
+**Fix** (`backend/tools/places.py`, `backend/tools/restaurants.py`):
+- Prefer `name:en` → `int_name` → `name` (grounded — real OSM English tags, not fabricated).
+- Added `Accept-Language: en` to the Foursquare request (best-effort).
+- Lint/mypy clean; 12 tool tests pass.
+- All **future** trips render English. **Tokyo regenerated** (cleared place caches + re-ran `generate_itinerary_async`): every **attraction** now resolves to its OSM `name:en` — Japanese titles dropped **20 → 10**. The remaining 10 are Foursquare **restaurant** names, which the API returns in local script (often `English (日本語)`); left as-is for now (acceptable — names are still mostly readable).
 
----
+### 5. Infra / Celery debugging ✅
 
-#### 3. Stability fixes ✅ (commit `4f511f7`)
-
-- **StarField WebGL resilience**: Split into `StarField.tsx` (detector) + `StarFieldWebGL.tsx` (Three.js); WebGL module is never imported in headless/SSR environments — fixes Playwright E2E crash
-- **Login hydration**: Time-based tagline moved to `useState` lazy initializer + `suppressHydrationWarning`; eliminates server/client mismatch warning
-- **mypy fixes**: `celery_tasks.py` feedback args cast to `str`/`list[str]`; `approvals.py` return type `dict → dict[str, object]`
-- **ruff exclusions**: e2e/verify/seed scripts excluded in `pyproject.toml`
+- **Port-8000 ghost socket**: a Dockerized backend container + a WinNAT-orphaned socket were shadowing local uvicorn and serving stale routes (15 paths instead of 19/32). Resolved by stopping the docker backend, restarting WinNAT, and running uvicorn via the **venv** Python explicitly (`backend\.venv\Scripts\python -m uvicorn …`, not the system `python`).
+- **Celery worker** had been killed by `taskkill /F /IM python.exe`; restarted in the background (`--pool=solo`). Purged a **duplicate** Delhi `generate_itinerary_async` task from the Redis queue.
 
 ---
 
@@ -62,68 +76,53 @@
 
 | Layer | Status |
 |-------|--------|
-| Backend agents | Travel Style, Itinerary Planner, Hotel, Budget Optimizer, Events, Packing List, Concierge, Weather — all wired in graph |
-| Frontend pages | Landing, Login, Trips list, Trip detail, Profile/Travel DNA, Trip creation wizard, Trip map — all dark-space design |
-| Tests | **528 unit tests, all passing** |
-| DB migrations | Up to date (`b1df5cfd3ec3`) |
-| Design system | `glass-card`, space-900 background, electric/gold/coral/emerald accents, Framer Motion animations |
-| E2E | Python Playwright tests in `e2e_m2_py.py` — 6 tests pass end-to-end |
+| Design system | **Golden Hour (light)** — cream surfaces, sky/coral/amber/teal accents, Fraunces + Plus Jakarta Sans, SkyScene travel hero |
+| Backend agents | Travel Style, Itinerary Planner, Hotel, Budget Optimizer, Events, Packing List, Concierge, Weather (9 nodes in graph) |
+| Frontend pages | Landing, Login, Onboarding, Trips list, Trip detail, Profile, Wizard, Share, TripMap — all redesigned |
+| Tests | ~535 unit tests passing (packing suite expanded 11 → 18) |
+| DB migrations | `share_token` + `cover_image_url` applied (`545e5bb6b304`, `f3f5215ec0b8`) |
+| Git | `bdf6f7f` committed (sharing feature). Redesign + packing/English fixes **uncommitted** |
 
 ---
 
-## How to start the app
+## How to start the app (Windows)
 
 ```powershell
-# 1. Infra (if not running)
+# 1. Infra only (never start the docker backend/celery services locally — they shadow local)
 docker compose -f infra/docker-compose.yml up -d postgres redis qdrant
 
-# 2. Backend (from repo root)
-backend/.venv/Scripts/uvicorn backend.api.main:app --reload --port 8000
+# 2. Backend — use the VENV python explicitly (system `python` resolves to a different interpreter)
+backend\.venv\Scripts\python -m uvicorn backend.api.main:app --reload --port 8000
 
 # 3. Celery worker (separate terminal, from repo root)
-backend/.venv/Scripts/celery -A backend.workflows.celery_tasks worker --loglevel=info --pool=solo
+backend\.venv\Scripts\celery -A backend.workflows.celery_tasks worker --loglevel=info --pool=solo
 
 # 4. Frontend
-cd frontend && npm run dev  # http://localhost:3000
+cd frontend; npm run dev   # http://localhost:3000
 ```
 
 ---
 
-## Next session — task priority order
+## Pending / next session
 
-| # | Task | Effort | Impact |
-|---|------|--------|--------|
-| **19** | **Share Trip link** | Medium | High — social/sharing feature; `POST /trips/{id}/share` → signed token, public `/trips/{id}/s/{token}` page | 
-| **20** | **Onboarding wizard** | Medium | High — new users have no Travel DNA data; post-register wizard seeds preferences so agents personalize from day 1 |
-| **21** | **Real-time status polling** | Small | Medium — `refetchInterval: 3000` when `status === "generating"` so page updates live without refresh |
-| **22** | **Quick-wins: #2, #7, #8** | Small | Medium — Qdrant init on startup (#2), weather agent uses travel style (#7), validation flags under-count days (#8) |
-| **23** | **Mobile responsive pass** | Medium | High — current layout breaks below 768px (sidebar overlaps, wizard inputs too small); needs responsive audit |
-| **24** | **Concierge: ProposeReplaceActivity tool** | Medium | High — extends the existing `ProposeItineraryChange` to full slot replacement with alternatives |
-
-### Task 19 detail — Share Trip
-- **Backend**: `POST /api/v1/trips/{id}/share` → create `share_token` (UUID, 30-day TTL) stored on `trips` table; `GET /api/v1/share/{token}` → public read-only trip JSON (no auth)
-- **Frontend**: Share button on trip detail header; `app/share/[token]/page.tsx` public page showing destination hero, itinerary days, packing list (no Concierge chat, no edits)
-- **Files**: `backend/api/routers/trips.py`, `backend/db/models.py` (add `share_token`, `share_expires_at`), Alembic migration, `frontend/app/share/[token]/page.tsx`
-
-### Task 20 detail — Onboarding wizard
-- Post-register redirect to `/onboarding` (currently skips to `/trips`)
-- 4 steps: Pace (relaxed/moderate/packed), Travel style (budget/mid/luxury), Interests (multi-select: culture/adventure/food/nature/nightlife), Food prefs
-- Writes to `PUT /api/v1/auth/preferences` — endpoint already exists
-- File: `frontend/app/onboarding/page.tsx` (new), `frontend/app/login/page.tsx` (redirect after register)
-
-### Task 21 detail — Real-time polling
-- In `TripDetailPage`, add `refetchInterval: trip?.status === "generating" ? 3000 : false` to both `useQuery` calls (trip data + itinerary)
-- Stop polling when status changes to `planned`, `failed`, or `awaiting_approval`
-- File: `frontend/app/trips/[tripId]/page.tsx` lines ~720-740
+| Priority | Item |
+|----------|------|
+| **1** | **Push** `bdf6f7f` to `origin/master`, then **commit** the Golden Hour redesign and the packing/English-names fixes |
+| **2** | **Agent prompt-quality pass** — tune the LLM prompts for better results (TASKS.md #23–29). Biggest lever: the **Itinerary Planner** stacks obscure same-type POIs (Tokyo regen produced ~5 niche museums back-to-back) instead of iconic, varied sights. |
+| 3 | Reset the one older trip stuck in `generating` status back to `planning` |
+| 4 | Pre-existing mypy debt (59 errors): `TravelOSState` gained `events_state`/`packing_state` keys that `celery_tasks.py` + several graph tests don't supply |
+| 5 | Carry-over backlog: validation under-count flag (#8), Concierge ProposeItineraryChange (#6), walking-distance clustering (#4) |
 
 ---
 
 ## Known issues / gotchas
 
-- **Groq TPD limit**: 100k tokens/day. Exhausts quickly in heavy test sessions. Space out LLM-heavy operations.
-- **Qdrant cold start** (task #2, unfixed): `trip_memories` and `user_preferences` don't auto-create — first Travel Style call on fresh install logs warnings and degrades to [].
-- **Port 5433**: Docker postgres on 5433 (not 5432 — Windows native postgres owns 5432).
-- **Celery from repo root**: Run `backend/.venv/Scripts/celery` from `/TravelOS`, not from `backend/`.
-- **Uvicorn stale pool**: After schema migrations, kill and restart uvicorn if 500s appear on working endpoints.
-- **react-leaflet v4**: Do not upgrade to v5 (requires React 19, project uses React 18).
-- **packing_list on existing trips**: Trips planned before this session have `packing_list = NULL`. Packing List panel only renders when non-null — old trips silently skip it. Re-generate trip to get a list.
+- **Use the venv Python for uvicorn/celery** — the bare `python` on PATH is a *different* interpreter and silently serves stale/incompatible code.
+- **Docker backend shadows local**: never start the `backend` / `celery_worker` / `celery_beat` docker services locally; only `postgres redis qdrant`. A killed docker backend can leave a WinNAT ghost socket on port 8000 — `net stop winnat && net start winnat` (admin) clears it.
+- **`taskkill /F /IM python.exe` kills the Celery worker too** — restart it afterward or the queue won't drain (and nothing auto-starts it).
+- **Groq is the permanent LLM** (llama-3.3-70b "large", llama-3.1-8b "small"). Do not switch to Claude/Anthropic. TPD limit ~100k tokens/day.
+- **Place-name language**: OSM tools now prefer `name:en`; Foursquare names are as-listed (mostly English, occasionally local). Cached place data (`places:*`/`restaurants:*`, 3–6h TTL) keeps old names until cleared.
+- **Itinerary selection quality**: the planner draws from raw OSM tourism POIs and currently favors proximity/quantity over prominence — it can stack many niche same-type venues (e.g. several small museums in a row) instead of iconic, varied sights. Prompt-quality pass queued (TASKS.md #23).
+- **Port 5433**: Docker postgres on 5433 (Windows native postgres owns 5432).
+- **react-leaflet v4**: do not upgrade to v5 (needs React 19; project is React 18).
+- **packing_list on old trips**: trips planned before the packing agent have `packing_list = NULL`; the panel only renders when non-null. Re-generate or backfill to populate.
