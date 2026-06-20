@@ -85,6 +85,47 @@ export const api = {
   patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, { body }),
 
   delete: <T>(path: string) => request<T>("DELETE", path),
+
+  createShareLink: (tripId: string) =>
+    request<TripOut>("POST", `/api/v1/trips/${tripId}/share`),
+
+  getSharedTrip: (token: string) =>
+    request<ShareTripOut>("GET", `/api/v1/share/${token}`),
+
+  updateTrip: (tripId: string, body: Partial<TripUpdate>) =>
+    request<TripOut>("PUT", `/api/v1/trips/${tripId}`, { body }),
+
+  deleteTrip: (tripId: string) =>
+    request<void>("DELETE", `/api/v1/trips/${tripId}`),
+
+  selectHotel: (tripId: string, hotelId: string) =>
+    request<HotelCandidateOut[]>("POST", `/api/v1/trips/${tripId}/hotels/${hotelId}/select`),
+
+  /** Fetches the .ics blob with auth and triggers a browser download. */
+  downloadCalendarIcs: async (tripId: string, cityName: string): Promise<void> => {
+    let token: string | null = null;
+    try {
+      const raw = localStorage.getItem("auth-store");
+      if (raw) {
+        const parsed = JSON.parse(raw) as { state?: { token?: string } };
+        token = parsed.state?.token ?? null;
+      }
+    } catch { /* ignore */ }
+
+    const res = await fetch(buildUrl(`/api/v1/trips/${tripId}/calendar.ics`), {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error("Failed to download calendar");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `travelos-${cityName.toLowerCase().replace(/\s+/g, "-")}.ics`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
 };
 
 export { ApiError };
@@ -131,8 +172,36 @@ export interface TripOut {
   budget_currency: string;
   status: string;
   packing_list: { categories: Record<string, string[]>; destination_specific?: string[] } | null;
+  cover_image_url: string | null;
+  share_token: string | null;
+  share_expires_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface TripUpdate {
+  title?: string;
+  destination_city?: string;
+  destination_country?: string | null;
+  start_date?: string;
+  end_date?: string;
+  num_travelers?: number;
+  budget_total?: number | null;
+  budget_currency?: string;
+}
+
+export interface ShareTripOut {
+  id: string;
+  title: string;
+  destination_city: string;
+  destination_country: string | null;
+  start_date: string;
+  end_date: string;
+  num_travelers: number;
+  budget_currency: string;
+  cover_image_url: string | null;
+  packing_list: { categories: Record<string, string[]>; destination_specific?: string[] } | null;
+  itinerary: ItineraryItemOut[];
 }
 
 export interface ApprovalOut {

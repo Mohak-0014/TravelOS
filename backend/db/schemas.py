@@ -75,6 +75,8 @@ class TripCreate(BaseModel):
 
 class TripUpdate(BaseModel):
     title: str | None = None
+    destination_city: str | None = None
+    destination_country: str | None = None
     start_date: date | None = None
     end_date: date | None = None
     num_travelers: int | None = None
@@ -98,8 +100,27 @@ class TripOut(BaseModel):
     budget_currency: str
     status: str
     packing_list: dict[str, Any] | None = None
+    cover_image_url: str | None = None
+    share_token: str | None = None
+    share_expires_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class ShareTripOut(BaseModel):
+    """Read-only public view of a trip — no auth required."""
+
+    id: str
+    title: str
+    destination_city: str
+    destination_country: str | None
+    start_date: date
+    end_date: date
+    num_travelers: int
+    budget_currency: str
+    cover_image_url: str | None = None
+    packing_list: dict[str, Any] | None = None
+    itinerary: list["ItineraryItemOut"] = []
 
 
 # ── Itinerary ────────────────────────────────────────────────────────────────

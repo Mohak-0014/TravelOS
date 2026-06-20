@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     FOURSQUARE_API_KEY: str = ""
     TICKETMASTER_API_KEY: str = ""
     EVENTBRITE_TOKEN: str = ""
+    UNSPLASH_ACCESS_KEY: str = ""
     # Overpass API (OpenStreetMap) — no key required
 
     # Auth

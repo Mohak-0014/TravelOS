@@ -56,23 +56,35 @@ class SearchRestaurants(BaseModel):
     radius_m: int = Field(default=1000, description="Search radius in metres (200–5 000)")
 
 
+class _Alternative(BaseModel):
+    title: str = Field(description="Title of the alternative")
+    description: str = Field(description="Brief description of this option")
+
+
 class ProposeItineraryChange(BaseModel):
     """Propose replacing a specific itinerary item with an alternative. Use this when the
     user explicitly asks to swap, change, or replace an activity, meal, or venue on a specific
     day. This creates an approval request — the user will see a banner and must approve before
     any change is applied. Do NOT call this speculatively; only when the user clearly asks to
-    make a change."""
+    make a change.
+
+    Always provide 2-3 alternatives in the 'alternatives' field (ranked best-first) so the
+    user can pick the one that suits them. The first alternative should be your best pick."""
 
     day: int = Field(description="Day number (1-indexed) of the item to replace")
     item_index: int = Field(
         description="0-indexed position of the item within that day (0 = first item)"
     )
-    replacement_title: str = Field(description="Title of the replacement activity or venue")
+    replacement_title: str = Field(description="Title of your top replacement choice")
     replacement_description: str = Field(
-        description="Brief description of the replacement and why it fits the trip"
+        description="Brief description of the top replacement and why it fits the trip"
     )
     reason: str = Field(
         description="Why this replacement is better (e.g. 'rain forecast', 'user prefers indoor')"
+    )
+    alternatives: list[_Alternative] = Field(
+        default_factory=list,
+        description="2-3 ranked alternatives for the user to choose from (best first)",
     )
 
 
@@ -314,6 +326,21 @@ async def _create_itinerary_change_proposal(
             if reason:
                 summary += f". {reason}"
 
+            # Build alternatives list (primary is always first)
+            raw_alts = args.get("alternatives") or []
+            alternatives: list[dict[str, str]] = []
+            for a in raw_alts:
+                if isinstance(a, dict) and a.get("title"):
+                    alternatives.append(
+                        {"title": str(a["title"]), "description": str(a.get("description", ""))}
+                    )
+            primary = {"title": replacement_title, "description": replacement_description}
+            if not alternatives or alternatives[0].get("title") != replacement_title:
+                alternatives = [primary] + [
+                    a for a in alternatives if a.get("title") != replacement_title
+                ]
+            alternatives = alternatives[:3]
+
             approval = Approval(
                 trip_id=trip_id,
                 proposed_by="concierge",
@@ -322,11 +349,18 @@ async def _create_itinerary_change_proposal(
                 payload={
                     "item_id": str(item.id),
                     "day": day,
-                    "current": {"id": str(item.id), "title": item.title},
+                    "current": {
+                        "id": str(item.id),
+                        "title": item.title,
+                        "item_type": item.item_type,
+                        "start_time": str(item.start_time) if item.start_time else None,
+                        "est_cost": float(item.est_cost) if item.est_cost is not None else None,
+                    },
                     "replacement": {
                         "title": replacement_title,
                         "description": replacement_description,
                     },
+                    "alternatives": alternatives,
                     "reason": reason,
                 },
                 status="pending",
@@ -548,18 +582,32 @@ def _build_system_prompt(
             lines.append(f"Total price: {hotel.price_total} {hotel.price_currency or ''}")
         lines.append("")
 
-    # Itinerary (titles + indices so LLM can reference them)
+    # Itinerary (titles + indices so LLM can reference them for ProposeItineraryChange)
     if items:
-        lines.append("## Itinerary (day: index. type — title)")
+        lines.append("## Itinerary (use day + 0-based index when calling ProposeItineraryChange)")
         by_day: dict[int, list[ItineraryItem]] = {}
         for item in items:
             by_day.setdefault(item.day_number, []).append(item)
         for day, day_items in sorted(by_day.items()):
-            day_lines = [
-                f"  {i}. {it.item_type} — {it.title}" for i, it in enumerate(day_items[:6])
-            ]
-            lines.append(f"Day {day}:")
-            lines.extend(day_lines)
+            date_str = (
+                f" ({day_items[0].item_date.strftime('%a %b %d')})"
+                if day_items[0].item_date
+                else ""
+            )
+            lines.append(f"Day {day}{date_str}:")
+            for i, it in enumerate(day_items[:6]):
+                meta: list[str] = [it.item_type]
+                if it.start_time:
+                    meta.append(str(it.start_time)[:5])
+                if it.est_cost is not None:
+                    meta.append(f"{it.est_cost_currency or ''}{it.est_cost:.0f}")
+                lines.append(f"  {i}. [{', '.join(meta)}] {it.title}")
+        lines += [
+            "",
+            "When calling ProposeItineraryChange, you MUST populate the 'alternatives' field with",
+            "2–3 ranked options (best first). Each alternative needs 'title' and 'description'.",
+            "The first alternative must match replacement_title/replacement_description.",
+        ]
         lines.append("")
 
     # Traveler preferences (from DB)

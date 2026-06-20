@@ -98,6 +98,13 @@ class Trip(Base):
     budget_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="planning")
     packing_list: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    cover_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    share_token: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, unique=True, index=True
+    )
+    share_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     langgraph_thread_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

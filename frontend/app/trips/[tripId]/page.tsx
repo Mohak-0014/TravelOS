@@ -11,12 +11,13 @@ import {
   CheckCircle2, AlertCircle, Loader2, ArrowRight, ChevronRight,
   Send, X, Hotel, Star, Wallet, Activity, Utensils, Bus,
   Sun, CloudRain, Wind, ZapIcon, Luggage, ChevronDown,
+  Share2, Check, Pencil, Trash2, CalendarPlus, CalendarDays, Download,
   type LucideIcon,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type {
   TripOut, ItineraryItemOut, ApprovalOut, ChatResponse, ChatSource,
-  WeatherDay, HotelCandidateOut,
+  WeatherDay, HotelCandidateOut, TripUpdate,
 } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 import NavBar from "@/components/ui/NavBar";
@@ -364,14 +365,279 @@ function DayNav({
   );
 }
 
+// ── Edit Trip Modal ────────────────────────────────────────────────────────────
+
+function EditTripModal({
+  trip,
+  onClose,
+  onSave,
+}: {
+  trip: TripOut;
+  onClose: () => void;
+  onSave: (updates: TripUpdate) => Promise<void>;
+}) {
+  const [form, setForm] = useState<TripUpdate>({
+    title: trip.title,
+    destination_city: trip.destination_city,
+    destination_country: trip.destination_country ?? "",
+    start_date: trip.start_date,
+    end_date: trip.end_date,
+    num_travelers: trip.num_travelers,
+    budget_total: trip.budget_total ?? undefined,
+    budget_currency: trip.budget_currency,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const set = (key: keyof TripUpdate, value: unknown) =>
+    setForm((f) => ({ ...f, [key]: value }));
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(form);
+      onClose();
+    } catch {
+      setError("Could not save changes. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const fieldCls = "w-full bg-space-800 border border-white/10 rounded-xl px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-electric-500/50 transition-colors";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0, y: 8 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.95, opacity: 0, y: 8 }}
+        transition={{ type: "spring", damping: 28, stiffness: 340 }}
+        className="glass-card p-6 w-full max-w-md"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-base font-semibold text-slate-100">Edit Trip</h2>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label className="text-xs text-slate-500 mb-1 block">Trip name</label>
+            <input className={fieldCls} value={form.title ?? ""} onChange={(e) => set("title", e.target.value)} required />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-slate-500 mb-1 block">City</label>
+              <input className={fieldCls} value={form.destination_city ?? ""} onChange={(e) => set("destination_city", e.target.value)} required />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 mb-1 block">Country</label>
+              <input className={fieldCls} placeholder="Optional" value={form.destination_country ?? ""} onChange={(e) => set("destination_country", e.target.value || null)} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-slate-500 mb-1 block">Start date</label>
+              <input type="date" className={fieldCls} value={form.start_date ?? ""} onChange={(e) => set("start_date", e.target.value)} required />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 mb-1 block">End date</label>
+              <input type="date" className={fieldCls} value={form.end_date ?? ""} onChange={(e) => set("end_date", e.target.value)} required />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-slate-500 mb-1 block">Travelers</label>
+              <input type="number" min={1} max={20} className={fieldCls} value={form.num_travelers ?? 1} onChange={(e) => set("num_travelers", parseInt(e.target.value))} required />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 mb-1 block">Budget</label>
+              <input type="number" min={0} className={fieldCls} placeholder="Optional" value={form.budget_total ?? ""} onChange={(e) => set("budget_total", e.target.value ? parseFloat(e.target.value) : null)} />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-500 mb-1 block">Currency</label>
+            <input className={`${fieldCls} uppercase`} maxLength={3} value={form.budget_currency ?? "USD"} onChange={(e) => set("budget_currency", e.target.value.toUpperCase())} />
+          </div>
+
+          {error && <p className="text-xs text-coral-400">{error}</p>}
+
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm text-slate-400 border border-white/10 hover:bg-white/5 transition-colors">
+              Cancel
+            </button>
+            <motion.button
+              type="submit"
+              whileTap={{ scale: 0.97 }}
+              disabled={saving}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-electric-gradient text-white shadow-electric-sm hover:shadow-electric transition-all disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save changes"}
+            </motion.button>
+          </div>
+        </form>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ── Approval Cards ─────────────────────────────────────────────────────────────
+
+type OnDecision = (id: string, decision: "approved" | "rejected", resolutionNote?: string) => void;
+
+// ── ConciergeSwapCard ──────────────────────────────────────────────────────────
+
+function ConciergeSwapCard({ approval, onDecision }: { approval: ApprovalOut; onDecision: OnDecision }) {
+  const a = approval;
+  const alternatives = (a.payload.alternatives as Array<{ title: string; description: string }> | undefined) ?? [];
+  const [selectedAlt, setSelectedAlt] = useState(0);
+  const current = a.payload.current as { title: string; item_type?: string; start_time?: string; est_cost?: number };
+  const chosen = alternatives[selectedAlt] ?? (a.payload.replacement as { title: string; description?: string });
+
+  return (
+    <div className="glass-card p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold text-electric-400 bg-electric-500/10 border border-electric-500/20">
+          AI Concierge
+        </span>
+        <span className="text-[10px] text-slate-500">Suggestion · Day {a.payload.day as number}</span>
+      </div>
+
+      {/* Before → After diff */}
+      <div className="flex items-start gap-2 mb-3">
+        <div className="flex-1 p-2.5 rounded-xl bg-white/3 border border-white/8">
+          <p className="text-[10px] text-slate-500 mb-0.5">Current</p>
+          <p className="text-xs text-slate-400 line-through leading-snug">{current.title}</p>
+          {current.start_time && (
+            <p className="text-[10px] text-slate-600 mt-0.5">{current.start_time.slice(0, 5)}</p>
+          )}
+          {current.est_cost != null && (
+            <p className="text-[10px] text-slate-600">{current.est_cost}</p>
+          )}
+        </div>
+        <ArrowRight className="w-3.5 h-3.5 text-slate-600 shrink-0 mt-3.5" />
+        <div className="flex-1 p-2.5 rounded-xl bg-electric-500/5 border border-electric-500/20">
+          <p className="text-[10px] text-electric-400 mb-0.5">Proposed</p>
+          <p className="text-xs text-slate-200 font-medium leading-snug">{chosen.title}</p>
+          {chosen.description && (
+            <p className="text-[10px] text-slate-500 line-clamp-2 mt-0.5">{chosen.description}</p>
+          )}
+        </div>
+      </div>
+
+      {/* Alternatives selector */}
+      {alternatives.length > 1 && (
+        <div className="mb-3 space-y-1.5">
+          <p className="text-[10px] text-slate-500 uppercase tracking-widest">Choose an option</p>
+          {alternatives.map((alt, idx) => (
+            <button
+              key={idx}
+              onClick={() => setSelectedAlt(idx)}
+              className={`w-full text-left px-3 py-2 rounded-xl text-xs transition-all border ${
+                idx === selectedAlt
+                  ? "bg-electric-500/15 border-electric-500/30 text-slate-100"
+                  : "bg-white/3 border-white/8 text-slate-400 hover:bg-white/5"
+              }`}
+            >
+              <span className="font-medium">{alt.title}</span>
+              {alt.description && (
+                <span className="text-[10px] text-slate-500 block line-clamp-1 mt-0.5">{alt.description}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!!a.payload.reason && (
+        <p className="text-xs text-slate-500 italic mb-4">{a.payload.reason as string}</p>
+      )}
+
+      <div className="flex gap-2">
+        <motion.button
+          whileTap={{ scale: 0.96 }}
+          onClick={() => onDecision(a.id, "approved", alternatives.length > 1 ? `alt:${selectedAlt}` : undefined)}
+          className="text-xs bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-4 py-2 rounded-xl hover:bg-emerald-500/25 transition-colors font-medium"
+        >
+          Accept swap
+        </motion.button>
+        <motion.button
+          whileTap={{ scale: 0.96 }}
+          onClick={() => onDecision(a.id, "rejected")}
+          className="text-xs bg-white/5 text-slate-400 border border-white/10 px-4 py-2 rounded-xl hover:bg-white/10 transition-colors"
+        >
+          Keep original
+        </motion.button>
+      </div>
+    </div>
+  );
+}
+
+// ── ConciergeAddCard ───────────────────────────────────────────────────────────
+
+function ConciergeAddCard({ approval, onDecision }: { approval: ApprovalOut; onDecision: OnDecision }) {
+  const a = approval;
+  return (
+    <div className="glass-card p-4">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20">
+          AI Concierge
+        </span>
+        <span className="text-[10px] text-slate-500">Day {a.payload.day as number} · Add</span>
+      </div>
+      <p className="font-semibold text-slate-100 text-sm leading-snug mb-0.5">
+        {a.payload.title as string}
+      </p>
+      {!!a.payload.description && (
+        <p className="text-xs text-slate-500 line-clamp-2 mb-1">
+          {a.payload.description as string}
+        </p>
+      )}
+      {!!a.payload.reason && (
+        <p className="text-xs text-slate-500 italic mb-4">{a.payload.reason as string}</p>
+      )}
+      <div className="flex gap-2">
+        <motion.button
+          whileTap={{ scale: 0.96 }}
+          onClick={() => onDecision(a.id, "approved")}
+          className="text-xs bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-4 py-2 rounded-xl hover:bg-emerald-500/25 transition-colors font-medium"
+        >
+          Add to itinerary
+        </motion.button>
+        <motion.button
+          whileTap={{ scale: 0.96 }}
+          onClick={() => onDecision(a.id, "rejected")}
+          className="text-xs bg-white/5 text-slate-400 border border-white/10 px-4 py-2 rounded-xl hover:bg-white/10 transition-colors"
+        >
+          No thanks
+        </motion.button>
+      </div>
+    </div>
+  );
+}
+
+// ── ApprovalCard (dispatcher) ──────────────────────────────────────────────────
 
 function ApprovalCard({
   approval,
   onDecision,
 }: {
   approval: ApprovalOut;
-  onDecision: (id: string, decision: "approved" | "rejected") => void;
+  onDecision: OnDecision;
 }) {
   const a = approval;
 
@@ -536,7 +802,15 @@ function ApprovalCard({
     );
   }
 
-  // concierge_swap / concierge_add / fallback
+  if (a.change_type === "concierge_swap") {
+    return <ConciergeSwapCard approval={a} onDecision={onDecision} />;
+  }
+
+  if (a.change_type === "concierge_add") {
+    return <ConciergeAddCard approval={a} onDecision={onDecision} />;
+  }
+
+  // Generic fallback
   return (
     <div className="glass-card p-4">
       <p className="text-[10px] text-electric-400 uppercase tracking-widest mb-1 font-semibold">
@@ -758,6 +1032,84 @@ export default function TripDetailPage() {
     }
   }, [trip?.status, queryClient, tripId]);
 
+  // ── Share ─────────────────────────────────────────────────────────────────────
+
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+
+  async function handleShare() {
+    if (!trip) return;
+    setShareLoading(true);
+    try {
+      let token = trip.share_token;
+      if (!token) {
+        const updated = await api.createShareLink(trip.id);
+        token = updated.share_token;
+        queryClient.setQueryData(["trip", tripId], updated);
+      }
+      const url = `${window.location.origin}/share/${token}`;
+      await navigator.clipboard.writeText(url);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2500);
+    } finally {
+      setShareLoading(false);
+    }
+  }
+
+  // ── Edit ──────────────────────────────────────────────────────────────────────
+
+  const [editOpen, setEditOpen] = useState(false);
+
+  async function handleEditSave(updates: TripUpdate) {
+    const updated = await api.updateTrip(tripId, updates);
+    queryClient.setQueryData(["trip", tripId], updated);
+  }
+
+  // ── Delete ────────────────────────────────────────────────────────────────────
+
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await api.deleteTrip(tripId);
+      router.replace("/trips");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  // ── Calendar export ───────────────────────────────────────────────────────────
+
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [icsLoading, setIcsLoading] = useState(false);
+
+  function handleGoogleCalendar() {
+    if (!trip) return;
+    const start = trip.start_date.replace(/-/g, "");
+    const end = trip.end_date.replace(/-/g, "");
+    const url = new URL("https://calendar.google.com/calendar/render");
+    url.searchParams.set("action", "TEMPLATE");
+    url.searchParams.set("text", `Trip to ${trip.destination_city}`);
+    url.searchParams.set("dates", `${start}/${end}`);
+    url.searchParams.set("details", `AI-planned itinerary by TravelOS`);
+    url.searchParams.set("location", [trip.destination_city, trip.destination_country].filter(Boolean).join(", "));
+    window.open(url.toString(), "_blank", "noopener,noreferrer");
+    setCalendarOpen(false);
+  }
+
+  async function handleDownloadIcs() {
+    if (!trip || icsLoading) return;
+    setIcsLoading(true);
+    try {
+      await api.downloadCalendarIcs(trip.id, trip.destination_city);
+    } finally {
+      setIcsLoading(false);
+      setCalendarOpen(false);
+    }
+  }
+
   // ── Generate ─────────────────────────────────────────────────────────────────
 
   const [generating, setGenerating] = useState(false);
@@ -783,9 +1135,16 @@ export default function TripDetailPage() {
 
   // ── Approvals ─────────────────────────────────────────────────────────────────
 
-  async function handleDecision(approvalId: string, decision: "approved" | "rejected") {
+  async function handleDecision(
+    approvalId: string,
+    decision: "approved" | "rejected",
+    resolutionNote?: string,
+  ) {
     try {
-      await api.post(`/api/v1/trips/${tripId}/approvals/${approvalId}/resolve`, { decision });
+      await api.post(`/api/v1/approvals/${approvalId}`, {
+        decision,
+        ...(resolutionNote ? { resolution_note: resolutionNote } : {}),
+      });
       queryClient.invalidateQueries({ queryKey: ["approvals", tripId, "pending"] });
       queryClient.invalidateQueries({ queryKey: ["trip", tripId] });
       queryClient.invalidateQueries({ queryKey: ["itinerary", tripId] });
@@ -1078,16 +1437,22 @@ export default function TripDetailPage() {
       </div>
 
       {/* ── Hero Banner ────────────────────────────────────────────────────── */}
-      <div className={`relative h-48 bg-gradient-to-br ${gradient} overflow-hidden`}>
-        {/* Geometric pattern overlay */}
-        <div
-          className="absolute inset-0 opacity-15"
-          style={{
-            backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
-          }}
-        />
-        {/* Dark gradient overlay at bottom */}
-        <div className="absolute inset-0 bg-gradient-to-t from-space-900/80 via-transparent to-transparent" />
+      <div
+        className={`relative h-48 bg-gradient-to-br ${gradient} overflow-hidden`}
+        style={trip.cover_image_url ? {
+          backgroundImage: `url(${trip.cover_image_url})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+        } : undefined}
+      >
+        {/* Overlay — heavier when photo is present for text legibility */}
+        {trip.cover_image_url
+          ? <div className="absolute inset-0 bg-gradient-to-t from-space-900/90 via-black/40 to-black/20" />
+          : <>
+              <div className="absolute inset-0 opacity-15" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")` }} />
+              <div className="absolute inset-0 bg-gradient-to-t from-space-900/80 via-transparent to-transparent" />
+            </>
+        }
 
         {/* Hero content */}
         <div className="relative z-10 h-full flex flex-col justify-end px-4 pb-5 max-w-7xl mx-auto">
@@ -1145,6 +1510,83 @@ export default function TripDetailPage() {
                   />
                   {statusCfg.label}
                 </span>
+                <button
+                  onClick={handleShare}
+                  disabled={shareLoading}
+                  className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10 hover:bg-white/10 transition-colors disabled:opacity-50"
+                  title="Copy share link"
+                >
+                  {shareLoading ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : shareCopied ? (
+                    <Check className="w-3 h-3 text-emerald-400" />
+                  ) : (
+                    <Share2 className="w-3 h-3" />
+                  )}
+                  {shareCopied ? "Copied!" : "Share"}
+                </button>
+
+                {/* Calendar export */}
+                <div className="relative">
+                  <button
+                    onClick={() => setCalendarOpen((v) => !v)}
+                    className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10 hover:bg-white/10 transition-colors"
+                    title="Export to calendar"
+                  >
+                    <CalendarPlus className="w-3 h-3" />
+                    Calendar
+                  </button>
+                  <AnimatePresence>
+                    {calendarOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 6, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 6, scale: 0.96 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute top-full mt-2 left-0 w-44 glass-card py-1 z-20"
+                      >
+                        <button
+                          onClick={handleGoogleCalendar}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 transition-colors"
+                        >
+                          <CalendarDays className="w-3.5 h-3.5 text-electric-400 shrink-0" />
+                          Google Calendar
+                        </button>
+                        <button
+                          onClick={handleDownloadIcs}
+                          disabled={icsLoading}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 transition-colors disabled:opacity-50"
+                        >
+                          {icsLoading
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                            : <Download className="w-3.5 h-3.5 text-gold-400 shrink-0" />
+                          }
+                          Download .ics
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                {/* Edit trip */}
+                <button
+                  onClick={() => setEditOpen(true)}
+                  className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10 hover:bg-white/10 transition-colors"
+                  title="Edit trip"
+                >
+                  <Pencil className="w-3 h-3" />
+                  Edit
+                </button>
+
+                {/* Delete trip */}
+                <button
+                  onClick={() => setDeleteConfirm(true)}
+                  className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10 hover:bg-coral-500/15 hover:text-coral-300 hover:border-coral-500/30 transition-colors"
+                  title="Delete trip"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  Delete
+                </button>
               </div>
 
               {/* Weather timeline strip */}
@@ -1161,7 +1603,7 @@ export default function TripDetailPage() {
       {/* ── Planning status / generate banner ──────────────────────────────── */}
       {(trip.status === "planning" || trip.status === "failed") && (
         <div className="max-w-7xl mx-auto px-4 pt-6">
-          <div className="glass-card p-6 flex items-center gap-5">
+          <div className="glass-card p-6 flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-5">
             <div className="w-12 h-12 rounded-2xl bg-electric-gradient flex items-center justify-center shrink-0 shadow-electric">
               <Sparkles className="w-6 h-6 text-white" />
             </div>
@@ -1185,7 +1627,7 @@ export default function TripDetailPage() {
               whileTap={{ scale: 0.97 }}
               onClick={handleGenerate}
               disabled={generating}
-              className="btn-primary flex items-center gap-2 whitespace-nowrap disabled:opacity-50"
+              className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto whitespace-nowrap disabled:opacity-50"
             >
               {generating ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -1622,7 +2064,9 @@ export default function TripDetailPage() {
                     <div key={hotel.id} className="glass-card p-4 opacity-80 hover:opacity-100 transition-opacity">
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-slate-300 text-sm">{hotel.name}</p>
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <p className="font-medium text-slate-300 text-sm">{hotel.name}</p>
+                          </div>
                           {hotel.star_rating != null && (
                             <div className="flex items-center gap-0.5 mt-0.5">
                               {Array.from({ length: 5 }).map((_, i) => (
@@ -1659,18 +2103,30 @@ export default function TripDetailPage() {
                             )}
                           </div>
                         </div>
-                        <div className="text-right shrink-0">
-                          {hotel.price_per_night != null && (
-                            <p className="text-sm font-semibold text-slate-300 tabular-nums">
-                              {hotel.price_currency ?? ""} {hotel.price_per_night.toLocaleString()}
-                              <span className="text-[10px] font-normal text-slate-600">/night</span>
-                            </p>
-                          )}
-                          {hotel.price_total != null && (
-                            <p className="text-[10px] text-slate-600 tabular-nums">
-                              {hotel.price_currency ?? ""} {hotel.price_total.toLocaleString()} total
-                            </p>
-                          )}
+                        <div className="text-right shrink-0 flex flex-col items-end gap-2">
+                          <div>
+                            {hotel.price_per_night != null && (
+                              <p className="text-sm font-semibold text-slate-300 tabular-nums">
+                                {hotel.price_currency ?? ""} {hotel.price_per_night.toLocaleString()}
+                                <span className="text-[10px] font-normal text-slate-600">/night</span>
+                              </p>
+                            )}
+                            {hotel.price_total != null && (
+                              <p className="text-[10px] text-slate-600 tabular-nums">
+                                {hotel.price_currency ?? ""} {hotel.price_total.toLocaleString()} total
+                              </p>
+                            )}
+                          </div>
+                          <motion.button
+                            whileTap={{ scale: 0.96 }}
+                            onClick={async () => {
+                              const updated = await api.selectHotel(tripId, hotel.id);
+                              queryClient.setQueryData(["hotels", tripId], updated);
+                            }}
+                            className="text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-electric-500/10 text-electric-400 border border-electric-500/20 hover:bg-electric-500/20 transition-colors whitespace-nowrap"
+                          >
+                            Set as hotel
+                          </motion.button>
                         </div>
                       </div>
                     </div>
@@ -1863,6 +2319,69 @@ export default function TripDetailPage() {
           )}
         </motion.button>
       </div>
+
+      {/* ── Edit Trip Modal ──────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {editOpen && trip && (
+          <EditTripModal
+            trip={trip}
+            onClose={() => setEditOpen(false)}
+            onSave={handleEditSave}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Delete Confirmation Modal ────────────────────────────────────── */}
+      <AnimatePresence>
+        {deleteConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            onClick={() => setDeleteConfirm(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 8 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 8 }}
+              transition={{ type: "spring", damping: 28, stiffness: 340 }}
+              className="glass-card p-6 w-full max-w-sm"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start gap-3 mb-5">
+                <div className="p-2 rounded-xl bg-coral-500/10 border border-coral-500/20 shrink-0">
+                  <Trash2 className="w-4 h-4 text-coral-400" />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-slate-100 mb-1">Delete trip?</h2>
+                  <p className="text-sm text-slate-400">
+                    This will permanently remove{" "}
+                    <span className="text-slate-200">{trip?.title}</span> and all its itinerary
+                    data. This cannot be undone.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeleteConfirm(false)}
+                  className="flex-1 py-2.5 rounded-xl text-sm text-slate-400 border border-white/10 hover:bg-white/5 transition-colors"
+                >
+                  Cancel
+                </button>
+                <motion.button
+                  whileTap={{ scale: 0.97 }}
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-coral-500 text-white hover:bg-coral-600 transition-colors disabled:opacity-50"
+                >
+                  {deleting ? "Deleting…" : "Delete"}
+                </motion.button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

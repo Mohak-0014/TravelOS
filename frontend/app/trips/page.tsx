@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
-import { motion } from "framer-motion";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   MapPin, Calendar, Users, DollarSign, Sparkles, Clock,
-  CheckCircle2, AlertCircle, Loader2, ArrowRight, Globe2,
+  CheckCircle2, AlertCircle, Loader2, ArrowRight, Globe2, Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -47,7 +47,7 @@ function destGradient(city: string) {
 
 // ── Trip Card ─────────────────────────────────────────────────────────────────
 
-function TripCard({ trip, index }: { trip: TripOut; index: number }) {
+function TripCard({ trip, index, onDelete }: { trip: TripOut; index: number; onDelete: (id: string) => void }) {
   const nights = Math.max(
     1,
     Math.ceil((new Date(trip.end_date).getTime() - new Date(trip.start_date).getTime()) / 86400000)
@@ -62,6 +62,7 @@ function TripCard({ trip, index }: { trip: TripOut; index: number }) {
 
   return (
     <motion.div
+      className="relative group/card"
       initial={{ opacity: 0, y: 24 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.06, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
@@ -69,15 +70,16 @@ function TripCard({ trip, index }: { trip: TripOut; index: number }) {
     >
       <Link href={`/trips/${trip.id}`} className="block">
         <div className="glass-card overflow-hidden cursor-pointer transition-all duration-300 hover:border-electric-500/30 hover:shadow-card-hover">
-          {/* Destination banner */}
-          <div className={`relative h-24 bg-gradient-to-br ${gradient} flex items-end p-4`}>
-            {/* Subtle pattern overlay */}
-            <div
-              className="absolute inset-0 opacity-20"
-              style={{
-                backgroundImage: `url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.3'%3E%3Cpath d='M0 38.59l2.83-2.83 1.41 1.41L1.41 40H0v-1.41zM0 1.4l2.83 2.83 1.41-1.41L1.41 0H0v1.41zM38.59 40l-2.83-2.83 1.41-1.41L40 38.59V40h-1.41zM40 1.41l-2.83 2.83-1.41-1.41L38.59 0H40v1.41z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
-              }}
-            />
+          {/* Destination banner — real photo or gradient fallback */}
+          <div
+            className={`relative h-24 bg-gradient-to-br ${gradient} flex items-end p-4`}
+            style={trip.cover_image_url ? {
+              backgroundImage: `url(${trip.cover_image_url})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+            } : undefined}
+          >
+            {trip.cover_image_url && <div className="absolute inset-0 bg-black/35" />}
             <div className="relative z-10 flex items-end justify-between w-full">
               <div>
                 <p className="text-white/70 text-xs font-medium uppercase tracking-widest mb-0.5">
@@ -133,6 +135,15 @@ function TripCard({ trip, index }: { trip: TripOut; index: number }) {
           </div>
         </div>
       </Link>
+
+      {/* Delete button — visible on card hover */}
+      <button
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(trip.id); }}
+        title="Delete trip"
+        className="absolute top-2 right-2 z-10 p-1.5 rounded-lg bg-space-900/80 backdrop-blur-sm text-slate-500 opacity-0 group-hover/card:opacity-100 hover:text-coral-400 hover:bg-coral-500/10 transition-all duration-200"
+      >
+        <Trash2 className="w-3.5 h-3.5" />
+      </button>
     </motion.div>
   );
 }
@@ -199,7 +210,10 @@ function GlobePanel({ trips }: { trips: TripOut[] }) {
 
 export default function TripsPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { token, user, _hasHydrated } = useAuthStore();
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (_hasHydrated && !token) router.replace("/login");
@@ -211,6 +225,18 @@ export default function TripsPage() {
     enabled: !!token,
     refetchInterval: 8000,
   });
+
+  async function handleDeleteConfirm() {
+    if (!deleteConfirmId || deleting) return;
+    setDeleting(true);
+    try {
+      await api.deleteTrip(deleteConfirmId);
+      queryClient.invalidateQueries({ queryKey: ["trips"] });
+    } finally {
+      setDeleting(false);
+      setDeleteConfirmId(null);
+    }
+  }
 
   if (!_hasHydrated) return null;
 
@@ -282,7 +308,7 @@ export default function TripsPage() {
                     <MapPin className="w-3 h-3" /> Upcoming
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {upcoming.map((t, i) => <TripCard key={t.id} trip={t} index={i} />)}
+                    {upcoming.map((t, i) => <TripCard key={t.id} trip={t} index={i} onDelete={setDeleteConfirmId} />)}
                   </div>
                 </div>
               )}
@@ -293,14 +319,14 @@ export default function TripsPage() {
                     Past Trips
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {past.map((t, i) => <TripCard key={t.id} trip={t} index={upcoming.length + i} />)}
+                    {past.map((t, i) => <TripCard key={t.id} trip={t} index={upcoming.length + i} onDelete={setDeleteConfirmId} />)}
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Globe sidebar */}
-            <div className="lg:col-span-1">
+            {/* Globe sidebar — hidden on mobile, shown on large screens */}
+            <div className="hidden lg:block lg:col-span-1">
               <motion.div
                 initial={{ opacity: 0, x: 24 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -334,6 +360,53 @@ export default function TripsPage() {
           </div>
         )}
       </main>
+
+      {/* Delete confirmation modal */}
+      <AnimatePresence>
+        {deleteConfirmId && (
+          <motion.div
+            key="delete-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            onClick={() => setDeleteConfirmId(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 8 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 8 }}
+              transition={{ type: "spring", damping: 28, stiffness: 340 }}
+              className="glass-card p-6 w-full max-w-sm"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-10 h-10 rounded-xl bg-coral-500/15 border border-coral-500/30 flex items-center justify-center mb-4">
+                <Trash2 className="w-5 h-5 text-coral-400" />
+              </div>
+              <h3 className="text-base font-semibold text-slate-100 mb-1">Delete this trip?</h3>
+              <p className="text-sm text-slate-400 mb-6">
+                {`"${trips?.find((t) => t.id === deleteConfirmId)?.title ?? "This trip"}" will be permanently removed.`}
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeleteConfirmId(null)}
+                  className="flex-1 py-2 rounded-xl text-sm text-slate-400 border border-white/10 hover:bg-white/5 transition-colors"
+                >
+                  Cancel
+                </button>
+                <motion.button
+                  whileTap={{ scale: 0.97 }}
+                  onClick={handleDeleteConfirm}
+                  disabled={deleting}
+                  className="flex-1 py-2 rounded-xl text-sm font-semibold text-coral-400 bg-coral-500/15 border border-coral-500/30 hover:bg-coral-500/25 transition-colors disabled:opacity-50"
+                >
+                  {deleting ? "Deleting…" : "Delete"}
+                </motion.button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

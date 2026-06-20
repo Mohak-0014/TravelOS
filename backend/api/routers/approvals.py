@@ -173,11 +173,26 @@ async def resolve_approval(
             item_result = await db.execute(select(ItineraryItem).where(ItineraryItem.id == item_id))
             item = item_result.scalar_one_or_none()
             if item is not None:
+                # If user picked an alternative (resolution_note="alt:1"), use that instead
                 replacement = approval.payload.get("replacement", {})
+                note = (body.resolution_note or "").strip()
+                if note.startswith("alt:") and approval.change_type == "concierge_swap":
+                    try:
+                        alt_idx = int(note[4:])
+                        alts = approval.payload.get("alternatives", [])
+                        if 0 <= alt_idx < len(alts):
+                            replacement = alts[alt_idx]
+                    except (ValueError, IndexError):
+                        pass
                 item.title = replacement.get("title", item.title)
                 desc = replacement.get("description")
                 if desc:
                     item.description = desc
+                # Apply enriched fields from concierge_swap payload if present
+                if approval.change_type == "concierge_swap":
+                    current = approval.payload.get("current", {})
+                    if current.get("item_type"):
+                        item.item_type = current["item_type"]
 
     elif body.decision == "approved" and approval.change_type == "concierge_add":
         payload = approval.payload
