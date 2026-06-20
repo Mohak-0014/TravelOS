@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from sqlalchemy import select, update
 
 from backend.agents._llm import build_llm
@@ -52,10 +52,11 @@ async def run(state: TravelOSState) -> dict[str, object]:
         packing = await _generate(trip, items, weather_state)
         await _persist(trip_id, packing)
 
+        cats = packing.get("categories", {})
         logger.info(
             "packing_list_done",
             trip_id=trip_id,
-            category_count=len(packing.get("categories", {})),
+            category_count=len(cats) if isinstance(cats, dict) else 0,
         )
         return {"packing_state": {**packing, "status": "done"}}
 
@@ -93,7 +94,8 @@ async def _generate(
         if it.item_type in ("activity", "meal") and it.title:
             activity_types.append(it.title)
 
-    risk_flags: list[str] = list(weather_state.get("risk_flags") or [])  # type: ignore[arg-type]
+    raw_flags = weather_state.get("risk_flags") or []
+    risk_flags: list[str] = [str(f) for f in raw_flags] if isinstance(raw_flags, list) else []
 
     user_msg = (
         f"Destination: {trip.destination_city}, {trip.destination_country or 'unknown country'}\n"
@@ -107,18 +109,85 @@ async def _generate(
         "Generate a practical, complete packing list."
     )
 
-    llm = build_llm(size="small", temperature=0.3)
-    resp = llm.invoke([SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=user_msg)])
-    raw = str(resp.content).strip()
+    # Cap the completion so the small model can't run away and emit a truncated,
+    # unparseable payload (the failure mode that left some trips with no list).
+    llm = build_llm(size="small", temperature=0.3, max_tokens=2048)
+    messages: list[BaseMessage] = [
+        SystemMessage(content=_SYSTEM_PROMPT),
+        HumanMessage(content=user_msg),
+    ]
 
-    # Strip markdown fences if model adds them
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-        raw = raw.replace("```", "").strip()
+    last_error = "no response"
+    for attempt in range(2):
+        resp = llm.invoke(messages)
+        raw = _strip_fences(str(resp.content).strip())
+        parsed = _safe_parse(raw)
+        if parsed and isinstance(parsed.get("categories"), dict) and parsed["categories"]:
+            if attempt > 0:
+                logger.info("packing_list_recovered", attempt=attempt)
+            return parsed
 
-    return dict(json.loads(raw))  # type: ignore[arg-type]
+        last_error = "empty or unparseable JSON"
+        # One stricter retry before giving up.
+        messages.append(
+            HumanMessage(
+                content=(
+                    "That response was not valid JSON or was truncated. Reply again with "
+                    "STRICT, COMPLETE JSON only — at most 6 categories and 35 items total, "
+                    "no commentary and no markdown."
+                )
+            )
+        )
+
+    raise ValueError(f"packing JSON unusable after retries: {last_error}")
+
+
+def _strip_fences(raw: str) -> str:
+    """Drop markdown fences / surrounding prose so the payload is just the JSON object.
+
+    Handles fences even when the model adds preamble before them
+    (e.g. ``Here you go:\\n```json\\n{...}```\\n``).
+    """
+    if "```" in raw:
+        parts = raw.split("```")
+        raw = parts[1] if len(parts) >= 3 else raw.replace("```", "")
+        if raw.lstrip().startswith("json"):
+            raw = raw.lstrip()[4:]
+        raw = raw.strip()
+    # Trim to the JSON object boundaries; leave truncated payloads (no closing
+    # brace) intact so _safe_parse can salvage them.
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start != -1 and end > start:
+        return raw[start : end + 1]
+    return raw[start:] if start > 0 else raw
+
+
+def _safe_parse(raw: str) -> dict[str, object] | None:
+    """Parse packing JSON, salvaging a partial list from a truncated response."""
+    try:
+        return dict(json.loads(raw))
+    except json.JSONDecodeError:
+        pass
+    try:
+        return dict(json.loads(_repair_truncated_json(raw)))
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+def _repair_truncated_json(raw: str) -> str:
+    """Best-effort close a packing payload that was cut off mid-array.
+
+    Shape is ``{"categories": {"Cat": [..], ...}}``. Trim back to the last
+    completed category array (last ``]``), drop a trailing comma, then balance
+    the still-open braces so the partial list is recoverable.
+    """
+    end = raw.rfind("]")
+    if end == -1:
+        raise ValueError("nothing salvageable")
+    s = raw[: end + 1].rstrip().rstrip(",")
+    opens = s.count("{") - s.count("}")
+    return s + ("}" * opens if opens > 0 else "")
 
 
 async def _persist(trip_id: str, packing: dict[str, object]) -> None:

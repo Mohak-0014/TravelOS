@@ -8,7 +8,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.agents.packing_list import _season, run
+from backend.agents.packing_list import (
+    _repair_truncated_json,
+    _safe_parse,
+    _season,
+    _strip_fences,
+    run,
+)
 from backend.graphs.state import TravelOSState
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -211,3 +217,101 @@ async def test_run_uses_weather_risk_flags() -> None:
         user_msg = call_args[0][0][1].content  # HumanMessage content
         assert "heavy_rain" in user_msg
         assert "thunderstorm" in user_msg
+
+
+# ── salvage / robustness tests ────────────────────────────────────────────────
+
+
+def test_strip_fences_handles_preamble_and_fences() -> None:
+    raw = 'Sure! Here you go:\n```json\n{"categories": {"Docs": ["Passport"]}}\n```'
+    out = _strip_fences(raw)
+    assert out.startswith("{")
+    assert json.loads(out)["categories"]["Docs"] == ["Passport"]
+
+
+def test_safe_parse_clean_json() -> None:
+    parsed = _safe_parse(_SAMPLE_LLM_RESPONSE)
+    assert parsed is not None
+    assert "Clothing" in parsed["categories"]  # type: ignore[index]
+
+
+def test_safe_parse_salvages_truncated_json() -> None:
+    # cut off mid-string inside the second category (the real Tokyo failure mode)
+    truncated = (
+        '{"categories": {"Clothing": ["Shirt", "Jacket"], '
+        '"Electronics": ["Charger", "Travel adapter for Ja'
+    )
+    parsed = _safe_parse(truncated)
+    assert parsed is not None
+    # the complete category survives; the incomplete one is dropped
+    assert parsed["categories"]["Clothing"] == ["Shirt", "Jacket"]  # type: ignore[index]
+    assert "Electronics" not in parsed["categories"]  # type: ignore[index]
+
+
+def test_safe_parse_returns_none_for_garbage() -> None:
+    assert _safe_parse("this is not json at all") is None
+
+
+def test_repair_truncated_json_balances_braces() -> None:
+    truncated = '{"categories": {"A": ["x", "y"], "B": ["z'
+    obj = json.loads(_repair_truncated_json(truncated))
+    assert obj["categories"]["A"] == ["x", "y"]
+
+
+@pytest.mark.asyncio
+async def test_run_recovers_from_truncated_response() -> None:
+    """A truncated (unterminated) JSON response should still yield a partial list."""
+    trip = _mock_trip()
+    truncated = (
+        '{"categories": {"Documents & Money": ["Passport", "Visa"], '
+        '"Clothing": ["Rain jacket for Toky'
+    )
+    mock_resp = MagicMock()
+    mock_resp.content = truncated
+
+    with (
+        patch("backend.agents.packing_list._load_trip", AsyncMock(return_value=trip)),
+        patch(
+            "backend.agents.packing_list._load_itinerary_items",
+            AsyncMock(return_value=[]),
+        ),
+        patch("backend.agents.packing_list.build_llm") as mock_build_llm,
+        patch("backend.agents.packing_list._persist", AsyncMock()),
+    ):
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = mock_resp
+        mock_build_llm.return_value = mock_llm
+
+        result = await run(_state())
+
+    ps = result["packing_state"]
+    assert ps["status"] == "done"  # type: ignore[index]
+    assert "Documents & Money" in ps["categories"]  # type: ignore[index]
+
+
+@pytest.mark.asyncio
+async def test_run_retries_once_then_succeeds() -> None:
+    """First response is unusable; the single retry returns valid JSON."""
+    trip = _mock_trip()
+    bad = MagicMock()
+    bad.content = "Sorry, I cannot produce that."
+    good = MagicMock()
+    good.content = _SAMPLE_LLM_RESPONSE
+
+    with (
+        patch("backend.agents.packing_list._load_trip", AsyncMock(return_value=trip)),
+        patch(
+            "backend.agents.packing_list._load_itinerary_items",
+            AsyncMock(return_value=[]),
+        ),
+        patch("backend.agents.packing_list.build_llm") as mock_build_llm,
+        patch("backend.agents.packing_list._persist", AsyncMock()),
+    ):
+        mock_llm = MagicMock()
+        mock_llm.invoke.side_effect = [bad, good]
+        mock_build_llm.return_value = mock_llm
+
+        result = await run(_state())
+
+    assert result["packing_state"]["status"] == "done"  # type: ignore[index]
+    assert mock_llm.invoke.call_count == 2
