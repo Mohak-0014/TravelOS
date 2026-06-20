@@ -1193,9 +1193,8 @@ export default function TripDetailPage() {
 
   async function sendMessage(userText: string): Promise<void> {
     try {
-      const res = await api.post<ChatResponse>(`/api/v1/trips/${tripId}/concierge`, {
-        message: userText,
-        history: chatMessages,
+      const res = await api.post<ChatResponse>(`/api/v1/trips/${tripId}/chat`, {
+        question: userText,
       });
       setChatMessages((prev) => [
         ...prev,
