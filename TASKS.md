@@ -18,6 +18,7 @@ Last updated: 2026-06-20
 | 2 | **Initialize Qdrant collections on startup** | `backend/api/main.py` | Call `ensure_collections()` in a FastAPI startup event. Without this, `trip_memories` and `user_preferences` don't exist for fresh installs — Travel Style and Concierge degrade silently. |
 | 7 | **Inject travel_style_profile into weather adaptation** | `backend/agents/weather.py` lines 318-324 | Read `activity_preference`, `dining_preference`, `budget_priority` from state and inject into the weather adaptation LLM prompt so replacements match user taste (e.g. art gallery not bowling alley). |
 | 8 | **Enforce pace item count in validation** | `backend/graphs/validation.py` | Post-parse check: if any day has fewer than `pace_target - 1` items, flag for replan. Conflict detection already checks >8 items; mirror for under-count. Add unit test. |
+| 30 | **Replace decommissioned Groq tool-use model** | `backend/agents/_llm.py` (`_TOOL_USE_MODEL`, line 12) | `size="tools"` maps to `llama3-groq-70b-8192-tool-use-preview`, which Groq has **decommissioned** — it is no longer in the live `/v1/models` list (verified 2026-06-21). Currently a latent bug: nothing calls `build_llm("tools")` (Concierge uses `"large"`), but any future use will 400. Fix: drop the `"tools"` branch or point it at a supported model — `llama-3.3-70b-versatile` already does reliable tool-calling for the Concierge. |
 
 ### Agent Prompt Quality (2026-06-20)
 
