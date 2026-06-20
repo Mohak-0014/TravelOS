@@ -51,6 +51,13 @@ def _mock_item(title: str = "Eiffel Tower", day: int = 1, kind: str = "activity"
     i.day_number = day
     i.sort_order = 0
     i.item_type = kind
+    # Optional fields read by _build_system_prompt — set explicitly so the
+    # auto-generated MagicMock attrs don't break numeric formatting, e.g.
+    # f"{est_cost:.0f}" raises TypeError on a bare MagicMock.
+    i.item_date = None
+    i.start_time = None
+    i.est_cost = None
+    i.est_cost_currency = None
     return i
 
 
@@ -804,5 +811,5 @@ def test_build_system_prompt_itinerary_shows_item_indices() -> None:
     prompt = _build_system_prompt(
         _mock_trip(), items, None, None, {"past_trips": [], "pref_hits": []}
     )
-    assert "0. activity" in prompt
-    assert "1. meal" in prompt
+    assert "0. [activity]" in prompt
+    assert "1. [meal]" in prompt
