@@ -18,13 +18,10 @@ import {
   User,
 } from "lucide-react";
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import { api } from "@/lib/api";
 import type { TripOut, PreferenceOut } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 import NavBar from "@/components/ui/NavBar";
-
-const StarField = dynamic(() => import("@/components/3d/StarField"), { ssr: false });
 
 // ── Travel personality badge ──────────────────────────────────────────────────
 
@@ -223,7 +220,7 @@ function PreferenceSlider({
                   ? COLOR_MAP[config.color]
                   : i < safeIdx
                   ? TRACK_COLOR_MAP[config.color]
-                  : "bg-white/8"
+                  : "bg-ink-900/[0.05]"
               }`}
             />
           ))}
@@ -337,7 +334,11 @@ export default function ProfilePage() {
 
   return (
     <div className="relative min-h-screen bg-space-900">
-      <StarField />
+      <div className="absolute top-0 left-0 right-0 h-96 pointer-events-none overflow-hidden">
+        <div className="absolute inset-0 bg-sky-gradient opacity-60" />
+        <div className="absolute top-10 left-1/3 w-96 h-96 rounded-full bg-coral-500/8 blur-3xl" />
+        <div className="absolute top-0 right-1/4 w-72 h-72 rounded-full bg-gold-500/8 blur-3xl" />
+      </div>
       <NavBar />
 
       {/* Ambient glows */}
@@ -423,7 +424,7 @@ export default function ProfilePage() {
                 ))}
               </div>
 
-              <div className="flex items-center gap-3 mt-7 pt-5 border-t border-white/5">
+              <div className="flex items-center gap-3 mt-7 pt-5 border-t border-ink-900/8">
                 <motion.button
                   whileHover={{ scale: 1.03, y: -1 }}
                   whileTap={{ scale: 0.97 }}
@@ -518,7 +519,7 @@ export default function ProfilePage() {
                         transition={{ delay: 0.28 + i * 0.04 }}
                       >
                         <Link href={`/trips/${trip.id}`}>
-                          <div className="glass-light rounded-xl px-4 py-3 flex items-center gap-3 hover:border-electric-500/20 hover:bg-white/5 transition-all group cursor-pointer">
+                          <div className="glass-light rounded-xl px-4 py-3 flex items-center gap-3 hover:border-electric-500/20 hover:bg-ink-900/[0.04] transition-all group cursor-pointer">
                             <div className="w-8 h-8 rounded-lg bg-electric-500/15 flex items-center justify-center shrink-0">
                               <Map className="w-3.5 h-3.5 text-electric-400" />
                             </div>
@@ -660,7 +661,7 @@ export default function ProfilePage() {
                 whileHover={{ scale: 1.02, y: -1 }}
                 whileTap={{ scale: 0.97 }}
                 onClick={handleLogout}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 glass-light rounded-xl text-slate-400 hover:text-coral-400 hover:border-coral-400/20 transition-all text-sm font-medium border border-white/5"
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 glass-light rounded-xl text-slate-400 hover:text-coral-400 hover:border-coral-400/20 transition-all text-sm font-medium border border-ink-900/8"
               >
                 <LogOut className="w-4 h-4" />
                 Sign Out

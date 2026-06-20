@@ -17,12 +17,12 @@ import type { ShareTripOut, ItineraryItemOut } from "@/lib/api";
 // ── Destination gradient (deterministic hash of city name) ───────────────────
 
 const GRADIENTS = [
-  "from-blue-600/70 via-indigo-700/60 to-violet-900/80",
-  "from-emerald-600/70 via-teal-700/60 to-cyan-900/80",
-  "from-rose-600/70 via-pink-700/60 to-purple-900/80",
-  "from-amber-600/70 via-orange-700/60 to-red-900/80",
-  "from-sky-600/70 via-blue-700/60 to-indigo-900/80",
-  "from-violet-600/70 via-purple-700/60 to-fuchsia-900/80",
+  "from-sky-400 via-cyan-500 to-blue-600",
+  "from-amber-400 via-orange-500 to-rose-500",
+  "from-emerald-400 via-teal-500 to-cyan-600",
+  "from-rose-400 via-pink-500 to-fuchsia-600",
+  "from-indigo-400 via-blue-500 to-sky-600",
+  "from-orange-400 via-amber-500 to-yellow-500",
 ];
 
 function destGradient(city: string): string {
@@ -35,7 +35,7 @@ function destGradient(city: string): string {
 
 const ITEM_TYPE_CONFIG: Record<string, { icon: LucideIcon; color: string; label: string }> = {
   activity: { icon: Compass, color: "text-electric-400", label: "Activity" },
-  meal: { icon: Utensils, color: "text-gold", label: "Meal" },
+  meal: { icon: Utensils, color: "text-gold-500", label: "Meal" },
   transport: { icon: Bus, color: "text-slate-400", label: "Transport" },
   lodging: { icon: Hotel, color: "text-purple-400", label: "Lodging" },
   free: { icon: Coffee, color: "text-emerald-400", label: "Free time" },
@@ -73,15 +73,15 @@ function PackingCategory({ name, items }: { name: string; items: string[] }) {
   const [open, setOpen] = useState(false);
   const icon = CATEGORY_ICONS[name] ?? "📦";
   return (
-    <div className="border border-white/8 rounded-xl overflow-hidden">
+    <div className="border border-ink-900/10 rounded-xl overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors"
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-ink-900/[0.04] transition-colors"
       >
         <div className="flex items-center gap-2.5">
           <span className="text-base">{icon}</span>
-          <span className="text-sm font-medium text-white">{name}</span>
-          <span className="text-xs text-slate-500 bg-white/5 px-2 py-0.5 rounded-full">
+          <span className="text-sm font-medium text-slate-100">{name}</span>
+          <span className="text-xs text-slate-500 bg-ink-900/[0.06] px-2 py-0.5 rounded-full">
             {items.length}
           </span>
         </div>
@@ -127,13 +127,13 @@ function ItineraryCard({ item, index }: { item: ItineraryItemOut; index: number 
       initial={{ opacity: 0, x: -12 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.05, duration: 0.35 }}
-      className="flex items-start gap-3 p-4 rounded-xl bg-white/4 border border-white/6 hover:bg-white/6 hover:border-white/10 transition-all"
+      className="flex items-start gap-3 p-4 rounded-xl bg-ink-900/[0.03] border border-ink-900/8 hover:bg-ink-900/[0.05] hover:border-ink-900/10 transition-all"
     >
-      <div className={`mt-0.5 p-2 rounded-lg bg-black/30 shrink-0 ${cfg.color}`}>
+      <div className={`mt-0.5 p-2 rounded-lg bg-ink-900/[0.06] shrink-0 ${cfg.color}`}>
         <Icon className="w-3.5 h-3.5" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-white leading-snug truncate">{item.title}</p>
+        <p className="text-sm font-semibold text-slate-100 leading-snug truncate">{item.title}</p>
         {item.description && (
           <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{item.description}</p>
         )}
@@ -175,7 +175,7 @@ function DayGroup({ dayNum, date, items }: { dayNum: number; date: string; items
           </span>
           <span className="text-sm text-slate-500">{formatDate(date)}</span>
         </div>
-        <div className="flex-1 h-px bg-white/6" />
+        <div className="flex-1 h-px bg-ink-900/10" />
       </div>
       <div className="space-y-2">
         {items.map((item, i) => (
@@ -225,7 +225,7 @@ export default function SharePage() {
           <div className="w-14 h-14 rounded-2xl bg-coral/10 flex items-center justify-center mx-auto mb-5">
             <MapPin className="w-7 h-7 text-coral" />
           </div>
-          <h1 className="text-xl font-bold text-white mb-2">
+          <h1 className="text-xl font-bold text-slate-100 mb-2">
             {isExpired ? "Link Expired" : "Link Not Found"}
           </h1>
           <p className="text-sm text-slate-500 mb-6">
@@ -302,7 +302,7 @@ export default function SharePage() {
             }}
           />
         )}
-        <div className={`absolute inset-0 ${trip.cover_image_url ? "bg-gradient-to-t from-space-900/90 via-black/40 to-black/20" : "bg-gradient-to-t from-space-900/80 via-transparent to-transparent"}`} />
+        <div className={`absolute inset-0 ${trip.cover_image_url ? "bg-gradient-to-t from-ink-900/90 via-ink-900/45 to-ink-900/10" : "bg-gradient-to-t from-ink-900/65 via-ink-900/10 to-transparent"}`} />
 
         {/* Shared badge */}
         <div className="absolute top-4 right-4 flex items-center gap-1.5 text-xs text-white/70 bg-black/30 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10">
@@ -317,7 +317,7 @@ export default function SharePage() {
               {trip.destination_country ?? ""}
             </span>
           </div>
-          <h1 className="text-3xl sm:text-4xl font-bold text-white leading-tight">
+          <h1 className="font-display text-3xl sm:text-4xl font-semibold text-white leading-tight">
             {trip.destination_city}
           </h1>
         </div>
@@ -332,7 +332,7 @@ export default function SharePage() {
           transition={{ duration: 0.4 }}
           className="flex flex-wrap gap-2"
         >
-          <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-white/6 border border-white/8 px-3 py-1.5 rounded-full">
+          <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-ink-900/[0.05] border border-ink-900/10 px-3 py-1.5 rounded-full">
             <Calendar className="w-3 h-3 text-electric-400" />
             {new Date(trip.start_date + "T00:00:00").toLocaleDateString("en-US", {
               month: "short", day: "numeric",
@@ -341,11 +341,11 @@ export default function SharePage() {
               month: "short", day: "numeric", year: "numeric",
             })}
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-white/6 border border-white/8 px-3 py-1.5 rounded-full">
+          <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-ink-900/[0.05] border border-ink-900/10 px-3 py-1.5 rounded-full">
             <Users className="w-3 h-3 text-gold" />
             {trip.num_travelers} traveler{trip.num_travelers !== 1 ? "s" : ""}
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-white/6 border border-white/8 px-3 py-1.5 rounded-full">
+          <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-ink-900/[0.05] border border-ink-900/10 px-3 py-1.5 rounded-full">
             <Calendar className="w-3 h-3 text-emerald-400" />
             {nights} night{nights !== 1 ? "s" : ""}
           </div>
@@ -354,7 +354,7 @@ export default function SharePage() {
         {/* ── Itinerary ───────────────────────────────────────────────────────── */}
         {days.length > 0 ? (
           <section>
-            <h2 className="text-lg font-bold text-white mb-5 flex items-center gap-2">
+            <h2 className="text-lg font-bold text-slate-100 mb-5 flex items-center gap-2">
               <Compass className="w-4 h-4 text-electric-400" />
               Itinerary
             </h2>
@@ -378,7 +378,7 @@ export default function SharePage() {
         {/* ── Packing list ────────────────────────────────────────────────────── */}
         {(packingCategories.length > 0 || destSpecific.length > 0) && (
           <section>
-            <h2 className="text-lg font-bold text-white mb-5 flex items-center gap-2">
+            <h2 className="text-lg font-bold text-slate-100 mb-5 flex items-center gap-2">
               <Luggage className="w-4 h-4 text-gold" />
               Packing List
             </h2>
@@ -401,7 +401,7 @@ export default function SharePage() {
           className="glass-card p-6 flex items-center justify-between gap-4"
         >
           <div>
-            <p className="text-sm font-semibold text-white">
+            <p className="text-sm font-semibold text-slate-100">
               Plan your own AI-powered trip
             </p>
             <p className="text-xs text-slate-500 mt-0.5">

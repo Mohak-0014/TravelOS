@@ -8,7 +8,7 @@ import type { ItineraryItemOut } from "@/lib/api";
 // CSS dot marker avoids the broken default webpack/leaflet icon issue
 const dotIcon = L.divIcon({
   className: "",
-  html: '<div style="width:11px;height:11px;background:#60a5fa;border-radius:50%;border:2px solid rgba(255,255,255,0.9);box-shadow:0 0 8px rgba(59,130,246,0.8),0 1px 4px rgba(0,0,0,0.6)"></div>',
+  html: '<div style="width:12px;height:12px;background:#ff6b5c;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #ffffff;box-shadow:0 2px 6px rgba(20,34,61,0.35)"></div>',
   iconSize: [11, 11],
   iconAnchor: [5, 5],
   popupAnchor: [0, -8],

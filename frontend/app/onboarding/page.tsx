@@ -12,9 +12,7 @@ import {
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
-import dynamic from "next/dynamic";
-
-const StarField = dynamic(() => import("@/components/3d/StarField"), { ssr: false });
+import SkyScene from "@/components/travel/SkyScene";
 
 // ── Step config ───────────────────────────────────────────────────────────────
 
@@ -163,7 +161,7 @@ export default function OnboardingPage() {
 
   return (
     <div className="relative min-h-screen bg-space-900 flex flex-col items-center justify-center overflow-hidden px-4 py-12">
-      <StarField />
+      <SkyScene />
 
       {/* Glows */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
@@ -182,7 +180,7 @@ export default function OnboardingPage() {
             <Compass className="w-3.5 h-3.5" />
             Travel DNA setup
           </div>
-          <h1 className="text-2xl font-bold text-white">Personalize your experience</h1>
+          <h1 className="font-display text-3xl font-semibold text-slate-100">Personalize your experience</h1>
           <p className="text-slate-500 text-sm mt-1.5">
             Your AI agents use this to plan every trip from day&nbsp;one.
           </p>
@@ -194,7 +192,7 @@ export default function OnboardingPage() {
             <span>Step {step + 1} of {TOTAL_STEPS}</span>
             <span>{Math.round(progress)}%</span>
           </div>
-          <div className="h-1 rounded-full bg-white/5 overflow-hidden">
+          <div className="h-1 rounded-full bg-ink-900/[0.04] overflow-hidden">
             <motion.div
               className="h-full rounded-full bg-electric-gradient"
               animate={{ width: `${progress}%` }}
@@ -219,7 +217,7 @@ export default function OnboardingPage() {
               {/* ── Step 0: Pace ─────────────────────────────── */}
               {step === 0 && (
                 <>
-                  <h2 className="text-base font-bold text-white mb-0.5">How do you like to travel?</h2>
+                  <h2 className="text-base font-bold text-slate-100 mb-0.5">How do you like to travel?</h2>
                   <p className="text-xs text-slate-500 mb-5">Sets activities per day in your itinerary.</p>
                   <div className="space-y-3">
                     {PACE_OPTIONS.map((opt) => {
@@ -234,18 +232,18 @@ export default function OnboardingPage() {
                           className={`w-full flex items-center gap-4 p-4 rounded-xl border transition-all text-left ${
                             selected
                               ? opt.color
-                              : "border-white/8 bg-white/3 hover:bg-white/6 hover:border-white/15"
+                              : "border-ink-900/10 bg-ink-900/[0.03] hover:bg-ink-900/[0.05] hover:border-ink-900/15"
                           }`}
                         >
-                          <div className={`p-2.5 rounded-xl ${selected ? "bg-black/20" : "bg-white/5"}`}>
+                          <div className={`p-2.5 rounded-xl ${selected ? "bg-white/80 shadow-soft" : "bg-ink-900/[0.04]"}`}>
                             <Icon className={`w-5 h-5 ${selected ? "" : "text-slate-400"}`} />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className={`font-semibold text-sm ${selected ? "text-white" : "text-slate-300"}`}>{opt.label}</p>
+                            <p className={`font-semibold text-sm ${selected ? "text-slate-100" : "text-slate-300"}`}>{opt.label}</p>
                             <p className="text-xs text-slate-500 mt-0.5">{opt.sub}</p>
                           </div>
                           {selected && (
-                            <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                            <div className="w-5 h-5 rounded-full bg-ink-900 flex items-center justify-center shrink-0">
                               <Check className="w-3 h-3 text-white" />
                             </div>
                           )}
@@ -259,7 +257,7 @@ export default function OnboardingPage() {
               {/* ── Step 1: Luxury tier ───────────────────────── */}
               {step === 1 && (
                 <>
-                  <h2 className="text-base font-bold text-white mb-0.5">What&apos;s your travel style?</h2>
+                  <h2 className="text-base font-bold text-slate-100 mb-0.5">What&apos;s your travel style?</h2>
                   <p className="text-xs text-slate-500 mb-5">Drives hotel tier, dining, and budget split.</p>
                   <div className="space-y-3">
                     {LUXURY_OPTIONS.map((opt) => {
@@ -274,18 +272,18 @@ export default function OnboardingPage() {
                           className={`w-full flex items-center gap-4 p-4 rounded-xl border transition-all text-left ${
                             selected
                               ? opt.color
-                              : "border-white/8 bg-white/3 hover:bg-white/6 hover:border-white/15"
+                              : "border-ink-900/10 bg-ink-900/[0.03] hover:bg-ink-900/[0.05] hover:border-ink-900/15"
                           }`}
                         >
-                          <div className={`p-2.5 rounded-xl ${selected ? "bg-black/20" : "bg-white/5"}`}>
+                          <div className={`p-2.5 rounded-xl ${selected ? "bg-white/80 shadow-soft" : "bg-ink-900/[0.04]"}`}>
                             <Icon className={`w-5 h-5 ${selected ? "" : "text-slate-400"}`} />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className={`font-semibold text-sm ${selected ? "text-white" : "text-slate-300"}`}>{opt.label}</p>
+                            <p className={`font-semibold text-sm ${selected ? "text-slate-100" : "text-slate-300"}`}>{opt.label}</p>
                             <p className="text-xs text-slate-500 mt-0.5">{opt.sub}</p>
                           </div>
                           {selected && (
-                            <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                            <div className="w-5 h-5 rounded-full bg-ink-900 flex items-center justify-center shrink-0">
                               <Check className="w-3 h-3 text-white" />
                             </div>
                           )}
@@ -299,7 +297,7 @@ export default function OnboardingPage() {
               {/* ── Step 2: Interests ─────────────────────────── */}
               {step === 2 && (
                 <>
-                  <h2 className="text-base font-bold text-white mb-0.5">What do you love?</h2>
+                  <h2 className="text-base font-bold text-slate-100 mb-0.5">What do you love?</h2>
                   <p className="text-xs text-slate-500 mb-5">Pick as many as you like — we&apos;ll prioritize these.</p>
                   <div className="grid grid-cols-2 gap-2">
                     {INTERESTS.map((opt) => {
@@ -313,8 +311,8 @@ export default function OnboardingPage() {
                           whileTap={{ scale: 0.97 }}
                           className={`flex items-center gap-2.5 p-3 rounded-xl border transition-all text-left ${
                             selected
-                              ? "border-electric-500/50 bg-electric-500/15 text-white"
-                              : "border-white/8 bg-white/3 text-slate-400 hover:bg-white/6 hover:border-white/15"
+                              ? "border-electric-500/50 bg-electric-500/15 text-slate-100"
+                              : "border-ink-900/10 bg-ink-900/[0.03] text-slate-400 hover:bg-ink-900/[0.05] hover:border-ink-900/15"
                           }`}
                         >
                           <Icon className={`w-4 h-4 shrink-0 ${selected ? "text-electric-400" : ""}`} />
@@ -330,7 +328,7 @@ export default function OnboardingPage() {
               {/* ── Step 3: Food prefs ────────────────────────── */}
               {step === 3 && (
                 <>
-                  <h2 className="text-base font-bold text-white mb-0.5">Food preferences</h2>
+                  <h2 className="text-base font-bold text-slate-100 mb-0.5">Food preferences</h2>
                   <p className="text-xs text-slate-500 mb-5">We&apos;ll factor these into restaurant picks.</p>
                   <div className="grid grid-cols-2 gap-2">
                     {FOOD_PREFS.map((opt) => {
@@ -343,19 +341,19 @@ export default function OnboardingPage() {
                           whileTap={{ scale: 0.97 }}
                           className={`flex items-center gap-2.5 p-3 rounded-xl border transition-all text-left ${
                             selected
-                              ? "border-yellow-500/50 bg-yellow-500/10 text-white"
-                              : "border-white/8 bg-white/3 text-slate-400 hover:bg-white/6 hover:border-white/15"
+                              ? "border-gold-400/50 bg-gold-400/15 text-slate-100"
+                              : "border-ink-900/10 bg-ink-900/[0.03] text-slate-400 hover:bg-ink-900/[0.05] hover:border-ink-900/15"
                           }`}
                         >
                           <span className="text-base shrink-0">{opt.emoji}</span>
                           <span className="text-sm font-medium">{opt.label}</span>
-                          {selected && <Check className="w-3 h-3 text-yellow-400 ml-auto shrink-0" />}
+                          {selected && <Check className="w-3 h-3 text-gold-500 ml-auto shrink-0" />}
                         </motion.button>
                       );
                     })}
                   </div>
                   {saveError && (
-                    <p className="text-xs text-red-400 mt-4 text-center">{saveError}</p>
+                    <p className="text-xs text-coral-600 mt-4 text-center">{saveError}</p>
                   )}
                 </>
               )}
@@ -418,7 +416,7 @@ export default function OnboardingPage() {
               animate={{
                 width: i === step ? 20 : 6,
                 backgroundColor:
-                  i === step ? "#3b82f6" : i < step ? "#60a5fa" : "rgba(255,255,255,0.12)",
+                  i === step ? "#ff6b5c" : i < step ? "#ffb38a" : "rgba(20,34,61,0.15)",
               }}
               transition={{ duration: 0.3 }}
               className="h-1.5 rounded-full"

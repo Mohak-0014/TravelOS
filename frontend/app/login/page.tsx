@@ -3,19 +3,17 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Compass, Mail, Lock, User, ArrowRight, Loader2 } from "lucide-react";
+import { Plane, Mail, Lock, User, ArrowRight, Loader2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { Token, UserOut } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
-import dynamic from "next/dynamic";
-
-const StarField = dynamic(() => import("@/components/3d/StarField"), { ssr: false });
+import SkyScene from "@/components/travel/SkyScene";
 
 const TAGLINES = [
   "Gets smarter every trip.",
   "Remembers what you love.",
   "Plans so you don't have to.",
-  "Your AI travel brain.",
+  "Your AI travel companion.",
 ];
 
 export default function LoginPage() {
@@ -56,15 +54,8 @@ export default function LoginPage() {
 
   return (
     <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-space-900">
-      {/* 3D starfield background */}
-      <StarField />
-
-      {/* Gradient blobs */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute -top-40 -left-40 w-96 h-96 rounded-full bg-electric-500/10 blur-3xl animate-float-slow" />
-        <div className="absolute -bottom-40 -right-40 w-96 h-96 rounded-full bg-purple-600/10 blur-3xl animate-float-medium" />
-        <div className="absolute top-1/2 left-1/4 w-64 h-64 rounded-full bg-gold/5 blur-3xl" />
-      </div>
+      {/* Golden Hour sky background */}
+      <SkyScene />
 
       {/* Center card */}
       <motion.div
@@ -76,27 +67,27 @@ export default function LoginPage() {
         {/* Logo + brand */}
         <div className="text-center mb-8">
           <motion.div
-            animate={{ rotate: [0, 5, -5, 0] }}
+            animate={{ rotate: [0, 4, -4, 0], y: [0, -3, 0] }}
             transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
             className="inline-flex w-14 h-14 rounded-2xl bg-electric-gradient items-center justify-center shadow-electric mb-4"
           >
-            <Compass className="w-7 h-7 text-white" />
+            <Plane className="w-7 h-7 text-white" />
           </motion.div>
-          <h1 className="text-2xl font-bold gradient-text mb-1">TravelOS</h1>
+          <h1 className="font-display text-3xl font-semibold gradient-text mb-1">TravelOS</h1>
           <p className="text-sm text-slate-500" suppressHydrationWarning>{tagline}</p>
         </div>
 
         {/* Glass card */}
         <div className="glass-card p-7">
           {/* Mode toggle */}
-          <div className="flex rounded-xl bg-space-800/60 p-1 mb-6">
+          <div className="flex rounded-xl bg-space-800 p-1 mb-6 border border-ink-900/6">
             {(["login", "register"] as const).map((m) => (
               <button
                 key={m}
                 onClick={() => { setMode(m); setError(null); }}
                 className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
                   mode === m
-                    ? "bg-electric-500 text-white shadow-electric-sm"
+                    ? "bg-coral-500 text-white shadow-coral-sm"
                     : "text-slate-400 hover:text-slate-200"
                 }`}
               >
@@ -159,7 +150,7 @@ export default function LoginPage() {
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: "auto" }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="text-sm text-coral-400 bg-coral-500/10 border border-coral-500/20 rounded-xl px-4 py-3"
+                  className="text-sm text-coral-600 bg-coral-500/10 border border-coral-500/25 rounded-xl px-4 py-3"
                 >
                   {error}
                 </motion.p>
@@ -184,7 +175,7 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <p className="text-center text-xs text-slate-600 mt-4">
+        <p className="text-center text-xs text-slate-500 mt-4">
           The travel planning system that remembers you.
         </p>
       </motion.div>

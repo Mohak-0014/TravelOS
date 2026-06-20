@@ -114,12 +114,12 @@ const ITEM_ICONS: Record<string, { emoji: string; icon: IconComponent; color: st
 // ── Destination gradient helper ───────────────────────────────────────────────
 
 const DEST_GRADIENTS = [
-  "from-blue-900 via-indigo-800 to-purple-900",
-  "from-emerald-900 via-teal-800 to-cyan-900",
-  "from-orange-900 via-rose-800 to-pink-900",
-  "from-violet-900 via-purple-800 to-pink-900",
-  "from-sky-900 via-blue-800 to-indigo-900",
-  "from-amber-900 via-orange-800 to-red-900",
+  "from-sky-400 via-cyan-500 to-blue-600",
+  "from-amber-400 via-orange-500 to-rose-500",
+  "from-emerald-400 via-teal-500 to-cyan-600",
+  "from-rose-400 via-pink-500 to-fuchsia-600",
+  "from-indigo-400 via-blue-500 to-sky-600",
+  "from-orange-400 via-amber-500 to-yellow-500",
 ];
 
 function destGradient(city: string): string {
@@ -251,7 +251,7 @@ function AgentPipeline({ messages }: { messages?: { role: string; content: strin
                       ? "bg-emerald-500/20 border-emerald-500/60 text-emerald-400"
                       : active
                       ? "bg-electric-500/20 border-electric-500/60 text-electric-400 shadow-electric-sm"
-                      : "bg-space-700 border-white/10 text-slate-600"
+                      : "bg-space-700 border-ink-900/10 text-slate-600"
                   }`}
                 >
                   {done ? (
@@ -278,7 +278,7 @@ function AgentPipeline({ messages }: { messages?: { role: string; content: strin
               {i < PIPELINE_STEPS.length - 1 && (
                 <div
                   className={`w-8 h-px mx-1 mb-5 transition-all duration-700 ${
-                    done ? "bg-emerald-500/60" : "bg-white/10"
+                    done ? "bg-emerald-500/60" : "bg-ink-900/[0.06]"
                   }`}
                 />
               )}
@@ -314,7 +314,7 @@ function WeatherTimeline({ days }: { days: WeatherDay[] }) {
           className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl shrink-0 ${
             d.is_adverse
               ? "bg-coral-500/10 border border-coral-500/20"
-              : "bg-white/5 border border-white/8"
+              : "bg-ink-900/[0.04] border border-ink-900/10"
           }`}
         >
           <span className="text-[10px] text-slate-500">
@@ -355,7 +355,7 @@ function DayNav({
           className={`w-full text-left px-3 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
             d === activeDay
               ? "bg-electric-500/15 border border-electric-500/30 text-electric-400"
-              : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
+              : "text-slate-500 hover:text-slate-300 hover:bg-ink-900/[0.04]"
           }`}
         >
           Day {d}
@@ -406,14 +406,14 @@ function EditTripModal({
     }
   }
 
-  const fieldCls = "w-full bg-space-800 border border-white/10 rounded-xl px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-electric-500/50 transition-colors";
+  const fieldCls = "w-full bg-space-800 border border-ink-900/10 rounded-xl px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-electric-500/50 transition-colors";
 
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink-900/40 backdrop-blur-sm"
       onClick={onClose}
     >
       <motion.div
@@ -426,7 +426,7 @@ function EditTripModal({
       >
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-base font-semibold text-slate-100">Edit Trip</h2>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all">
+          <button onClick={onClose} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-ink-900/[0.04] transition-all">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -478,7 +478,7 @@ function EditTripModal({
           {error && <p className="text-xs text-coral-400">{error}</p>}
 
           <div className="flex gap-3 pt-1">
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm text-slate-400 border border-white/10 hover:bg-white/5 transition-colors">
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm text-slate-400 border border-ink-900/10 hover:bg-ink-900/[0.04] transition-colors">
               Cancel
             </button>
             <motion.button
@@ -520,7 +520,7 @@ function ConciergeSwapCard({ approval, onDecision }: { approval: ApprovalOut; on
 
       {/* Before → After diff */}
       <div className="flex items-start gap-2 mb-3">
-        <div className="flex-1 p-2.5 rounded-xl bg-white/3 border border-white/8">
+        <div className="flex-1 p-2.5 rounded-xl bg-ink-900/[0.03] border border-ink-900/10">
           <p className="text-[10px] text-slate-500 mb-0.5">Current</p>
           <p className="text-xs text-slate-400 line-through leading-snug">{current.title}</p>
           {current.start_time && (
@@ -551,7 +551,7 @@ function ConciergeSwapCard({ approval, onDecision }: { approval: ApprovalOut; on
               className={`w-full text-left px-3 py-2 rounded-xl text-xs transition-all border ${
                 idx === selectedAlt
                   ? "bg-electric-500/15 border-electric-500/30 text-slate-100"
-                  : "bg-white/3 border-white/8 text-slate-400 hover:bg-white/5"
+                  : "bg-ink-900/[0.03] border-ink-900/10 text-slate-400 hover:bg-ink-900/[0.04]"
               }`}
             >
               <span className="font-medium">{alt.title}</span>
@@ -578,7 +578,7 @@ function ConciergeSwapCard({ approval, onDecision }: { approval: ApprovalOut; on
         <motion.button
           whileTap={{ scale: 0.96 }}
           onClick={() => onDecision(a.id, "rejected")}
-          className="text-xs bg-white/5 text-slate-400 border border-white/10 px-4 py-2 rounded-xl hover:bg-white/10 transition-colors"
+          className="text-xs bg-ink-900/[0.04] text-slate-400 border border-ink-900/10 px-4 py-2 rounded-xl hover:bg-ink-900/[0.06] transition-colors"
         >
           Keep original
         </motion.button>
@@ -621,7 +621,7 @@ function ConciergeAddCard({ approval, onDecision }: { approval: ApprovalOut; onD
         <motion.button
           whileTap={{ scale: 0.96 }}
           onClick={() => onDecision(a.id, "rejected")}
-          className="text-xs bg-white/5 text-slate-400 border border-white/10 px-4 py-2 rounded-xl hover:bg-white/10 transition-colors"
+          className="text-xs bg-ink-900/[0.04] text-slate-400 border border-ink-900/10 px-4 py-2 rounded-xl hover:bg-ink-900/[0.06] transition-colors"
         >
           No thanks
         </motion.button>
@@ -692,7 +692,7 @@ function ApprovalCard({
           <motion.button
             whileTap={{ scale: 0.96 }}
             onClick={() => onDecision(a.id, "rejected")}
-            className="text-xs bg-white/5 text-slate-400 border border-white/10 px-4 py-2 rounded-xl hover:bg-white/10 transition-colors"
+            className="text-xs bg-ink-900/[0.04] text-slate-400 border border-ink-900/10 px-4 py-2 rounded-xl hover:bg-ink-900/[0.06] transition-colors"
           >
             Skip
           </motion.button>
@@ -751,7 +751,7 @@ function ApprovalCard({
           <motion.button
             whileTap={{ scale: 0.96 }}
             onClick={() => onDecision(a.id, "rejected")}
-            className="text-xs bg-white/5 text-slate-400 border border-white/10 px-4 py-2 rounded-xl hover:bg-white/10 transition-colors"
+            className="text-xs bg-ink-900/[0.04] text-slate-400 border border-ink-900/10 px-4 py-2 rounded-xl hover:bg-ink-900/[0.06] transition-colors"
           >
             Keep original
           </motion.button>
@@ -793,7 +793,7 @@ function ApprovalCard({
           <motion.button
             whileTap={{ scale: 0.96 }}
             onClick={() => onDecision(a.id, "rejected")}
-            className="text-xs bg-white/5 text-slate-400 border border-white/10 px-4 py-2 rounded-xl hover:bg-white/10 transition-colors"
+            className="text-xs bg-ink-900/[0.04] text-slate-400 border border-ink-900/10 px-4 py-2 rounded-xl hover:bg-ink-900/[0.06] transition-colors"
           >
             Not interested
           </motion.button>
@@ -828,7 +828,7 @@ function ApprovalCard({
         <motion.button
           whileTap={{ scale: 0.96 }}
           onClick={() => onDecision(a.id, "rejected")}
-          className="text-xs bg-white/5 text-slate-400 border border-white/10 px-4 py-2 rounded-xl hover:bg-white/10 transition-colors"
+          className="text-xs bg-ink-900/[0.04] text-slate-400 border border-ink-900/10 px-4 py-2 rounded-xl hover:bg-ink-900/[0.06] transition-colors"
         >
           Reject
         </motion.button>
@@ -889,7 +889,7 @@ function PackingListPanel({
       </div>
 
       {/* Progress bar */}
-      <div className="mb-4 h-1.5 bg-white/5 rounded-full overflow-hidden">
+      <div className="mb-4 h-1.5 bg-ink-900/[0.04] rounded-full overflow-hidden">
         <motion.div
           className="h-full bg-emerald-500 rounded-full"
           animate={{ width: `${totalItems > 0 ? (checkedCount / totalItems) * 100 : 0}%` }}
@@ -901,7 +901,7 @@ function PackingListPanel({
         {/* Toggle header */}
         <button
           onClick={() => setOpen((v) => !v)}
-          className="w-full flex items-center justify-between px-5 py-4 hover:bg-white/3 transition-colors"
+          className="w-full flex items-center justify-between px-5 py-4 hover:bg-ink-900/[0.03] transition-colors"
         >
           <span className="text-sm text-slate-400">
             {open ? "Hide checklist" : `Show ${totalItems} items across ${Object.keys(packingList.categories).length} categories`}
@@ -921,7 +921,7 @@ function PackingListPanel({
               transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
               className="overflow-hidden"
             >
-              <div className="px-5 pb-5 space-y-5 border-t border-white/6">
+              <div className="px-5 pb-5 space-y-5 border-t border-ink-900/8">
                 {Object.entries(packingList.categories).map(([cat, items]) => (
                   <div key={cat} className="pt-4">
                     <div className="flex items-center gap-2 mb-2.5">
@@ -938,14 +938,14 @@ function PackingListPanel({
                           className={`flex items-center gap-2.5 text-left px-3 py-2 rounded-xl transition-all text-xs ${
                             checked.has(item)
                               ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400"
-                              : "bg-white/4 border border-white/6 text-slate-400 hover:bg-white/8 hover:text-slate-300"
+                              : "bg-ink-900/[0.03] border border-ink-900/8 text-slate-400 hover:bg-ink-900/[0.05] hover:text-slate-300"
                           }`}
                         >
                           <div
                             className={`w-4 h-4 rounded-md border shrink-0 flex items-center justify-center transition-all ${
                               checked.has(item)
                                 ? "bg-emerald-500 border-emerald-500"
-                                : "border-white/20"
+                                : "border-ink-900/15"
                             }`}
                           >
                             {checked.has(item) && <CheckCircle2 className="w-2.5 h-2.5 text-white" />}
@@ -1375,7 +1375,7 @@ export default function TripDetailPage() {
         <div className="sticky top-16 z-40 border-b border-coral-500/20 bg-coral-500/10 backdrop-blur-glass">
           <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
             <AlertCircle className="w-4 h-4 text-coral-400 shrink-0" />
-            <p className="text-sm text-coral-300 font-medium flex-1">
+            <p className="text-sm text-coral-600 font-medium flex-1">
               {pendingApprovals.length} change{pendingApprovals.length !== 1 ? "s" : ""} need
               {pendingApprovals.length === 1 ? "s" : ""} your review
             </p>
@@ -1447,10 +1447,10 @@ export default function TripDetailPage() {
       >
         {/* Overlay — heavier when photo is present for text legibility */}
         {trip.cover_image_url
-          ? <div className="absolute inset-0 bg-gradient-to-t from-space-900/90 via-black/40 to-black/20" />
+          ? <div className="absolute inset-0 bg-gradient-to-t from-ink-900/90 via-ink-900/45 to-ink-900/10" />
           : <>
               <div className="absolute inset-0 opacity-15" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")` }} />
-              <div className="absolute inset-0 bg-gradient-to-t from-space-900/80 via-transparent to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-t from-ink-900/65 via-ink-900/10 to-transparent" />
             </>
         }
 
@@ -1481,7 +1481,7 @@ export default function TripDetailPage() {
             <div className="flex flex-col gap-2 lg:items-end">
               {/* Trip meta pills */}
               <div className="flex flex-wrap gap-2">
-                <div className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10">
+                <div className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20">
                   <Calendar className="w-3 h-3" />
                   {new Date(trip.start_date + "T00:00:00").toLocaleDateString("en-US", {
                     month: "short",
@@ -1494,12 +1494,12 @@ export default function TripDetailPage() {
                     year: "numeric",
                   })}
                 </div>
-                <div className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10">
+                <div className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20">
                   <Users className="w-3 h-3" />
                   {trip.num_travelers} traveler{trip.num_travelers !== 1 ? "s" : ""}
                 </div>
                 {trip.budget_total && (
-                  <div className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10">
+                  <div className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20">
                     <DollarSign className="w-3 h-3" />
                     {trip.budget_currency} {trip.budget_total.toLocaleString()}
                   </div>
@@ -1513,7 +1513,7 @@ export default function TripDetailPage() {
                 <button
                   onClick={handleShare}
                   disabled={shareLoading}
-                  className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10 hover:bg-white/10 transition-colors disabled:opacity-50"
+                  className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20 hover:bg-white/15 transition-colors disabled:opacity-50"
                   title="Copy share link"
                 >
                   {shareLoading ? (
@@ -1530,7 +1530,7 @@ export default function TripDetailPage() {
                 <div className="relative">
                   <button
                     onClick={() => setCalendarOpen((v) => !v)}
-                    className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10 hover:bg-white/10 transition-colors"
+                    className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20 hover:bg-white/15 transition-colors"
                     title="Export to calendar"
                   >
                     <CalendarPlus className="w-3 h-3" />
@@ -1547,7 +1547,7 @@ export default function TripDetailPage() {
                       >
                         <button
                           onClick={handleGoogleCalendar}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 transition-colors"
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:bg-ink-900/[0.04] transition-colors"
                         >
                           <CalendarDays className="w-3.5 h-3.5 text-electric-400 shrink-0" />
                           Google Calendar
@@ -1555,7 +1555,7 @@ export default function TripDetailPage() {
                         <button
                           onClick={handleDownloadIcs}
                           disabled={icsLoading}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 transition-colors disabled:opacity-50"
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:bg-ink-900/[0.04] transition-colors disabled:opacity-50"
                         >
                           {icsLoading
                             ? <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
@@ -1571,7 +1571,7 @@ export default function TripDetailPage() {
                 {/* Edit trip */}
                 <button
                   onClick={() => setEditOpen(true)}
-                  className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10 hover:bg-white/10 transition-colors"
+                  className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20 hover:bg-white/15 transition-colors"
                   title="Edit trip"
                 >
                   <Pencil className="w-3 h-3" />
@@ -1581,7 +1581,7 @@ export default function TripDetailPage() {
                 {/* Delete trip */}
                 <button
                   onClick={() => setDeleteConfirm(true)}
-                  className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10 hover:bg-coral-500/15 hover:text-coral-300 hover:border-coral-500/30 transition-colors"
+                  className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20 hover:bg-coral-500/25 hover:text-white hover:border-coral-400 transition-colors"
                   title="Delete trip"
                 >
                   <Trash2 className="w-3 h-3" />
@@ -1662,7 +1662,7 @@ export default function TripDetailPage() {
                           .getElementById("hotels-section")
                           ?.scrollIntoView({ behavior: "smooth" })
                       }
-                      className="w-full text-left px-3 py-2 rounded-xl text-sm text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all flex items-center gap-2"
+                      className="w-full text-left px-3 py-2 rounded-xl text-sm text-slate-500 hover:text-slate-300 hover:bg-ink-900/[0.04] transition-all flex items-center gap-2"
                     >
                       <Hotel className="w-3 h-3" />
                       Hotels
@@ -1675,7 +1675,7 @@ export default function TripDetailPage() {
                           .getElementById("budget-section")
                           ?.scrollIntoView({ behavior: "smooth" })
                       }
-                      className="w-full text-left px-3 py-2 rounded-xl text-sm text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all flex items-center gap-2"
+                      className="w-full text-left px-3 py-2 rounded-xl text-sm text-slate-500 hover:text-slate-300 hover:bg-ink-900/[0.04] transition-all flex items-center gap-2"
                     >
                       <Wallet className="w-3 h-3" />
                       Budget
@@ -1688,7 +1688,7 @@ export default function TripDetailPage() {
                           .getElementById("packing-section")
                           ?.scrollIntoView({ behavior: "smooth" })
                       }
-                      className="w-full text-left px-3 py-2 rounded-xl text-sm text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all flex items-center gap-2"
+                      className="w-full text-left px-3 py-2 rounded-xl text-sm text-slate-500 hover:text-slate-300 hover:bg-ink-900/[0.04] transition-all flex items-center gap-2"
                     >
                       <Luggage className="w-3 h-3" />
                       Packing
@@ -1777,7 +1777,7 @@ export default function TripDetailPage() {
                         className="glass-card overflow-hidden"
                       >
                         {/* Day header */}
-                        <div className="flex items-center justify-between px-5 py-4 border-b border-white/6">
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-ink-900/8">
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-xl bg-electric-500/15 border border-electric-500/30 flex items-center justify-center">
                               <span className="text-xs font-bold text-electric-400">{day}</span>
@@ -1835,7 +1835,7 @@ export default function TripDetailPage() {
                                       />
                                     </div>
                                     {!isLast && (
-                                      <div className="w-px flex-1 bg-white/6 mt-1.5 min-h-[16px]" />
+                                      <div className="w-px flex-1 bg-ink-900/[0.05] mt-1.5 min-h-[16px]" />
                                     )}
                                   </div>
 
@@ -1941,7 +1941,7 @@ export default function TripDetailPage() {
                         <div className="px-5 pb-4">
                           <button
                             onClick={() => setChatOpen(true)}
-                            className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-electric-400 transition-colors py-1.5 px-3 rounded-full border border-white/8 hover:border-electric-500/30 hover:bg-electric-500/8"
+                            className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-electric-400 transition-colors py-1.5 px-3 rounded-full border border-ink-900/10 hover:border-electric-500/30 hover:bg-electric-500/8"
                           >
                             <Compass className="w-3 h-3" />
                             Ask Concierge about Day {day} →
@@ -2031,7 +2031,7 @@ export default function TripDetailPage() {
                             </p>
                           )}
                           {selectedHotel.meal_plan && (
-                            <span className="inline-block mt-2 text-[10px] text-slate-500 bg-white/5 border border-white/8 px-2 py-0.5 rounded-full">
+                            <span className="inline-block mt-2 text-[10px] text-slate-500 bg-ink-900/[0.04] border border-ink-900/10 px-2 py-0.5 rounded-full">
                               {selectedHotel.meal_plan}
                             </span>
                           )}
@@ -2086,7 +2086,7 @@ export default function TripDetailPage() {
                           )}
                           <div className="flex items-center gap-2 mt-1.5">
                             {hotel.meal_plan && (
-                              <span className="text-[10px] text-slate-600 bg-white/4 border border-white/6 px-1.5 py-0.5 rounded-full">
+                              <span className="text-[10px] text-slate-600 bg-ink-900/[0.03] border border-ink-900/8 px-1.5 py-0.5 rounded-full">
                                 {hotel.meal_plan}
                               </span>
                             )}
@@ -2184,7 +2184,7 @@ export default function TripDetailPage() {
               style={{ height: "50vh", maxHeight: "480px" }}
             >
               {/* Chat header */}
-              <div className="flex items-center gap-3 px-4 py-3 border-b border-white/8 shrink-0">
+              <div className="flex items-center gap-3 px-4 py-3 border-b border-ink-900/10 shrink-0">
                 <div className="w-7 h-7 rounded-xl bg-electric-gradient flex items-center justify-center shadow-electric-sm">
                   <Compass className="w-3.5 h-3.5 text-white" />
                 </div>
@@ -2241,7 +2241,7 @@ export default function TripDetailPage() {
                         className={`max-w-[85%] text-xs px-3.5 py-2.5 rounded-2xl leading-relaxed ${
                           msg.role === "user"
                             ? "bg-electric-gradient text-white rounded-br-sm shadow-electric-sm"
-                            : "glass-light text-slate-300 rounded-bl-sm border border-white/8"
+                            : "glass-light text-slate-300 rounded-bl-sm border border-ink-900/10"
                         }`}
                       >
                         {msg.text}
@@ -2252,7 +2252,7 @@ export default function TripDetailPage() {
                         {msg.sources.slice(0, 4).map((s, j) => (
                           <span
                             key={j}
-                            className="text-[10px] bg-white/5 text-slate-500 px-2 py-0.5 rounded-full border border-white/8"
+                            className="text-[10px] bg-ink-900/[0.04] text-slate-500 px-2 py-0.5 rounded-full border border-ink-900/10"
                           >
                             {s.name}
                           </span>
@@ -2279,7 +2279,7 @@ export default function TripDetailPage() {
               {/* Input */}
               <form
                 onSubmit={handleChatSubmit}
-                className="flex gap-2 px-3 py-3 border-t border-white/8 shrink-0"
+                className="flex gap-2 px-3 py-3 border-t border-ink-900/10 shrink-0"
               >
                 <input
                   type="text"
@@ -2308,7 +2308,7 @@ export default function TripDetailPage() {
           onClick={() => setChatOpen((v) => !v)}
           className={`flex items-center gap-2 px-5 py-3 rounded-2xl font-semibold text-sm text-white shadow-lg transition-all ${
             chatOpen
-              ? "bg-space-700 border border-white/15"
+              ? "bg-space-700 border border-ink-900/15"
               : "bg-electric-gradient shadow-electric"
           } ${pendingApprovals.length > 0 ? "animate-pulse-glow" : ""}`}
         >
@@ -2338,7 +2338,7 @@ export default function TripDetailPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink-900/40 backdrop-blur-sm"
             onClick={() => setDeleteConfirm(false)}
           >
             <motion.div
@@ -2365,7 +2365,7 @@ export default function TripDetailPage() {
               <div className="flex gap-3">
                 <button
                   onClick={() => setDeleteConfirm(false)}
-                  className="flex-1 py-2.5 rounded-xl text-sm text-slate-400 border border-white/10 hover:bg-white/5 transition-colors"
+                  className="flex-1 py-2.5 rounded-xl text-sm text-slate-400 border border-ink-900/10 hover:bg-ink-900/[0.04] transition-colors"
                 >
                   Cancel
                 </button>
@@ -2432,7 +2432,7 @@ function AgentActivityPanel({
       <div className="glass-card overflow-hidden">
         <button
           onClick={() => setDrawerOpen(true)}
-          className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/3 transition-colors"
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-ink-900/[0.03] transition-colors"
         >
           <div className="flex items-center gap-2">
             <ZapIcon className="w-3.5 h-3.5 text-electric-400" />
@@ -2440,13 +2440,13 @@ function AgentActivityPanel({
               Agent Log
             </p>
           </div>
-          <span className="text-[10px] text-slate-600 bg-white/5 px-2 py-0.5 rounded-full">
+          <span className="text-[10px] text-slate-600 bg-ink-900/[0.04] px-2 py-0.5 rounded-full">
             {messages.length} events
           </span>
         </button>
 
         {/* Last 3 messages preview */}
-        <div className="px-4 pb-3 space-y-1 border-t border-white/6 pt-2">
+        <div className="px-4 pb-3 space-y-1 border-t border-ink-900/8 pt-2">
           {messages.slice(-3).map((msg, i) => {
             const meta = agentMeta(msg.role);
             return (
@@ -2477,7 +2477,7 @@ function AgentActivityPanel({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
+              className="fixed inset-0 bg-ink-900/40 backdrop-blur-sm z-40"
               onClick={() => setDrawerOpen(false)}
             />
 
@@ -2488,10 +2488,10 @@ function AgentActivityPanel({
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed top-0 right-0 h-full w-full max-w-[420px] bg-space-900 border-l border-white/8 z-50 flex flex-col shadow-2xl"
+              className="fixed top-0 right-0 h-full w-full max-w-[420px] bg-space-900 border-l border-ink-900/10 z-50 flex flex-col shadow-2xl"
             >
               {/* Header */}
-              <div className="flex items-center justify-between px-5 py-4 border-b border-white/8 shrink-0">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-ink-900/10 shrink-0">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-xl bg-electric-500/15 border border-electric-500/30 flex items-center justify-center">
                     <ZapIcon className="w-4 h-4 text-electric-400" />
@@ -2532,7 +2532,7 @@ function AgentActivityPanel({
                           {meta.emoji}
                         </div>
                         {gi < groups.length - 1 && (
-                          <div className="w-px flex-1 bg-white/8 mt-1" />
+                          <div className="w-px flex-1 bg-ink-900/[0.05] mt-1" />
                         )}
                       </div>
 
@@ -2553,7 +2553,7 @@ function AgentActivityPanel({
               </div>
 
               {/* Footer */}
-              <div className="px-5 py-3 border-t border-white/8 shrink-0">
+              <div className="px-5 py-3 border-t border-ink-900/10 shrink-0">
                 <p className="text-[10px] text-slate-600 text-center">
                   Powered by TravelOS multi-agent system
                 </p>
