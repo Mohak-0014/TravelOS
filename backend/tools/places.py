@@ -49,7 +49,10 @@ def _cache_key(lat: float, lng: float, radius_m: int) -> str:
 
 def _element_to_attraction(el: dict) -> Attraction | None:
     tags = el.get("tags", {})
-    name = tags.get("name") or tags.get("name:en")
+    # Prefer the English / international OSM name so titles are readable for an
+    # English-speaking user; fall back to the local-language name only if neither
+    # exists. (OSM stores English names under name:en / int_name.)
+    name = tags.get("name:en") or tags.get("int_name") or tags.get("name")
     if not name:
         return None
 

@@ -102,6 +102,8 @@ async def _search_foursquare(
                     "Authorization": f"Bearer {settings.FOURSQUARE_API_KEY}",
                     "X-Places-Api-Version": _FSQ_VERSION,
                     "Accept": "application/json",
+                    # Best-effort English localization of venue names.
+                    "Accept-Language": "en",
                 },
             )
             resp.raise_for_status()
@@ -169,7 +171,8 @@ async def _search_overpass(lat: float, lng: float, radius_m: int) -> list[Restau
     for el in data.get("elements", []):
         try:
             tags = el.get("tags", {})
-            name = tags.get("name") or tags.get("name:en")
+            # Prefer English / international OSM name for readability.
+            name = tags.get("name:en") or tags.get("int_name") or tags.get("name")
             if not name:
                 continue
             osm_id = str(el["id"])
