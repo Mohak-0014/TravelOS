@@ -5,11 +5,13 @@ import pytest
 from langchain_core.messages import AIMessage, SystemMessage
 
 from backend.agents.itinerary_planner import (
+    _MUST_SEE_MIN_SITELINKS,
     _build_prompt,
     _build_weather_state,
     _cluster_attractions,
     _compass_direction,
     _default_itinerary,
+    _enforce_must_see,
     _item_to_dict,
     _ItemDraft,
     _parse_items,
@@ -733,3 +735,122 @@ def test_build_prompt_no_must_see_when_nothing_famous() -> None:
     a = _make_attraction("Local Spot", 48.86, 2.34, "attraction", is_major=True)  # prominence 0
     prompt = _build_prompt(trip, {}, [], [a], [], {})
     assert "MUST-SEE landmarks" not in prompt
+
+
+# ── _enforce_must_see ─────────────────────────────────────────────────────────
+
+
+def _famous(name: str, ref: str = "") -> Attraction:
+    """Return a famous (must-see) attraction with sitelink count above the threshold."""
+    a = _make_attraction(name, 48.86, 2.34, "attraction", is_major=True)
+    a.prominence = _MUST_SEE_MIN_SITELINKS + 5
+    a.source_ref = ref or a.osm_id
+    return a
+
+
+def _item(title: str, day: int = 1, ref: str = "", lat: float | None = None) -> _ItemDraft:
+    return _ItemDraft(
+        day_number=day,
+        item_date=f"2026-07-0{day}",
+        item_type="activity",
+        title=title,
+        latitude=lat,
+        longitude=2.34 if lat is not None else None,
+        source_ref=ref or None,
+        sort_order=0,
+    )
+
+
+def test_enforce_must_see_noop_when_no_must_sees() -> None:
+    trip = _mock_trip()
+    obscure = _make_attraction("Tiny Tomb", 48.86, 2.34)  # prominence 0 → not must-see
+    items = [_item("Random Walk")]
+    assert _enforce_must_see(items, [obscure], trip) == items
+
+
+def test_enforce_must_see_noop_when_all_already_scheduled() -> None:
+    trip = _mock_trip()
+    eiffel = _famous("Eiffel Tower", ref="way/5013364")
+    items = [_item("Eiffel Tower", ref="way/5013364")]
+    result = _enforce_must_see(items, [eiffel], trip)
+    assert result == items
+
+
+def test_enforce_must_see_swaps_missing_icon_into_slot() -> None:
+    trip = _mock_trip(end_date=date(2026, 7, 3))  # 3 days → max_swaps = activity_count - 6
+    eiffel = _famous("Eiffel Tower", ref="way/eiffel")
+
+    # 3 days × 3 activity slots each = 9 activity items; max_swaps = 9 - 6 = 3
+    items = [
+        _item("Filler A", day=1),
+        _item("Filler B", day=2),
+        _item("Filler C", day=3),
+        _item("Filler D", day=1),
+        _item("Filler E", day=2),
+        _item("Filler F", day=3),
+        _item("Filler G", day=1),
+        _item("Filler H", day=2),
+        _item("Filler I", day=3),
+    ]
+    result = _enforce_must_see(items, [eiffel], trip)
+    titles = [i.title for i in result]
+    assert "Eiffel Tower" in titles
+
+
+def test_enforce_must_see_preserves_day_and_sort_order() -> None:
+    trip = _mock_trip(end_date=date(2026, 7, 3))
+    louvre = _famous("Louvre Museum", ref="way/louvre")
+
+    # 8 items with real coords (won't be replaced first); 1 LLM-invented on day 2 with metadata
+    real = [_item(f"Real{i}", day=d, lat=48.86) for i, d in enumerate([1, 1, 1, 2, 2, 3, 3, 3])]
+    target = _ItemDraft(
+        day_number=2,
+        item_date="2026-07-02",
+        item_type="activity",
+        title="LLM Filler",
+        start_time="10:00",
+        sort_order=5,
+    )
+    items = real + [target]  # 9 items: max_swaps = 9 - 6 = 3; target has no coords → replaced first
+    result = _enforce_must_see(items, [louvre], trip)
+
+    enforced = next(i for i in result if i.title == "Louvre Museum")
+    assert enforced.day_number == 2
+    assert enforced.sort_order == 5
+    assert enforced.start_time == "10:00"
+
+
+def test_enforce_must_see_respects_max_swaps_cap() -> None:
+    trip = _mock_trip(end_date=date(2026, 7, 1))  # 1 day
+    # 2 activity items, trip_days=1 → max_swaps = 2 - 2 = 0 → no swaps
+    icon_a = _famous("Icon A", ref="way/a")
+    icon_b = _famous("Icon B", ref="way/b")
+    items = [_item("Slot 1"), _item("Slot 2")]
+    result = _enforce_must_see(items, [icon_a, icon_b], trip)
+    titles = [i.title for i in result]
+    assert "Icon A" not in titles
+    assert "Icon B" not in titles
+
+
+def test_enforce_must_see_prefers_invented_slots_over_real_ones() -> None:
+    trip = _mock_trip(end_date=date(2026, 7, 2))  # 2 days
+    icon = _famous("Icon", ref="way/icon")
+
+    # 6 items across 2 days: max_swaps = 6 - 4 = 2
+    real_slot = _item("Real Place", day=1, ref="way/real", lat=48.86)  # has coords → lower priority
+    invented = _item("LLM Filler", day=1)  # no coords → replaced first
+    items = [
+        real_slot,
+        invented,
+        _item("X2", day=2),
+        _item("X3", day=2),
+        _item("X4", day=1),
+        _item("X5", day=2),
+    ]
+    result = _enforce_must_see(items, [icon], trip)
+
+    # The invented slot (no lat/lng) should have been replaced, not the real one
+    titles = [i.title for i in result]
+    assert "LLM Filler" not in titles
+    assert "Real Place" in titles
+    assert "Icon" in titles

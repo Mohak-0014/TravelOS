@@ -223,20 +223,31 @@ async def test_propose_swap_returns_none_on_llm_error() -> None:
 
 # ── _propose_upgrade ──────────────────────────────────────────────────────────
 
+_FAKE_CANDIDATE = {
+    "id": "hotel-cand-1",
+    "name": "Grand Ryokan",
+    "star_rating": 5.0,
+    "price_total": 800.0,
+}
+
 
 @pytest.mark.asyncio
 async def test_propose_upgrade_returns_proposal_on_valid_response() -> None:
     trip = _mock_trip(budget_total=3000.0)
-    hotel_state = {"selected": {"name": "Business Hotel", "price_total": 300.0}}
+    hotel_state = {"selected": {"name": "Business Hotel", "price_total": 300.0, "star_rating": 3.0}}
     costs = {"lodging": 300.0, "activities": 400.0, "meals": 200.0, "transport": 100.0}
 
     llm_response = MagicMock()
     llm_response.content = (
-        '{"title": "Premium Ryokan Night", "description": "Upgrade to traditional inn", '
+        '{"title": "Grand Ryokan", "description": "Upgrade to traditional inn", '
         '"reason": "Uses remaining USD 2000 well"}'
     )
 
-    with patch("backend.agents.budget_optimizer.build_llm") as mock_build:
+    with (
+        patch("backend.agents.budget_optimizer._load_upgrade_candidate") as mock_cand,
+        patch("backend.agents.budget_optimizer.build_llm") as mock_build,
+    ):
+        mock_cand.return_value = _FAKE_CANDIDATE
         mock_llm = MagicMock()
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
         mock_build.return_value = mock_llm
@@ -245,15 +256,31 @@ async def test_propose_upgrade_returns_proposal_on_valid_response() -> None:
 
     assert result is not None
     assert result["change_type"] == "budget_upgrade"
-    assert result["payload"]["title"] == "Premium Ryokan Night"
+    assert result["payload"]["candidate_id"] == "hotel-cand-1"
+    assert result["payload"]["title"] == "Grand Ryokan"
     assert result["payload"]["budget_remaining"] > 0
+
+
+@pytest.mark.asyncio
+async def test_propose_upgrade_returns_none_when_no_candidate() -> None:
+    trip = _mock_trip(budget_total=3000.0)
+
+    with patch("backend.agents.budget_optimizer._load_upgrade_candidate") as mock_cand:
+        mock_cand.return_value = None
+        result = await _propose_upgrade(trip, {}, {}, -0.35)
+
+    assert result is None
 
 
 @pytest.mark.asyncio
 async def test_propose_upgrade_returns_none_on_llm_error() -> None:
     trip = _mock_trip(budget_total=3000.0)
 
-    with patch("backend.agents.budget_optimizer.build_llm") as mock_build:
+    with (
+        patch("backend.agents.budget_optimizer._load_upgrade_candidate") as mock_cand,
+        patch("backend.agents.budget_optimizer.build_llm") as mock_build,
+    ):
+        mock_cand.return_value = _FAKE_CANDIDATE
         mock_llm = MagicMock()
         mock_llm.ainvoke = AsyncMock(side_effect=RuntimeError("boom"))
         mock_build.return_value = mock_llm

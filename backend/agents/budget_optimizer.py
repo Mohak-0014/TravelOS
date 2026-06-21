@@ -10,7 +10,7 @@ from sqlalchemy import select
 from backend.agents._llm import build_llm
 from backend.core.logging import get_logger
 from backend.db.base import AsyncSessionLocal
-from backend.db.models import Approval, ItineraryItem, Trip
+from backend.db.models import Approval, HotelCandidate, ItineraryItem, Trip
 from backend.graphs.state import TravelOSState
 
 logger = get_logger(__name__)
@@ -248,12 +248,22 @@ async def _propose_upgrade(
     selected = hotel_state.get("selected") or {}
     hotel_name = selected.get("name", "current hotel") if isinstance(selected, dict) else "hotel"
 
+    # Require a concrete DB candidate — text-only suggestions can't be applied on approve
+    candidate = await _load_upgrade_candidate(str(trip.id), selected)
+    if candidate is None:
+        return None
+
+    star_str = f" ({candidate['star_rating']:.0f}★)" if candidate.get("star_rating") else ""
+    price_str = (
+        f", {currency} {candidate['price_total']:.0f} total" if candidate.get("price_total") else ""
+    )
     prompt = (
         f"City: {trip.destination_city}\n"
         f"Current hotel: {hotel_name}\n"
+        f"Upgrade option: {candidate['name']}{star_str}{price_str}\n"
         f"Trip budget: {currency} {trip.budget_total:.0f}"
         f" (only {abs(deviation) * 100:.0f}% used — {remaining:.0f} remaining)\n"
-        "Suggest one premium experience or hotel upgrade that uses the remaining budget well."
+        "In one sentence, explain why this hotel upgrade is worthwhile."
     )
     raw = await _llm_json(prompt, _UPGRADE_SYSTEM)
     if raw is None or not raw.get("title"):
@@ -263,17 +273,50 @@ async def _propose_upgrade(
         "proposed_by": "budget_optimizer",
         "change_type": "budget_upgrade",
         "summary": (
-            f"Budget upgrade suggestion: \"{raw['title']}\""
+            f"Budget upgrade: switch to \"{candidate['name']}\""
             f" — trip is {abs(deviation) * 100:.0f}% under budget"
         ),
         "payload": {
-            "title": raw["title"],
+            "candidate_id": candidate["id"],
+            "title": candidate["name"],
             "description": raw.get("description", ""),
             "reason": raw.get("reason", "Uses remaining budget well"),
             "budget_remaining": round(remaining, 2),
             "currency": currency,
+            "star_rating": candidate.get("star_rating"),
+            "price_total": candidate.get("price_total"),
         },
     }
+
+
+async def _load_upgrade_candidate(
+    trip_id: str,
+    selected: dict,  # type: ignore[type-arg]
+) -> dict | None:  # type: ignore[type-arg]
+    """Return the best non-selected HotelCandidate with a higher star rating than current."""
+    try:
+        current_stars = float(selected.get("star_rating") or 0)
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(HotelCandidate)
+                .where(
+                    HotelCandidate.trip_id == trip_id,
+                    HotelCandidate.is_selected.is_(False),
+                )
+                .order_by(HotelCandidate.star_rating.desc())
+                .limit(5)
+            )
+            for c in result.scalars().all():
+                if float(c.star_rating or 0) > current_stars:
+                    return {
+                        "id": str(c.id),
+                        "name": c.name,
+                        "star_rating": float(c.star_rating) if c.star_rating else None,
+                        "price_total": float(c.price_total) if c.price_total else None,
+                    }
+    except Exception as exc:
+        logger.error("budget_optimizer_candidate_load_error", trip_id=trip_id, error=str(exc))
+    return None
 
 
 async def _llm_json(
@@ -286,7 +329,8 @@ async def _llm_json(
         raw = str(getattr(response, "content", response)).strip()
         start, end = raw.find("{"), raw.rfind("}") + 1
         if start >= 0 and end > start:
-            return json.loads(raw[start:end])
+            parsed = json.loads(raw[start:end])
+            return parsed if isinstance(parsed, dict) else None
     except Exception as exc:
         logger.warning("budget_optimizer_llm_error", error=str(exc))
     return None

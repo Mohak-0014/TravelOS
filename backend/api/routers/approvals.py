@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.api.dependencies import get_current_active_user
 from backend.core.logging import get_logger
 from backend.db.base import get_db
-from backend.db.models import Approval, ItineraryItem, Trip, User, UserFeedback
+from backend.db.models import Approval, HotelCandidate, ItineraryItem, Trip, User, UserFeedback
 from backend.db.schemas import ApprovalCreate, ApprovalDecision, ApprovalOut
 
 logger = get_logger(__name__)
@@ -273,6 +273,15 @@ async def resolve_approval(
                 sort_order=next_sort,
             )
             db.add(new_item)
+
+    elif body.decision == "approved" and approval.change_type == "budget_upgrade":
+        candidate_id = approval.payload.get("candidate_id")
+        if candidate_id:
+            all_result = await db.execute(
+                select(HotelCandidate).where(HotelCandidate.trip_id == approval.trip_id)
+            )
+            for c in all_result.scalars().all():
+                c.is_selected = str(c.id) == str(candidate_id)
 
     await db.flush()
 
