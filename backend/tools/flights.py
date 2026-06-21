@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 
 _BASE = "https://api.duffel.com"
 _OFFER_REQUESTS_URL = f"{_BASE}/air/offer_requests"
-_AIRPORTS_URL = f"{_BASE}/air/airports"
+_PLACES_URL = f"{_BASE}/places/suggestions"
 _VERSION = "v2"
 
 _IATA_TTL = 86400  # 24h cache for airport lookups
@@ -81,17 +81,28 @@ async def resolve_iata(
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             r = await client.get(
-                _AIRPORTS_URL,
-                params={"query": city, "limit": 5},
+                _PLACES_URL,
+                params={"query": city, "limit": 10},
                 headers=_headers(api_key),
             )
             r.raise_for_status()
-            for item in r.json().get("data", []):
-                iata = item.get("iata_code")
-                if iata:
-                    if cache:
-                        await redis_set_cached(cache, key, {"iata": iata}, ttl=_IATA_TTL)
-                    return str(iata)
+            items = r.json().get("data", [])
+            # Prefer city-level IATA (e.g. LON, PAR, NYC) — covers all metro airports
+            for item in items:
+                if item.get("type") == "city":
+                    iata = item.get("iata_code")
+                    if iata:
+                        if cache:
+                            await redis_set_cached(cache, key, {"iata": iata}, ttl=_IATA_TTL)
+                        return str(iata)
+            # Fall back to first airport result
+            for item in items:
+                if item.get("type") == "airport":
+                    iata = item.get("iata_code")
+                    if iata:
+                        if cache:
+                            await redis_set_cached(cache, key, {"iata": iata}, ttl=_IATA_TTL)
+                        return str(iata)
     except Exception as exc:
         logger.warning("duffel_iata_resolve_error", city=city, error=str(exc))
     return None
