@@ -22,6 +22,43 @@ _DEFAULT_CATEGORIES = "13065"
 # OSM amenity tags that count as dining options
 _OSM_AMENITIES = ["restaurant", "cafe", "fast_food", "bar", "food_court", "pub"]
 
+# Foursquare's newer Places API sometimes ignores the category filter and returns
+# any nearby POI (museums, monuments, even car showrooms). Keep only venues whose
+# category names look like food/drink; if that leaves nothing we fall back to OSM.
+_FOOD_CATEGORY_KEYWORDS = (
+    "restaurant",
+    "café",
+    "cafe",
+    "coffee",
+    "bakery",
+    "bar",
+    "pub",
+    "diner",
+    "bistro",
+    "eatery",
+    "food",
+    "pizz",
+    "grill",
+    "steak",
+    "brasserie",
+    "tavern",
+    "breakfast",
+    "brunch",
+    "deli",
+    "dessert",
+    "ice cream",
+    "snack",
+    "canteen",
+    "kitchen",
+    "dhaba",
+)
+
+
+def _is_food_place(categories: list[str]) -> bool:
+    """True if any Foursquare category name looks like a food/drink venue."""
+    blob = " ".join(categories).lower()
+    return any(kw in blob for kw in _FOOD_CATEGORY_KEYWORDS)
+
 
 class Restaurant(BaseModel):
     fsq_id: str  # OSM node ID when sourced from Overpass
@@ -113,6 +150,7 @@ async def _search_foursquare(
         return []
 
     results: list[Restaurant] = []
+    dropped = 0
     for place in data.get("results", []):
         try:
             # New API: coordinates are direct fields, not nested under geocodes.main
@@ -127,13 +165,18 @@ async def _search_foursquare(
             address = ", ".join(p for p in addr_parts if p) or None
             # New API uses fsq_place_id instead of fsq_id
             place_id = place.get("fsq_place_id") or place.get("fsq_id", "")
+            cat_names = [c.get("name", "") for c in place.get("categories", [])]
+            # Guard against the API returning non-food POIs despite the category filter.
+            if not _is_food_place(cat_names):
+                dropped += 1
+                continue
             results.append(
                 Restaurant(
                     fsq_id=place_id,
                     name=place.get("name", ""),
                     lat=place_lat,
                     lng=place_lng,
-                    categories=[c.get("name", "") for c in place.get("categories", [])],
+                    categories=cat_names,
                     price_level=None,
                     address=address,
                     source_ref=place_id,
@@ -142,6 +185,8 @@ async def _search_foursquare(
         except Exception:
             continue
 
+    if dropped:
+        logger.info("foursquare_dropped_non_food", lat=lat, lng=lng, dropped=dropped)
     return results
 
 
