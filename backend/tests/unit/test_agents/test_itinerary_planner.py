@@ -520,9 +520,19 @@ def test_item_to_dict_roundtrips() -> None:
 # ── _cluster_attractions ──────────────────────────────────────────────────────
 
 
-def _make_attraction(name: str, lat: float, lng: float, kinds: str = "museum") -> Attraction:
+def _make_attraction(
+    name: str, lat: float, lng: float, kinds: str = "museum", is_major: bool = False
+) -> Attraction:
     osm_id = f"node/{hash(name) & 0xFFFF}"
-    return Attraction(osm_id=osm_id, name=name, lat=lat, lng=lng, kinds=kinds, source_ref=osm_id)
+    return Attraction(
+        osm_id=osm_id,
+        name=name,
+        lat=lat,
+        lng=lng,
+        kinds=kinds,
+        source_ref=osm_id,
+        is_major=is_major,
+    )
 
 
 def test_cluster_attractions_empty_returns_empty() -> None:
@@ -661,3 +671,65 @@ def test_build_prompt_includes_scheduling_guidelines() -> None:
     assert "12:00" in prompt  # lunch hint from _MEAL_RULES
     assert "19:00" in prompt  # dinner hint
     assert "09:00" in prompt  # museum window
+
+
+# ── _build_prompt — prominence + variety (task #23) ───────────────────────────
+
+
+def test_build_prompt_marks_major_attractions_with_star() -> None:
+    trip = _mock_trip()
+    major = _make_attraction("Eiffel Tower", 48.8584, 2.2945, "attraction", is_major=True)
+    prompt = _build_prompt(trip, {}, [], [major], [], {})
+    assert "★" in prompt
+    assert "Eiffel Tower" in prompt
+
+
+def test_build_prompt_has_no_star_when_no_major_attractions() -> None:
+    trip = _mock_trip()
+    prompt = _build_prompt(trip, {}, [], [_mock_attraction()], [], {})
+    assert "★" not in prompt
+
+
+def test_build_prompt_ranks_major_attractions_first() -> None:
+    trip = _mock_trip()
+    # All three share one cluster; the anchor is a third (minor) venue so the two
+    # compared names appear only in the ranked member list.
+    anchor = _make_attraction("MMM Anchor Place", 48.8606, 2.3376, "attraction")
+    minor = _make_attraction("AAA Minor Gallery", 48.8606, 2.3376, "gallery")
+    major = _make_attraction("ZZZ Major Museum", 48.8606, 2.3376, "museum", is_major=True)
+    prompt = _build_prompt(trip, {}, [], [anchor, minor, major], [], {})
+    assert prompt.index("ZZZ Major Museum") < prompt.index("AAA Minor Gallery")
+
+
+def test_build_prompt_includes_prominence_and_variety_rules() -> None:
+    trip = _mock_trip()
+    prompt = _build_prompt(trip, {}, [], [], [], {})
+    assert "Selection priorities" in prompt
+    assert "Prominence" in prompt
+    assert "2 venues of the same kind" in prompt  # same-type cap
+
+
+def test_build_prompt_includes_example_day() -> None:
+    trip = _mock_trip()
+    prompt = _build_prompt(trip, {}, [], [], [], {})
+    assert "well-balanced day" in prompt
+
+
+def test_build_prompt_lists_must_see_landmarks() -> None:
+    trip = _mock_trip()
+    famous = _make_attraction("World Famous Fort", 48.86, 2.34, "attraction", is_major=True)
+    famous.prominence = 95
+    obscure = _make_attraction("Tiny Tomb", 48.861, 2.341, "monument", is_major=True)
+    obscure.prominence = 2
+    prompt = _build_prompt(trip, {}, [], [famous, obscure], [], {})
+    assert "MUST-SEE landmarks" in prompt
+    assert "World Famous Fort" in prompt
+    # First mention of the famous sight is in the MUST-SEE block (before the cluster list).
+    assert prompt.index("MUST-SEE") < prompt.index("World Famous Fort")
+
+
+def test_build_prompt_no_must_see_when_nothing_famous() -> None:
+    trip = _mock_trip()
+    a = _make_attraction("Local Spot", 48.86, 2.34, "attraction", is_major=True)  # prominence 0
+    prompt = _build_prompt(trip, {}, [], [a], [], {})
+    assert "MUST-SEE landmarks" not in prompt

@@ -35,6 +35,11 @@ _PACE_ITEMS_PER_DAY: dict[str, int] = {
 }
 _DEFAULT_ITEMS_PER_DAY = 4
 
+# Sights with at least this many Wikidata sitelinks are treated as must-see icons and
+# forced into the plan (world landmarks have 50–150; obscure local sites have 1–3).
+_MUST_SEE_MIN_SITELINKS = 10
+_MUST_SEE_CAP = 12
+
 # Walking tolerance → max metres between consecutive same-day venues (task #4)
 _WALKING_TOLERANCE_M: dict[str, int] = {"low": 500, "medium": 2000, "high": 5000}
 
@@ -170,7 +175,9 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
         lat, lng = coords
         weather_days, attractions, restaurants = await asyncio.gather(
             fetch_weather(lat, lng, trip.start_date, trip.end_date),
-            search_attractions(lat, lng, radius_m=5000, limit=30),
+            # Wide radius so a metro's iconic sights (often >5 km from centre) are in
+            # range; search_attractions ranks them prominent-first before truncating.
+            search_attractions(lat, lng, radius_m=12000, limit=30),
             search_restaurants(lat, lng, radius_m=2000),
         )
     else:
@@ -373,20 +380,41 @@ def _build_prompt(
             center_lng = sum(a.lng for a in attractions) / len(attractions)
 
         clusters = _cluster_attractions(attractions)
+
+        # MUST-SEE: the most world-famous sights (by Wikidata sitelink count) take
+        # absolute priority — list them explicitly and require every one be scheduled.
+        must_see = [
+            a for a in attractions if a.prominence >= _MUST_SEE_MIN_SITELINKS or a.is_heritage
+        ][:_MUST_SEE_CAP]
+        if must_see:
+            parts += [
+                "",
+                "**MUST-SEE landmarks** (most famous first) — the area's iconic sights."
+                " Schedule as many of these as the days allow, always preferring them over"
+                " any other venue and spreading them across the days:",
+            ]
+            for a in must_see:
+                parts.append(f"  • {a.name} [{a.kinds}] source_ref={a.source_ref}")
+
+        any_major = any(a.is_major for a in attractions)
+        legend = " — ★ marks a major / well-known sight; prefer these" if any_major else ""
         parts += [
             "",
             f"**Real Attractions Near {trip.destination_city}**"
-            " (grouped by walking zone — prefer same-day activities within one group)",
+            " (grouped by walking zone — prefer same-day activities within one group)" + legend,
         ]
         for label, anchor, members in clusters[:6]:  # cap at 6 clusters
             clat = sum(a.lat for a in members) / len(members)
             clng = sum(a.lng for a in members) / len(members)
             direction = _compass_direction(center_lat, center_lng, clat, clng)
             parts.append(f"  Group {label} — {direction}, near {anchor}")
-            for a in members[:6]:  # cap at 6 per cluster
+            # Most-prominent (★, high composite score) sights first so they survive the cap.
+            ranked = sorted(members, key=lambda a: (not a.is_major, -a.score, a.name))
+            for a in ranked[:6]:  # cap at 6 per cluster
+                star = " ★" if a.is_major else ""
                 hours_str = f" hours={a.opening_hours}" if a.opening_hours else ""
                 parts.append(
-                    f"    · {a.name} [{a.kinds}] lat={a.lat:.4f} lng={a.lng:.4f}"
+                    f"    · {a.name}{star} [{a.kinds}] lat={a.lat:.4f} lng={a.lng:.4f}"
                     f" source_ref={a.source_ref}{hours_str}"
                 )
     else:
@@ -406,6 +434,23 @@ def _build_prompt(
     parts += ["", "**Scheduling Guidelines**", f"  Meals: {_MEAL_RULES}"]
     for kinds_str, window in _SCHEDULING_RULES:
         parts.append(f"  {kinds_str} → {window}")
+
+    # Prominence + variety priorities (task #23)
+    parts += [
+        "",
+        "**Selection priorities** (apply in order):",
+        "  1. Prominence — favour iconic, well-known sights over obscure ones. A great"
+        " day is anchored by a famous landmark, not filler; include the city's signature"
+        " attractions even if slightly farther.",
+        "  2. Variety — at most 2 venues of the same kind per day (e.g. ≤2 museums)."
+        " Mix indoor and outdoor and vary the experience across the day.",
+        "  3. Proximity — only then group the day's picks within one walking zone.",
+        "",
+        "**Example of one well-balanced day** (follow this PATTERN, not these names):",
+        "  09:00 a major museum or landmark (indoor) · 12:30 lunch at a local restaurant"
+        " · 15:00 a contrasting OUTDOOR sight nearby — a park or viewpoint · 19:30 dinner."
+        "  → one museum, an indoor+outdoor mix, no same-type repeats.",
+    ]
 
     if items_per_day <= 3:
         structure = "morning activity, lunch (meal), afternoon activity"
