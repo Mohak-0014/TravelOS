@@ -1213,7 +1213,7 @@ export default function TripDetailPage() {
 
   // ── Chat ──────────────────────────────────────────────────────────────────────
 
-  const [chatOpen, setChatOpen] = useState(false);
+  const [panelMode, setPanelMode] = useState<"none" | "map" | "concierge">("concierge");
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
@@ -1679,7 +1679,7 @@ export default function TripDetailPage() {
       )}
 
       {/* ── Main layout (3-col at xl, 4-col at 2xl with concierge) ──────── */}
-      <div className="max-w-7xl 2xl:max-w-[1560px] mx-auto px-4 pt-8 pb-32">
+      <div className="max-w-7xl mx-auto px-4 pt-8 pb-32">
         <div className="flex gap-6 lg:gap-8 relative">
 
           {/* ── LEFT SIDEBAR: Day navigation ─────────────────────────────── */}
@@ -1984,7 +1984,7 @@ export default function TripDetailPage() {
                           <motion.button
                             whileHover={{ scale: 1.02, x: 2 }}
                             whileTap={{ scale: 0.97 }}
-                            onClick={() => setChatOpen(true)}
+                            onClick={() => setPanelMode("concierge")}
                             className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-electric-400 transition-colors py-1.5 px-3 rounded-full border border-ink-900/10 hover:border-electric-500/30 hover:bg-electric-500/8"
                           >
                             <Compass className="w-3 h-3" />
@@ -2345,389 +2345,287 @@ export default function TripDetailPage() {
 
           </div>
 
-          {/* ── RIGHT SIDEBAR ─────────────────────────────────────────────── */}
-          <div className="hidden xl:block w-[300px] shrink-0">
-            <div className="sticky top-24 space-y-4">
-
-              {/* Map — persistent sticky column showing itinerary pins + selected hotel */}
-              {trip.latitude != null && trip.longitude != null && (pinnedItems.length > 0 || (selectedHotel?.latitude != null)) && (
-                <div className="rounded-2xl overflow-hidden border border-white/[0.06] shadow-xl">
-                  {/* Map header */}
-                  <div className="flex items-center gap-2.5 px-4 py-3 bg-space-800 border-b border-white/[0.05]">
-                    <div className="w-7 h-7 rounded-xl bg-electric-500/15 border border-electric-500/25 flex items-center justify-center shrink-0">
-                      <MapPin className="w-3.5 h-3.5 text-electric-400" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-slate-200">{trip.destination_city}</p>
-                      <p className="text-[10px] text-slate-500">{pinnedItems.length} places mapped</p>
-                    </div>
-                    {selectedHotel && (
-                      <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full font-medium shrink-0">
-                        🏨 Hotel
-                      </span>
-                    )}
-                  </div>
-
-                  <TripMap
-                    items={pinnedItems}
-                    centerLat={trip.latitude}
-                    centerLng={trip.longitude}
-                    hotel={
-                      selectedHotel?.latitude != null && selectedHotel?.longitude != null
-                        ? { lat: selectedHotel.latitude, lng: selectedHotel.longitude, name: selectedHotel.name }
-                        : null
-                    }
-                    height="360px"
-                  />
-
-                  {/* Legend */}
-                  <div className="flex items-center gap-3 px-4 py-2.5 bg-space-800 border-t border-white/[0.05]">
-                    {[
-                      { color: "#f87171", label: "Activity" },
-                      { color: "#fbbf24", label: "Meal" },
-                      { color: "#34d399", label: "Transport" },
-                      { color: "#f59e0b", label: "Hotel", size: "w-2.5 h-2.5" },
-                    ].map(({ color, label, size }) => (
-                      <div key={label} className="flex items-center gap-1.5">
-                        <div className={`${size ?? "w-2 h-2"} rounded-full shrink-0`} style={{ background: color }} />
-                        <span className="text-[9px] text-slate-600 uppercase tracking-wide">{label}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Agent Activity collapsible */}
-              {trip.agent_messages && trip.agent_messages.length > 0 && (
-                <AgentActivityPanel messages={trip.agent_messages} />
-              )}
-            </div>
-          </div>
-
-          {/* ── CONCIERGE COLUMN (2xl+ only — persistent, no toggle) ──────── */}
-          <div className="hidden 2xl:flex flex-col w-[320px] shrink-0">
-            <div
-              className="sticky top-24 rounded-2xl border border-white/[0.07] overflow-hidden flex flex-col bg-space-800 shadow-xl"
-              style={{ height: "calc(100vh - 7rem)" }}
-            >
-              {/* Header */}
-              <div className="relative flex items-center gap-3 px-4 py-4 border-b border-white/[0.06] shrink-0 bg-gradient-to-r from-electric-500/8 via-purple-500/4 to-transparent">
-                <div className="relative w-9 h-9 rounded-2xl bg-electric-gradient flex items-center justify-center shadow-electric-sm shrink-0">
-                  <Compass className="w-4 h-4 text-white" />
-                  <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-space-800 flex items-center justify-center">
-                    <span className="absolute w-full h-full rounded-full bg-emerald-400 animate-ping opacity-60" />
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-white">AI Concierge</p>
-                  <p className="text-[10px] text-emerald-400/80 flex items-center gap-1">
-                    <span className="w-1 h-1 rounded-full bg-emerald-400 inline-block" />
-                    {trip.destination_city} specialist
-                  </p>
-                </div>
-              </div>
-
-              {/* Messages */}
-              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 scrollbar-hide">
-                {chatMessages.length === 0 && (
-                  <div className="flex flex-col items-center px-2 py-8">
-                    {/* Animated orb */}
-                    <div className="relative w-16 h-16 mb-4 shrink-0">
-                      <div className="absolute inset-0 rounded-full bg-electric-gradient opacity-15 blur-xl animate-pulse" />
-                      <div className="absolute inset-0 rounded-full border border-electric-500/20 animate-ping" style={{ animationDuration: "3s" }} />
-                      <div className="absolute inset-3 rounded-full bg-electric-gradient/20 flex items-center justify-center border border-electric-500/30">
-                        <Compass className="w-6 h-6 text-electric-400" />
-                      </div>
-                    </div>
-                    <h3 className="text-sm font-bold text-slate-100 mb-1 text-center">
-                      Your {trip.destination_city} Guide
-                    </h3>
-                    <p className="text-[11px] text-slate-500 text-center leading-relaxed mb-5 max-w-[200px]">
-                      Real-time advice on restaurants, hidden spots, logistics and more
-                    </p>
-                    <div className="w-full space-y-2">
-                      {[
-                        { q: `Best restaurants in ${trip.destination_city}?`, icon: "🍽" },
-                        { q: "What should I pack?", icon: "🧳" },
-                        { q: "Local transport tips", icon: "🚇" },
-                      ].map(({ q, icon }) => (
-                        <motion.button
-                          key={q}
-                          whileHover={{ x: 2 }}
-                          whileTap={{ scale: 0.98 }}
-                          onClick={() => {
-                            setChatMessages((prev) => [...prev, { role: "user", text: q }]);
-                            setChatLoading(true);
-                            sendMessage(q).finally(() => setChatLoading(false));
-                          }}
-                          className="w-full flex items-center gap-3 text-left px-3.5 py-2.5 rounded-xl text-xs bg-electric-500/8 border border-electric-500/15 text-slate-300 hover:bg-electric-500/15 hover:border-electric-500/30 hover:text-slate-100 transition-all group"
-                        >
-                          <span className="text-sm leading-none">{icon}</span>
-                          <span className="flex-1">{q}</span>
-                          <ChevronRight className="w-3 h-3 text-slate-600 group-hover:text-electric-400 transition-colors" />
-                        </motion.button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {chatMessages.map((msg, i) => (
-                  <motion.div
-                    key={i}
-                    initial={{ opacity: 0, y: 8, scale: 0.97 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    transition={{ type: "spring", damping: 28, stiffness: 380 }}
-                  >
-                    {msg.role === "assistant" ? (
-                      <div className="flex items-start gap-2.5">
-                        <div className="w-7 h-7 rounded-xl bg-electric-gradient flex items-center justify-center shrink-0 mt-0.5 shadow-electric-sm">
-                          <Compass className="w-3 h-3 text-white" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="bg-space-700/80 border border-electric-500/10 text-slate-200 text-xs px-3.5 py-2.5 rounded-2xl rounded-tl-sm leading-relaxed">
-                            {msg.text}
-                          </div>
-                          {msg.sources && msg.sources.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-1.5">
-                              {msg.sources.slice(0, 4).map((s, j) => (
-                                <span key={j} className="text-[10px] bg-ink-900/[0.04] text-slate-500 px-2 py-0.5 rounded-full border border-ink-900/10">
-                                  {s.name}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex justify-end">
-                        <div className="bg-electric-gradient text-white text-xs px-3.5 py-2.5 rounded-2xl rounded-br-sm shadow-electric-sm max-w-[85%] leading-relaxed">
-                          {msg.text}
-                        </div>
-                      </div>
-                    )}
-                  </motion.div>
-                ))}
-                {chatLoading && (
-                  <div className="flex items-start gap-2.5">
-                    <div className="w-7 h-7 rounded-xl bg-electric-gradient flex items-center justify-center shrink-0 shadow-electric-sm">
-                      <Compass className="w-3 h-3 text-white" />
-                    </div>
-                    <div className="bg-space-700/80 border border-electric-500/10 px-4 py-3 rounded-2xl rounded-tl-sm">
-                      <div className="flex gap-1.5 items-center h-3">
-                        {[0, 1, 2].map((i) => (
-                          <motion.div
-                            key={i}
-                            className="w-1.5 h-1.5 bg-electric-400 rounded-full"
-                            animate={{ y: [-3, 0, -3] }}
-                            transition={{ repeat: Infinity, duration: 0.9, delay: i * 0.18, ease: "easeInOut" }}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-                <div ref={chatEndRef} />
-              </div>
-
-              {/* Input */}
-              <div className="px-4 py-3 border-t border-white/[0.06] shrink-0 bg-gradient-to-t from-space-800/60 to-transparent">
-                <form onSubmit={handleChatSubmit} className="flex gap-2 items-center">
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    disabled={chatLoading}
-                    placeholder={`Ask about ${trip.destination_city}…`}
-                    className="flex-1 bg-space-700 border border-white/[0.07] focus:border-electric-500/50 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 outline-none transition-all"
-                  />
-                  <motion.button
-                    type="submit"
-                    disabled={chatLoading || !chatInput.trim()}
-                    whileHover={{ scale: 1.06 }}
-                    whileTap={{ scale: 0.94 }}
-                    className="w-9 h-9 rounded-xl bg-electric-gradient text-white flex items-center justify-center disabled:opacity-40 transition-opacity shadow-electric-sm shrink-0"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                  </motion.button>
-                </form>
-              </div>
-            </div>
-          </div>
-
         </div>
       </div>
 
-      {/* ── Floating Concierge Button (hidden at 2xl where the column is shown) ── */}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3 2xl:hidden">
-        {/* Chat panel */}
+      {/* ── Floating Panel — Map / AI Concierge ──────────────────────────── */}
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
         <AnimatePresence>
-          {chatOpen && (
+          {panelMode !== "none" && (
             <motion.div
               initial={{ opacity: 0, y: 20, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 20, scale: 0.95 }}
               transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-              className="w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border border-white/[0.07] overflow-hidden flex flex-col bg-space-800 shadow-2xl"
-              style={{ height: "50vh", maxHeight: "480px" }}
+              className="w-[400px] max-w-[calc(100vw-2rem)] rounded-2xl border border-white/[0.07] overflow-hidden flex flex-col bg-space-800 shadow-2xl"
+              style={{ maxHeight: "min(580px, calc(100vh - 7rem))" }}
             >
-              {/* Chat header */}
-              <div className="relative flex items-center gap-3 px-4 py-3.5 border-b border-white/[0.06] shrink-0 bg-gradient-to-r from-electric-500/8 via-purple-500/4 to-transparent">
-                <div className="relative w-8 h-8 rounded-xl bg-electric-gradient flex items-center justify-center shadow-electric-sm shrink-0">
-                  <Compass className="w-3.5 h-3.5 text-white" />
-                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 border border-space-800" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-white">AI Concierge</p>
-                  <p className="text-[10px] text-emerald-400/80">{trip.destination_city} specialist</p>
-                </div>
+              {/* Shared header with tab switcher */}
+              <div className="flex items-center gap-1.5 px-3 py-2.5 border-b border-white/[0.06] shrink-0 bg-gradient-to-r from-electric-500/5 to-transparent">
+                {/* Map tab */}
+                {trip.latitude != null && (pinnedItems.length > 0 || selectedHotel?.latitude != null) && (
+                  <button
+                    onClick={() => setPanelMode("map")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      panelMode === "map"
+                        ? "bg-electric-500/15 border border-electric-500/30 text-electric-400"
+                        : "text-slate-500 hover:text-slate-300 hover:bg-white/[0.04]"
+                    }`}
+                  >
+                    <MapPin className="w-3 h-3" />
+                    Map
+                    {panelMode === "map" && <span className="text-[9px] text-slate-500 font-normal">{pinnedItems.length}</span>}
+                  </button>
+                )}
+                {/* Concierge tab */}
                 <button
-                  onClick={() => setChatOpen(false)}
-                  className="text-slate-500 hover:text-slate-300 transition-colors p-1"
+                  onClick={() => setPanelMode("concierge")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    panelMode === "concierge"
+                      ? "bg-electric-gradient text-white shadow-electric-sm"
+                      : "text-slate-500 hover:text-slate-300 hover:bg-white/[0.04]"
+                  }`}
                 >
-                  <X className="w-4 h-4" />
+                  <Compass className="w-3 h-3" />
+                  AI Concierge
+                  {panelMode === "concierge" && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 ml-0.5" />
+                  )}
+                </button>
+                <button
+                  onClick={() => setPanelMode("none")}
+                  className="ml-auto p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/[0.04] transition-all"
+                >
+                  <X className="w-3.5 h-3.5" />
                 </button>
               </div>
 
-              {/* Messages */}
-              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 scrollbar-hide">
-                {chatMessages.length === 0 && (
-                  <div className="flex flex-col items-center py-6">
-                    <div className="relative w-12 h-12 mb-3 shrink-0">
-                      <div className="absolute inset-0 rounded-full bg-electric-gradient opacity-15 blur-lg animate-pulse" />
-                      <div className="absolute inset-2 rounded-full bg-electric-gradient/20 flex items-center justify-center border border-electric-500/30">
-                        <Compass className="w-5 h-5 text-electric-400" />
-                      </div>
-                    </div>
-                    <p className="text-xs font-semibold text-slate-200 mb-0.5 text-center">Your {trip.destination_city} Guide</p>
-                    <p className="text-[10px] text-slate-500 text-center mb-4 leading-relaxed">Ask anything about your trip</p>
-                    <div className="w-full space-y-1.5">
-                      {[
-                        { q: `Best restaurants in ${trip.destination_city}?`, icon: "🍽" },
-                        { q: "What should I pack?", icon: "🧳" },
-                        { q: "Local transport tips", icon: "🚇" },
-                      ].map(({ q, icon }) => (
-                        <button
-                          key={q}
-                          onClick={() => {
-                            setChatMessages((prev) => [
-                              ...prev,
-                              { role: "user", text: q },
-                            ]);
-                            setChatLoading(true);
-                            sendMessage(q).finally(() => setChatLoading(false));
-                          }}
-                          className="w-full flex items-center gap-2.5 text-left px-3 py-2 rounded-xl text-xs bg-electric-500/8 border border-electric-500/15 text-slate-300 hover:bg-electric-500/15 hover:text-slate-100 transition-all group"
-                        >
-                          <span className="text-sm leading-none">{icon}</span>
-                          <span className="flex-1">{q}</span>
-                          <ChevronRight className="w-3 h-3 text-slate-600 group-hover:text-electric-400 transition-colors shrink-0" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+              {/* Panel content — animated switch */}
+              <AnimatePresence mode="wait">
 
-                {chatMessages.map((msg, i) => (
+                {/* ── Map view ── */}
+                {panelMode === "map" && (
                   <motion.div
-                    key={i}
-                    initial={{ opacity: 0, y: 8, scale: 0.97 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    transition={{ type: "spring", damping: 28, stiffness: 380 }}
+                    key="map-panel"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="flex-1 flex flex-col overflow-hidden"
                   >
-                    {msg.role === "assistant" ? (
-                      <div className="flex items-start gap-2">
-                        <div className="w-6 h-6 rounded-lg bg-electric-gradient flex items-center justify-center shrink-0 mt-0.5 shadow-electric-sm">
-                          <Compass className="w-2.5 h-2.5 text-white" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="bg-space-700/80 border border-electric-500/10 text-slate-200 text-xs px-3 py-2.5 rounded-2xl rounded-tl-sm leading-relaxed">
-                            {msg.text}
-                          </div>
-                          {msg.sources && msg.sources.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-1.5">
-                              {msg.sources.slice(0, 4).map((s, j) => (
-                                <span key={j} className="text-[10px] bg-ink-900/[0.04] text-slate-500 px-2 py-0.5 rounded-full border border-ink-900/10">
-                                  {s.name}
-                                </span>
-                              ))}
+                    {trip.latitude != null && trip.longitude != null ? (
+                      <>
+                        <TripMap
+                          items={pinnedItems}
+                          centerLat={trip.latitude}
+                          centerLng={trip.longitude}
+                          hotel={
+                            selectedHotel?.latitude != null && selectedHotel?.longitude != null
+                              ? { lat: selectedHotel.latitude, lng: selectedHotel.longitude, name: selectedHotel.name }
+                              : null
+                          }
+                          height="460px"
+                        />
+                        <div className="flex items-center gap-3 px-4 py-2.5 border-t border-white/[0.05] shrink-0">
+                          <p className="text-[10px] text-slate-500 mr-1">{trip.destination_city}</p>
+                          {[
+                            { color: "#f87171", label: "Activity" },
+                            { color: "#fbbf24", label: "Meal" },
+                            { color: "#34d399", label: "Transport" },
+                            { color: "#f59e0b", label: "Hotel" },
+                          ].map(({ color, label }) => (
+                            <div key={label} className="flex items-center gap-1">
+                              <div className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
+                              <span className="text-[9px] text-slate-600">{label}</span>
                             </div>
-                          )}
+                          ))}
                         </div>
-                      </div>
+                      </>
                     ) : (
-                      <div className="flex justify-end">
-                        <div className="bg-electric-gradient text-white text-xs px-3 py-2.5 rounded-2xl rounded-br-sm shadow-electric-sm max-w-[85%] leading-relaxed">
-                          {msg.text}
-                        </div>
+                      <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">
+                        No location data
                       </div>
                     )}
                   </motion.div>
-                ))}
-
-                {chatLoading && (
-                  <div className="flex items-start gap-2">
-                    <div className="w-6 h-6 rounded-lg bg-electric-gradient flex items-center justify-center shrink-0 shadow-electric-sm">
-                      <Compass className="w-2.5 h-2.5 text-white" />
-                    </div>
-                    <div className="bg-space-700/80 border border-electric-500/10 px-3.5 py-3 rounded-2xl rounded-tl-sm">
-                      <div className="flex gap-1.5 items-center h-3">
-                        {[0, 1, 2].map((i) => (
-                          <motion.div
-                            key={i}
-                            className="w-1.5 h-1.5 bg-electric-400 rounded-full"
-                            animate={{ y: [-3, 0, -3] }}
-                            transition={{ repeat: Infinity, duration: 0.9, delay: i * 0.18, ease: "easeInOut" }}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  </div>
                 )}
-                <div ref={chatEndRef} />
-              </div>
 
-              {/* Input */}
-              <div className="px-3 py-3 border-t border-white/[0.06] shrink-0">
-                <form onSubmit={handleChatSubmit} className="flex gap-2 items-center">
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    disabled={chatLoading}
-                    placeholder={`Ask about ${trip.destination_city}…`}
-                    className="flex-1 bg-space-700 border border-white/[0.07] focus:border-electric-500/50 rounded-xl px-3 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 outline-none transition-all"
-                  />
-                  <motion.button
-                    type="submit"
-                    disabled={chatLoading || !chatInput.trim()}
-                    whileHover={{ scale: 1.06 }}
-                    whileTap={{ scale: 0.94 }}
-                    className="w-9 h-9 rounded-xl bg-electric-gradient text-white flex items-center justify-center disabled:opacity-40 transition-opacity shadow-electric-sm shrink-0"
+                {/* ── Concierge view ── */}
+                {panelMode === "concierge" && (
+                  <motion.div
+                    key="concierge-panel"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="flex-1 flex flex-col overflow-hidden"
                   >
-                    <Send className="w-3.5 h-3.5" />
-                  </motion.button>
-                </form>
-              </div>
+                    {/* Messages */}
+                    <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 scrollbar-hide">
+                      {chatMessages.length === 0 && (
+                        <div className="flex flex-col items-center py-6">
+                          <div className="relative w-14 h-14 mb-3 shrink-0">
+                            <div className="absolute inset-0 rounded-full bg-electric-gradient opacity-15 blur-xl animate-pulse" />
+                            <div className="absolute inset-0 rounded-full border border-electric-500/20 animate-ping" style={{ animationDuration: "3s" }} />
+                            <div className="absolute inset-3 rounded-full bg-electric-gradient/20 flex items-center justify-center border border-electric-500/30">
+                              <Compass className="w-6 h-6 text-electric-400" />
+                            </div>
+                          </div>
+                          <p className="text-sm font-bold text-slate-100 mb-1 text-center">Your {trip.destination_city} Guide</p>
+                          <p className="text-[11px] text-slate-500 text-center mb-5 leading-relaxed">
+                            Real-time advice on restaurants, hidden spots, logistics and more
+                          </p>
+                          <div className="w-full space-y-2">
+                            {[
+                              { q: `Best restaurants in ${trip.destination_city}?`, icon: "🍽" },
+                              { q: "What should I pack?", icon: "🧳" },
+                              { q: "Local transport tips", icon: "🚇" },
+                            ].map(({ q, icon }) => (
+                              <motion.button
+                                key={q}
+                                whileHover={{ x: 2 }}
+                                whileTap={{ scale: 0.98 }}
+                                onClick={() => {
+                                  setChatMessages((prev) => [...prev, { role: "user", text: q }]);
+                                  setChatLoading(true);
+                                  sendMessage(q).finally(() => setChatLoading(false));
+                                }}
+                                className="w-full flex items-center gap-3 text-left px-3.5 py-2.5 rounded-xl text-xs bg-electric-500/8 border border-electric-500/15 text-slate-300 hover:bg-electric-500/15 hover:border-electric-500/30 hover:text-slate-100 transition-all group"
+                              >
+                                <span className="text-base leading-none">{icon}</span>
+                                <span className="flex-1">{q}</span>
+                                <ChevronRight className="w-3 h-3 text-slate-600 group-hover:text-electric-400 transition-colors shrink-0" />
+                              </motion.button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {chatMessages.map((msg, i) => (
+                        <motion.div
+                          key={i}
+                          initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          transition={{ type: "spring", damping: 28, stiffness: 380 }}
+                        >
+                          {msg.role === "assistant" ? (
+                            <div className="flex items-start gap-2.5">
+                              <div className="w-7 h-7 rounded-xl bg-electric-gradient flex items-center justify-center shrink-0 mt-0.5 shadow-electric-sm">
+                                <Compass className="w-3 h-3 text-white" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="bg-space-700/80 border border-electric-500/10 text-slate-200 text-xs px-3.5 py-2.5 rounded-2xl rounded-tl-sm leading-relaxed">
+                                  {msg.text}
+                                </div>
+                                {msg.sources && msg.sources.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-1.5">
+                                    {msg.sources.slice(0, 4).map((s, j) => (
+                                      <span key={j} className="text-[10px] bg-ink-900/[0.04] text-slate-500 px-2 py-0.5 rounded-full border border-ink-900/10">
+                                        {s.name}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex justify-end">
+                              <div className="bg-electric-gradient text-white text-xs px-3.5 py-2.5 rounded-2xl rounded-br-sm shadow-electric-sm max-w-[85%] leading-relaxed">
+                                {msg.text}
+                              </div>
+                            </div>
+                          )}
+                        </motion.div>
+                      ))}
+
+                      {chatLoading && (
+                        <div className="flex items-start gap-2.5">
+                          <div className="w-7 h-7 rounded-xl bg-electric-gradient flex items-center justify-center shrink-0 shadow-electric-sm">
+                            <Compass className="w-3 h-3 text-white" />
+                          </div>
+                          <div className="bg-space-700/80 border border-electric-500/10 px-4 py-3 rounded-2xl rounded-tl-sm">
+                            <div className="flex gap-1.5 items-center h-3">
+                              {[0, 1, 2].map((i) => (
+                                <motion.div
+                                  key={i}
+                                  className="w-1.5 h-1.5 bg-electric-400 rounded-full"
+                                  animate={{ y: [-3, 0, -3] }}
+                                  transition={{ repeat: Infinity, duration: 0.9, delay: i * 0.18, ease: "easeInOut" }}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      <div ref={chatEndRef} />
+                    </div>
+
+                    {/* Input */}
+                    <div className="px-4 py-3 border-t border-white/[0.06] shrink-0">
+                      <form onSubmit={handleChatSubmit} className="flex gap-2 items-center">
+                        <input
+                          type="text"
+                          value={chatInput}
+                          onChange={(e) => setChatInput(e.target.value)}
+                          disabled={chatLoading}
+                          placeholder={`Ask about ${trip.destination_city}…`}
+                          className="flex-1 bg-space-700 border border-white/[0.07] focus:border-electric-500/50 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 outline-none transition-all"
+                        />
+                        <motion.button
+                          type="submit"
+                          disabled={chatLoading || !chatInput.trim()}
+                          whileHover={{ scale: 1.06 }}
+                          whileTap={{ scale: 0.94 }}
+                          className="w-9 h-9 rounded-xl bg-electric-gradient text-white flex items-center justify-center disabled:opacity-40 shadow-electric-sm shrink-0"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                        </motion.button>
+                      </form>
+                    </div>
+                  </motion.div>
+                )}
+
+              </AnimatePresence>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* FAB button */}
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={() => setChatOpen((v) => !v)}
-          className={`flex items-center gap-2 px-5 py-3 rounded-2xl font-semibold text-sm text-white shadow-lg transition-all ${
-            chatOpen
-              ? "bg-space-700 border border-ink-900/15"
-              : "bg-electric-gradient shadow-electric"
-          } ${pendingApprovals.length > 0 ? "animate-pulse-glow" : ""}`}
-        >
-          <Compass className="w-4 h-4" />
-          {chatOpen ? "Close" : "Ask AI"}
-          {!chatOpen && pendingApprovals.length > 0 && (
-            <span className="w-2 h-2 rounded-full bg-coral-400" />
+        {/* FAB buttons */}
+        <div className="flex items-center gap-2">
+          {/* Map FAB — only shown when map data exists */}
+          {trip.latitude != null && (pinnedItems.length > 0 || selectedHotel?.latitude != null) && (
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setPanelMode((v) => v === "map" ? "none" : "map")}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl font-semibold text-sm shadow-lg transition-all border ${
+                panelMode === "map"
+                  ? "bg-space-700 border-electric-500/30 text-electric-400"
+                  : "bg-space-700/80 border-white/[0.08] text-slate-400 hover:text-slate-200 hover:border-white/[0.15]"
+              }`}
+            >
+              <MapPin className="w-4 h-4" />
+              Map
+            </motion.button>
           )}
-        </motion.button>
+
+          {/* AI Concierge FAB */}
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setPanelMode((v) => v === "concierge" ? "none" : "concierge")}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-semibold text-sm shadow-lg transition-all ${
+              panelMode === "concierge"
+                ? "bg-space-700 border border-white/[0.1] text-slate-200"
+                : `bg-electric-gradient text-white shadow-electric ${pendingApprovals.length > 0 ? "animate-pulse-glow" : ""}`
+            }`}
+          >
+            <Compass className="w-4 h-4" />
+            {panelMode === "concierge" ? "Close" : "Ask AI"}
+            {panelMode !== "concierge" && pendingApprovals.length > 0 && (
+              <span className="w-2 h-2 rounded-full bg-coral-400" />
+            )}
+          </motion.button>
+        </div>
       </div>
 
       {/* ── Edit Trip Modal ──────────────────────────────────────────────── */}
@@ -2796,182 +2694,4 @@ export default function TripDetailPage() {
   );
 }
 
-// ── Agent name formatter ──────────────────────────────────────────────────────
 
-const AGENT_DISPLAY: Record<string, { label: string; color: string; emoji: string }> = {
-  travel_style:     { label: "Travel Style",     color: "text-electric-400",  emoji: "🧬" },
-  itinerary_planner:{ label: "Itinerary Planner",color: "text-gold-400",      emoji: "🗺" },
-  hotel_agent:      { label: "Hotel Agent",       color: "text-coral-400",     emoji: "🏨" },
-  budget_optimizer: { label: "Budget Optimizer",  color: "text-emerald-400",   emoji: "💰" },
-  events_agent:     { label: "Events Agent",      color: "text-purple-400",    emoji: "🎟" },
-  packing_list:     { label: "Packing List",      color: "text-teal-400",      emoji: "🧳" },
-  supervisor:       { label: "Supervisor",        color: "text-slate-400",     emoji: "🤖" },
-  validation:       { label: "Validation",        color: "text-slate-400",     emoji: "✅" },
-  conflict_detection:{ label: "Conflict Check",  color: "text-orange-400",    emoji: "⚠️" },
-  human:            { label: "Human",             color: "text-slate-300",     emoji: "👤" },
-  ai:               { label: "AI",                color: "text-electric-400",  emoji: "⚡" },
-};
-
-function agentMeta(role: string) {
-  return AGENT_DISPLAY[role] ?? { label: role, color: "text-slate-400", emoji: "🔷" };
-}
-
-// ── Agent Activity drawer ──────────────────────────────────────────────────────
-
-function AgentActivityPanel({
-  messages,
-}: {
-  messages: { role: string; content: string }[];
-}) {
-  const [drawerOpen, setDrawerOpen] = useState(false);
-
-  // Group consecutive messages by agent
-  type Group = { role: string; msgs: string[] };
-  const groups: Group[] = [];
-  for (const msg of messages) {
-    if (groups.length > 0 && groups[groups.length - 1].role === msg.role) {
-      groups[groups.length - 1].msgs.push(msg.content);
-    } else {
-      groups.push({ role: msg.role, msgs: [msg.content] });
-    }
-  }
-
-  return (
-    <>
-      {/* Sidebar teaser card */}
-      <div className="glass-card overflow-hidden">
-        <button
-          onClick={() => setDrawerOpen(true)}
-          className="w-full flex items-center justify-between px-4 py-3 hover:bg-ink-900/[0.03] transition-colors"
-        >
-          <div className="flex items-center gap-2">
-            <ZapIcon className="w-3.5 h-3.5 text-electric-400" />
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
-              Agent Log
-            </p>
-          </div>
-          <span className="text-[10px] text-slate-600 bg-ink-900/[0.04] px-2 py-0.5 rounded-full">
-            {messages.length} events
-          </span>
-        </button>
-
-        {/* Last 3 messages preview */}
-        <div className="px-4 pb-3 space-y-1 border-t border-ink-900/8 pt-2">
-          {messages.slice(-3).map((msg, i) => {
-            const meta = agentMeta(msg.role);
-            return (
-              <p key={i} className="text-[10px] text-slate-600 leading-relaxed truncate">
-                <span className={`${meta.color} font-medium`}>{meta.emoji} {meta.label}:</span>{" "}
-                {msg.content.slice(0, 60)}{msg.content.length > 60 ? "…" : ""}
-              </p>
-            );
-          })}
-          {messages.length > 3 && (
-            <button
-              onClick={() => setDrawerOpen(true)}
-              className="text-[10px] text-electric-400 hover:underline mt-1"
-            >
-              View all {messages.length} events →
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Full-height right drawer */}
-      <AnimatePresence>
-        {drawerOpen && (
-          <>
-            {/* Backdrop */}
-            <motion.div
-              key="backdrop"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-ink-900/40 backdrop-blur-sm z-40"
-              onClick={() => setDrawerOpen(false)}
-            />
-
-            {/* Drawer */}
-            <motion.div
-              key="drawer"
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed top-0 right-0 h-full w-full max-w-[420px] bg-space-900 border-l border-ink-900/10 z-50 flex flex-col shadow-2xl"
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between px-5 py-4 border-b border-ink-900/10 shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-electric-500/15 border border-electric-500/30 flex items-center justify-center">
-                    <ZapIcon className="w-4 h-4 text-electric-400" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-200">Agent Activity Log</p>
-                    <p className="text-[10px] text-slate-500">{messages.length} events recorded</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setDrawerOpen(false)}
-                  className="text-slate-500 hover:text-slate-300 transition-colors p-1"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Scroll body */}
-              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-                {groups.length === 0 && (
-                  <p className="text-xs text-slate-600 text-center py-12">No activity recorded yet.</p>
-                )}
-                {groups.map((group, gi) => {
-                  const meta = agentMeta(group.role);
-                  return (
-                    <motion.div
-                      key={gi}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: gi * 0.03 }}
-                      className="flex gap-3"
-                    >
-                      {/* Timeline dot */}
-                      <div className="flex flex-col items-center gap-0 mt-0.5 shrink-0">
-                        <div
-                          className={`w-6 h-6 rounded-lg border flex items-center justify-center text-[11px] shrink-0 ${meta.color} border-current bg-current/10`}
-                        >
-                          {meta.emoji}
-                        </div>
-                        {gi < groups.length - 1 && (
-                          <div className="w-px flex-1 bg-ink-900/[0.05] mt-1" />
-                        )}
-                      </div>
-
-                      {/* Content */}
-                      <div className="flex-1 min-w-0 pb-4">
-                        <p className={`text-xs font-semibold mb-1.5 ${meta.color}`}>{meta.label}</p>
-                        <div className="space-y-1">
-                          {group.msgs.map((text, mi) => (
-                            <p key={mi} className="text-[11px] text-slate-400 leading-relaxed">
-                              {text}
-                            </p>
-                          ))}
-                        </div>
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-
-              {/* Footer */}
-              <div className="px-5 py-3 border-t border-ink-900/10 shrink-0">
-                <p className="text-[10px] text-slate-600 text-center">
-                  Powered by TravelOS multi-agent system
-                </p>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-    </>
-  );
-}
