@@ -1025,7 +1025,12 @@ export default function TripDetailPage() {
     prevStatusRef.current = curr;
     if (!prev || prev === curr) return;
     if (curr === "planned" || curr === "awaiting_approval") {
+      // Generation rebuilds itinerary, hotels and weather — refetch all of them, not
+      // just the itinerary, so the (re)selected hotel and forecast aren't left stale
+      // (the hotels query often resolves empty mid-generation and would never refresh).
       queryClient.invalidateQueries({ queryKey: ["itinerary", tripId] });
+      queryClient.invalidateQueries({ queryKey: ["hotels", tripId] });
+      queryClient.invalidateQueries({ queryKey: ["weather", tripId] });
     }
     if (curr === "awaiting_approval") {
       queryClient.invalidateQueries({ queryKey: ["approvals", tripId, "pending"] });
@@ -1120,7 +1125,13 @@ export default function TripDetailPage() {
     setGenerateError(null);
     try {
       await api.post(`/api/v1/trips/${tripId}/itinerary/generate`);
-      queryClient.invalidateQueries({ queryKey: ["trip", tripId] });
+      // Optimistically flip to "generating" so the trip query's refetchInterval starts
+      // polling and the status-transition effect refreshes the itinerary once the worker
+      // finishes. An immediate refetch can race and read the stale "planned" status,
+      // which would leave polling off and the UI stuck on the old plan.
+      queryClient.setQueryData<TripOut>(["trip", tripId], (old) =>
+        old ? { ...old, status: "generating" } : old,
+      );
     } catch (err) {
       if (err instanceof ApiError) {
         const detail = err.detail as { message?: string } | null;

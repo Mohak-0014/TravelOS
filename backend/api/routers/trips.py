@@ -348,10 +348,16 @@ async def generate_itinerary(
     result = await db.execute(select(Trip).where(Trip.id == trip_id))
     trip = _assert_owns(result.scalar_one_or_none(), current_user)
 
-    if trip.status not in ("planning", "failed"):
+    # Only block when a run is already in flight — otherwise allow regeneration from
+    # any settled state (planned / awaiting_approval / failed) so the "Regenerate"
+    # button works on completed trips, not just freshly-created ones.
+    if trip.status == "generating":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "CONFLICT", "message": f"Trip is already {trip.status}."},
+            detail={
+                "code": "CONFLICT",
+                "message": "Itinerary generation is already in progress for this trip.",
+            },
         )
 
     from backend.workflows.celery_tasks import generate_itinerary_async  # noqa: PLC0415

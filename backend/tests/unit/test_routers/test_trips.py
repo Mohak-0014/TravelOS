@@ -331,7 +331,7 @@ async def test_generate_queues_celery_task(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_generate_non_planning_status_409(
+async def test_generate_rejects_when_already_generating(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
     from sqlalchemy import update
@@ -341,6 +341,7 @@ async def test_generate_non_planning_status_409(
     token = await _auth(client, "gen409@test.com")
     trip = await _create_trip(client, token)
 
+    # A run already in flight must not be double-triggered.
     await db_session.execute(update(Trip).where(Trip.id == trip["id"]).values(status="generating"))
     await db_session.commit()
 
@@ -350,6 +351,33 @@ async def test_generate_non_planning_status_409(
     )
     assert resp.status_code == 409
     assert resp.json()["detail"]["code"] == "CONFLICT"
+
+
+@pytest.mark.asyncio
+async def test_generate_allows_regeneration_when_planned(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    from sqlalchemy import update
+
+    from backend.db.models import Trip
+
+    token = await _auth(client, "genreplan@test.com")
+    trip = await _create_trip(client, token)
+
+    # The "Regenerate" button must work on an already-planned trip, not just new ones.
+    await db_session.execute(update(Trip).where(Trip.id == trip["id"]).values(status="planned"))
+    await db_session.commit()
+
+    with patch("backend.workflows.celery_tasks.generate_itinerary_async") as mock_task:
+        mock_task.delay.return_value = MagicMock(id="fake-task-id")
+        resp = await client.post(
+            f"/api/v1/trips/{trip['id']}/itinerary/generate",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "queued"
+    mock_task.delay.assert_called_once()
 
 
 # ── hotels ────────────────────────────────────────────────────────────────────
