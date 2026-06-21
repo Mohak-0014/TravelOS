@@ -3,7 +3,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from backend.tools.places import Attraction, _element_to_attraction, search_attractions
+from backend.tools.places import (
+    Attraction,
+    _element_to_attraction,
+    _fetch_prominence,
+    search_attractions,
+)
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -101,6 +106,38 @@ def test_website_tag_extracted() -> None:
     assert result.website == "https://example.com"
 
 
+def test_wikidata_tag_marks_attraction_major() -> None:
+    el = {
+        "type": "node",
+        "id": 1,
+        "lat": 48.0,
+        "lon": 2.0,
+        "tags": {"name": "Eiffel Tower", "tourism": "attraction", "wikidata": "Q243"},
+    }
+    result = _element_to_attraction(el)
+    assert result is not None
+    assert result.is_major is True
+
+
+def test_wikipedia_tag_marks_attraction_major() -> None:
+    el = {
+        "type": "node",
+        "id": 1,
+        "lat": 48.0,
+        "lon": 2.0,
+        "tags": {"name": "Louvre", "tourism": "museum", "wikipedia": "en:Louvre"},
+    }
+    result = _element_to_attraction(el)
+    assert result is not None
+    assert result.is_major is True
+
+
+def test_attraction_without_wiki_tags_not_major() -> None:
+    result = _element_to_attraction(_node())
+    assert result is not None
+    assert result.is_major is False
+
+
 # ── search_attractions integration (mocked HTTP) ─────────────────────────────
 
 
@@ -196,3 +233,205 @@ async def test_search_respects_limit() -> None:
         results = await search_attractions(48.85, 2.35, limit=10, cache=None)
 
     assert len(results) == 10
+
+
+@pytest.mark.asyncio
+async def test_search_ranks_major_before_nearer_minor() -> None:
+    # Minor venue is closer to the search point; major (Wikidata-tagged) is farther.
+    minor = {
+        "type": "node",
+        "id": 1,
+        "lat": 48.851,
+        "lon": 2.351,
+        "tags": {"name": "Minor Spot", "tourism": "attraction"},
+    }
+    major = {
+        "type": "node",
+        "id": 2,
+        "lat": 48.870,
+        "lon": 2.370,
+        "tags": {"name": "Famous Landmark", "tourism": "attraction", "wikidata": "Q1"},
+    }
+    payload = _overpass_payload([minor, major])
+
+    with (
+        patch("backend.tools.places.redis_get_cached", return_value=None),
+        patch("backend.tools.places.redis_set_cached", new_callable=AsyncMock),
+        patch("httpx.AsyncClient") as mock_cls,
+    ):
+        mock_cls.return_value = _mock_client(payload)
+        results = await search_attractions(48.85, 2.35, cache=None)
+
+    # Prominent sight ranks first despite being farther away.
+    assert [r.name for r in results] == ["Famous Landmark", "Minor Spot"]
+    assert results[0].is_major is True
+
+
+@pytest.mark.asyncio
+async def test_search_dedupes_repeated_elements() -> None:
+    # The prominent + general `out` blocks can emit the same element twice.
+    el = _node(osm_id=7, name="Twice Place")
+    payload = _overpass_payload([el, el])
+
+    with (
+        patch("backend.tools.places.redis_get_cached", return_value=None),
+        patch("backend.tools.places.redis_set_cached", new_callable=AsyncMock),
+        patch("httpx.AsyncClient") as mock_cls,
+    ):
+        mock_cls.return_value = _mock_client(payload)
+        results = await search_attractions(48.85, 2.35, cache=None)
+
+    assert len(results) == 1
+    assert results[0].name == "Twice Place"
+
+
+# ── fame-scoring (Wikidata sitelinks) ─────────────────────────────────────────
+
+
+def test_wikidata_id_captured() -> None:
+    el = {
+        "type": "node",
+        "id": 1,
+        "lat": 48.0,
+        "lon": 2.0,
+        "tags": {"name": "X", "tourism": "attraction", "wikidata": "Q243"},
+    }
+    a = _element_to_attraction(el)
+    assert a is not None
+    assert a.wikidata_id == "Q243"
+
+
+@pytest.mark.asyncio
+async def test_fetch_prominence_counts_sitelinks_and_wikivoyage() -> None:
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.json = MagicMock(
+        return_value={
+            "entities": {
+                "Q243": {"sitelinks": {"enwiki": {}, "frwiki": {}, "enwikivoyage": {}}},
+                "Q1": {"sitelinks": {"enwiki": {}}},
+            }
+        }
+    )
+    client = AsyncMock()
+    client.get = AsyncMock(return_value=resp)
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    with patch("httpx.AsyncClient", return_value=client):
+        info = await _fetch_prominence(["Q243", "Q1", None])
+    # (sitelink_count, has_wikivoyage) — Q243 has an enwikivoyage article.
+    assert info == {"Q243": (3, True), "Q1": (1, False)}
+
+
+@pytest.mark.asyncio
+async def test_fetch_prominence_empty_input() -> None:
+    assert await _fetch_prominence([]) == {}
+    assert await _fetch_prominence([None]) == {}
+
+
+@pytest.mark.asyncio
+async def test_search_ranks_by_fame_over_distance() -> None:
+    # Near minor (closer) vs far famous (more sitelinks) — fame must win over distance.
+    near = {
+        "type": "node",
+        "id": 1,
+        "lat": 48.851,
+        "lon": 2.351,
+        "tags": {"name": "Near Minor", "tourism": "attraction", "wikidata": "Q1"},
+    }
+    far = {
+        "type": "node",
+        "id": 2,
+        "lat": 48.885,
+        "lon": 2.385,
+        "tags": {"name": "Far Famous", "tourism": "attraction", "wikidata": "Q243"},
+    }
+    payload = _overpass_payload([near, far])
+    with (
+        patch("backend.tools.places.redis_get_cached", return_value=None),
+        patch("backend.tools.places.redis_set_cached", new_callable=AsyncMock),
+        patch(
+            "backend.tools.places._fetch_prominence",
+            new=AsyncMock(return_value={"Q1": (2, False), "Q243": (90, False)}),
+        ),
+        patch("httpx.AsyncClient") as mock_cls,
+    ):
+        mock_cls.return_value = _mock_client(payload)
+        results = await search_attractions(48.85, 2.35, cache=None)
+
+    assert [r.name for r in results] == ["Far Famous", "Near Minor"]
+    assert results[0].prominence == 90
+
+
+def test_tourism_and_heritage_tags_parsed() -> None:
+    el = {
+        "type": "node",
+        "id": 1,
+        "lat": 48.0,
+        "lon": 2.0,
+        "tags": {"name": "X", "historic": "castle", "heritage": "1", "wikidata": "Q1"},
+    }
+    a = _element_to_attraction(el)
+    assert a is not None
+    assert a.is_tourism is False  # historic-only, no tourism tag
+    assert a.is_heritage is True
+    # A tourism tag sets is_tourism.
+    b = _element_to_attraction(_node())  # tourism=museum
+    assert b is not None
+    assert b.is_tourism is True
+
+
+@pytest.mark.asyncio
+async def test_search_tourism_tag_beats_higher_sitelinks_without_tourism() -> None:
+    # The memorial case, generalised: a non-tourism site with MORE sitelinks (borrowed
+    # fame) must NOT outrank a tourism-tagged landmark — the OSM tag, independent of
+    # Wikidata, corrects the bias. Holds for any city, not just one.
+    memorial = {  # huge sitelinks, but historic-only (no tourist intent)
+        "type": "node",
+        "id": 1,
+        "lat": 48.860,
+        "lon": 2.336,
+        "tags": {"name": "Famous Person Memorial", "historic": "monument", "wikidata": "Q9"},
+    }
+    landmark = {  # fewer sitelinks, but a tourist attraction
+        "type": "node",
+        "id": 2,
+        "lat": 48.861,
+        "lon": 2.337,
+        "tags": {"name": "Iconic Landmark", "tourism": "attraction", "wikidata": "Q5"},
+    }
+    filler_a = {
+        "type": "node",
+        "id": 3,
+        "lat": 48.862,
+        "lon": 2.338,
+        "tags": {"name": "Filler A", "historic": "monument", "wikidata": "Q3"},
+    }
+    filler_b = {
+        "type": "node",
+        "id": 4,
+        "lat": 48.863,
+        "lon": 2.339,
+        "tags": {"name": "Filler B", "historic": "monument", "wikidata": "Q4"},
+    }
+    payload = _overpass_payload([memorial, landmark, filler_a, filler_b])
+    with (
+        patch("backend.tools.places.redis_get_cached", return_value=None),
+        patch("backend.tools.places.redis_set_cached", new_callable=AsyncMock),
+        patch(
+            "backend.tools.places._fetch_prominence",
+            new=AsyncMock(
+                return_value={
+                    "Q9": (200, False),
+                    "Q5": (100, False),
+                    "Q3": (50, False),
+                    "Q4": (10, False),
+                }
+            ),
+        ),
+        patch("httpx.AsyncClient") as mock_cls,
+    ):
+        mock_cls.return_value = _mock_client(payload)
+        results = await search_attractions(48.85, 2.35, cache=None)
+
+    assert results[0].name == "Iconic Landmark"
