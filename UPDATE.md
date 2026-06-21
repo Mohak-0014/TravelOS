@@ -1,100 +1,73 @@
-# TravelOS — Session Update (2026-06-20)
+# TravelOS — Session Update (2026-06-21)
 
 ## Headline
 
-- **Full UI redesign**: dark "galaxy/space" theme → light **"Golden Hour"** travel theme.
-- **Trip sharing shipped** (public share links, calendar export, hotel selection, cover photos) — committed `bdf6f7f`.
-- **Two grounding/quality bug fixes**: packing-list truncation recovery, and English place names in itineraries.
+- **Itinerary recommendations overhauled** with a general, city-agnostic **composite prominence score** so iconic landmarks surface instead of obscure same-type POIs. Verified on Delhi (Red Fort, Qutub, Humayun) and Paris (Eiffel Tower #1, Louvre, Notre-Dame).
+- **Hotel pricing fixed end-to-end** — LiteAPI rates were silently failing on every run; now returns real prices in the **trip's currency**.
+- **"Regenerate" button fixed** (used to 409 on any completed trip) + the hotel/weather UI now refreshes after a regeneration.
+- ⚠️ **A large body of work is uncommitted** (12 files) — needs committing (see "Pending").
 
 ---
 
 ## What was done this session
 
-### 1. "Golden Hour" UI redesign ✅ (uncommitted)
+### 1. Itinerary prominence + variety — TASKS #23 ✅ (uncommitted)
 
-Replaced the dark galaxy aesthetic with a warm, light, travel-inspired system (sunrise sky, sand/cream surfaces, sunset coral, golden amber, ocean teal).
+The planner used to stack obscure same-type POIs (e.g. niche Mughal tombs / 5 museums in a row). Rebuilt the attraction pipeline so it prefers iconic, varied sights:
 
-**Foundation (the keystone — re-themes the app via tokens)**
-- `frontend/tailwind.config.ts`: `space-*` → cream/sand surface ramp; `electric` → sky azure; `coral` → sunset (primary); `gold` → amber; `emerald` → teal-green; **inverted the `slate` scale** so existing `text-slate-100` (was light-on-dark) becomes ink-on-light automatically; warm `purple` remap; travel animations (`cloud-drift`, `sun-pulse`, `sway`).
-- `frontend/app/globals.css`: light glass-cards, coral buttons, light inputs/badges, warm `gradient-text`, `route-dash` flight-path utility, paper-grain texture.
-- `frontend/app/layout.tsx`: fonts swapped Geist → **Fraunces** (display serif) + **Plus Jakarta Sans** (body) via `next/font/google`.
+- **`backend/agents/itinerary_planner.py` (`_build_prompt`)**: prominence/variety prompt — prefer major sights, **≤2 same-type venues/day**, indoor/outdoor mix, a 1-day few-shot, and a **MUST-SEE landmarks** block listing the top sights by score (cap 12) that the planner is told to schedule.
+- **`backend/tools/places.py`** — the real work:
+  - **Two-block / geometry-aware Overpass query**: landmark **ways/relations** get their own generous block (`_AREA_CAP=1200`) so a flood of Wikidata-tagged **nodes** (statues/plaques/fountains — Paris has 2000+) can't starve them. `nwr` + `place_of_worship` (Wikidata-gated) included. This was the fix that surfaced the Eiffel Tower / Louvre / Notre-Dame for Paris.
+  - **Composite prominence score** (general across cities, no per-city tuning): blends **rank-normalised Wikidata sitelinks** (so one inflated/mistagged value can't dominate) + independent **OSM tag signals** — `tourism=*` (0.35), `heritage`/UNESCO (0.18), Wikivoyage (0.07), sitelinks (0.40). The tag signals are independent of Wikidata, which corrects the "borrowed fame" bias (a famous person's memorial like Raj Ghat — huge sitelinks, no `tourism` tag — no longer outranks India Gate).
+  - `_fetch_prominence` fetches sitelink counts + Wikivoyage presence from the Wikidata `wbgetentities` API.
+  - Wider 12 km radius (planner) so far icons (Qutub ~10 km) are in range.
+- **`backend/agents/itinerary_planner.py` already had** walking-distance clustering (#4) and time-of-day/opening-hours heuristics (#5) — both confirmed in place.
 
-**Travel motifs (replace the 3D galaxy)**
-- New `frontend/components/travel/SkyScene.tsx`: dawn sky gradient, glowing sun, drifting clouds, a plane looping a dotted arc, paper-cut mountain + ocean horizon.
-- Deleted `components/3d/StarField.tsx`, `StarFieldWebGL.tsx`, `TravelGlobe.tsx`.
+### 2. Restaurant food filter ✅ (uncommitted)
 
-**Per-page redesign** (all surfaces converted, ~152 `white/X` overlays → ink, hero overlays fixed for white-text legibility)
-- Landing: SkyScene hero + scroll parallax + **scroll-linked plane** flying across the 8-agent pipeline.
-- Login / Onboarding: SkyScene backgrounds; selected-state contrast fixed.
-- NavBar: frosted-cream bar, plane logo, coral active states.
-- Trips list: sunny destination banners + hand-built **SVG "Your World" globe** with coral pins.
-- Trip detail, Profile, Wizard, Share, TripMap (coral teardrop marker).
+`backend/tools/restaurants.py`: Foursquare's newer API was ignoring the category filter and returning **non-food POIs** (meals were landing on "Rashtrapati Bhavan", "Ferrari Showroom"). Added a food-category guard (`_is_food_place`) that drops non-food results; falls back to OSM amenities.
 
-**Verification**: `npm run type-check` clean, `npm run lint` clean, Playwright visual QA on all 9 surfaces + mobile, no console errors.
+### 3. "Regenerate" button fix ✅ (uncommitted)
 
-### 2. Trip sharing + calendar + hotels + cover photos ✅ (commit `bdf6f7f`)
+- **`backend/api/routers/trips.py`**: the `/itinerary/generate` guard rejected any status that wasn't `planning`/`failed` → completed trips 409'd. Now only blocks `generating` (a run in flight), so completed trips regenerate.
+- **`frontend/app/trips/[tripId]/page.tsx`**: `handleGenerate` optimistically sets `generating` so polling starts; and the status-transition effect now invalidates **hotels + weather** (not just itinerary) — fixes the "hotel selection doesn't show after a regen" report (the hotels query was caching an empty mid-generation result and never refreshing).
 
-- Public share router `GET /api/v1/share/{token}`; `POST /api/v1/trips/{id}/share` mints a 30-day token.
-- `share_token` + `cover_image_url` columns on `trips` (migrations `545e5bb6b304`, `f3f5215ec0b8`).
-- `ShareTripOut` schema; read-only `frontend/app/share/[token]/page.tsx`.
-- Calendar export `GET .../calendar.ics`; hotel selection `POST .../hotels/{id}/select`.
-- Unsplash destination cover photos (gradient fallback); `UNSPLASH_ACCESS_KEY` in `.env.example`.
-- EditTripModal + delete confirmation wired into trip detail.
-- **Fix**: approval resolve call corrected to `POST /api/v1/approvals/{id}` (was a non-existent `/trips/{id}/approvals/{id}/resolve`) — Approve/Not-interested buttons now work.
-- ⚠️ Committed locally but **not pushed** (direct push to `master` blocked by safety classifier; pushing manually).
+### 4. LiteAPI hotel rates fix ✅ (uncommitted)
 
-### 3. Packing-list truncation bug fix ✅ (uncommitted)
+`backend/tools/hotels.py`: rates were failing with `Expecting value: line 1 column 1` on **every** run (so all hotels had `price=None`).
 
-**Symptom**: Tokyo trip showed no packing section; Delhi did.
-**Root cause**: the small Groq model over-generated and the JSON response was **truncated mid-string** → `json.loads` "Unterminated string" → the agent caught it and silently skipped packing (`packing_list = NULL`).
-**Fix** (`backend/agents/packing_list.py`, `backend/agents/_llm.py`):
-- `build_llm(..., max_tokens=…)` added; packing capped at 2048 so the model can't run away.
-- Robust fence/preamble stripping (`_strip_fences`).
-- JSON **salvage** (`_repair_truncated_json`, `_safe_parse`): recovers a partial list from a truncated response instead of discarding everything.
-- One stricter **retry** on an unusable response.
-- 7 new unit tests (now **18** in `test_packing_list.py`, all pass).
-- Backfilled Tokyo's packing list (6 categories, 44 items).
-
-### 4. English place names in itineraries ✅ (uncommitted)
-
-**Symptom**: Tokyo itinerary titles were in Japanese (e.g. "アーティゾン美術館").
-**Root cause**: OSM lookups preferred the local-language `name` tag over `name:en`.
-**Fix** (`backend/tools/places.py`, `backend/tools/restaurants.py`):
-- Prefer `name:en` → `int_name` → `name` (grounded — real OSM English tags, not fabricated).
-- Added `Accept-Language: en` to the Foursquare request (best-effort).
-- Lint/mypy clean; 12 tool tests pass.
-- All **future** trips render English. **Tokyo regenerated** (cleared place caches + re-ran `generate_itinerary_async`): every **attraction** now resolves to its OSM `name:en` — Japanese titles dropped **20 → 10**. The remaining 10 are Foursquare **restaurant** names, which the API returns in local script (often `English (日本語)`); left as-is for now (acceptable — names are still mostly readable).
-
-### 5. Infra / Celery debugging ✅
-
-- **Port-8000 ghost socket**: a Dockerized backend container + a WinNAT-orphaned socket were shadowing local uvicorn and serving stale routes (15 paths instead of 19/32). Resolved by stopping the docker backend, restarting WinNAT, and running uvicorn via the **venv** Python explicitly (`backend\.venv\Scripts\python -m uvicorn …`, not the system `python`).
-- **Celery worker** had been killed by `taskkill /F /IM python.exe`; restarted in the background (`--pool=solo`). Purged a **duplicate** Delhi `generate_itinerary_async` task from the Redis queue.
+- Root cause: the code did a **GET with query params**, but `/v3.0/hotels/rates` is a **POST with a JSON body** — a GET returns an empty 200.
+- Second bug: the parser read `data[].rooms[]`, but prices nest under **`data[].roomTypes[].rates[].retailRate.total`**.
+- Fixed: POST with `hotelIds` / `occupancies` / `currency` / `guestNationality` / `checkin` / `checkout`; parse `roomTypes`.
+- **Currency now follows the trip** (`trip.budget_currency`), threaded `search_hotels → _search_liteapi → _fetch_rates` (and into the cache key). Verified: Paris (INR trip) hotels now priced in ₹.
+- **`guestNationality`**: requested as `IND`, but LiteAPI requires **ISO-2** — `IND` returns `400 guestNationality invalid`. Using **`IN`** (verified returns prices).
+- Verified live: `liteapi_rates_ok fetched=19/20`; Paris hotels now show e.g. *Victoria Palace Hotel — ₹21,246/night* (selected).
 
 ---
 
-## Current system state
+## New feature requests (queued — see TASKS.md #31–36)
 
-| Layer | Status |
-|-------|--------|
-| Design system | **Golden Hour (light)** — cream surfaces, sky/coral/amber/teal accents, Fraunces + Plus Jakarta Sans, SkyScene travel hero |
-| Backend agents | Travel Style, Itinerary Planner, Hotel, Budget Optimizer, Events, Packing List, Concierge, Weather (9 nodes in graph) |
-| Frontend pages | Landing, Login, Onboarding, Trips list, Trip detail, Profile, Wizard, Share, TripMap — all redesigned |
-| Tests | ~535 unit tests passing (packing suite expanded 11 → 18) |
-| DB migrations | `share_token` + `cover_image_url` applied (`545e5bb6b304`, `f3f5215ec0b8`) |
-| Git | `bdf6f7f` committed (sharing feature). Redesign + packing/English fixes **uncommitted** |
+| # | Request |
+|---|---|
+| 31 | **Flight prices** — add a flights provider + agent/tool + a prices section (needs an origin/home airport). |
+| 32 | **Local Events frontend section** — Events agent exists but events only surface as `event_add` approval banners; add persistence + endpoint + a browsable section. |
+| 33 | **Map as a sidebar** — move TripMap into a persistent side column. |
+| 34 | **Concierge full-column** — promote the chat from a small popup/drawer to a full column. |
+| 35 | **Hotel-upgrade accept bug** — accepting a budget "upgrade to hotel X" doesn't select X. |
+| 36 | **Deterministic must-see enforcement** — guarantee top icons are scheduled (the Louvre/under-ranking follow-up). |
 
 ---
 
 ## How to start the app (Windows)
 
 ```powershell
-# 1. Infra only (never start the docker backend/celery services locally — they shadow local)
+# 1. Infra only (never start the docker backend/celery services locally)
 docker compose -f infra/docker-compose.yml up -d postgres redis qdrant
 
-# 2. Backend — use the VENV python explicitly (system `python` resolves to a different interpreter)
+# 2. Backend — use the VENV python explicitly
 backend\.venv\Scripts\python -m uvicorn backend.api.main:app --reload --port 8000
 
-# 3. Celery worker (separate terminal, from repo root)
+# 3. Celery worker (separate terminal, from repo root) — RESTART after any backend code change
 backend\.venv\Scripts\celery -A backend.workflows.celery_tasks worker --loglevel=info --pool=solo
 
 # 4. Frontend
@@ -107,22 +80,19 @@ cd frontend; npm run dev   # http://localhost:3000
 
 | Priority | Item |
 |----------|------|
-| **1** | **Push** `bdf6f7f` to `origin/master`, then **commit** the Golden Hour redesign and the packing/English-names fixes |
-| **2** | **Agent prompt-quality pass** — tune the LLM prompts for better results (TASKS.md #23–29). Biggest lever: the **Itinerary Planner** stacks obscure same-type POIs (Tokyo regen produced ~5 niche museums back-to-back) instead of iconic, varied sights. |
-| 3 | Reset the one older trip stuck in `generating` status back to `planning` |
-| 4 | Pre-existing mypy debt (59 errors): `TravelOSState` gained `events_state`/`packing_state` keys that `celery_tasks.py` + several graph tests don't supply |
-| 5 | Carry-over backlog: validation under-count flag (#8), Concierge ProposeItineraryChange (#6), walking-distance clustering (#4) |
+| **1** | **Commit this session's work** — 12 files (places/restaurants/itinerary/hotels/trips + frontend + 2 new test files). Suggested split: `feat(places)`, `fix(hotels)`, `fix(restaurants)`, `feat(itinerary)`, `fix(trips)`. All gates green (ruff, mypy, tests). |
+| 2 | New feature work (TASKS #31–36), starting with the **hotel-upgrade accept bug (#35)** — small and user-facing. |
+| 3 | Carry-over: Groq decommissioned tool-use model (#30), Qdrant init (#2), agent prompt-quality (#24–29). |
 
 ---
 
 ## Known issues / gotchas
 
-- **Use the venv Python for uvicorn/celery** — the bare `python` on PATH is a *different* interpreter and silently serves stale/incompatible code.
-- **Docker backend shadows local**: never start the `backend` / `celery_worker` / `celery_beat` docker services locally; only `postgres redis qdrant`. A killed docker backend can leave a WinNAT ghost socket on port 8000 — `net stop winnat && net start winnat` (admin) clears it.
-- **`taskkill /F /IM python.exe` kills the Celery worker too** — restart it afterward or the queue won't drain (and nothing auto-starts it).
-- **Groq is the permanent LLM** (llama-3.3-70b "large", llama-3.1-8b "small"). Do not switch to Claude/Anthropic. TPD limit ~100k tokens/day.
-- **Place-name language**: OSM tools now prefer `name:en`; Foursquare names are as-listed (mostly English, occasionally local). Cached place data (`places:*`/`restaurants:*`, 3–6h TTL) keeps old names until cleared.
-- **Itinerary selection quality**: the planner draws from raw OSM tourism POIs and currently favors proximity/quantity over prominence — it can stack many niche same-type venues (e.g. several small museums in a row) instead of iconic, varied sights. Prompt-quality pass queued (TASKS.md #23).
-- **Port 5433**: Docker postgres on 5433 (Windows native postgres owns 5432).
-- **react-leaflet v4**: do not upgrade to v5 (needs React 19; project is React 18).
-- **packing_list on old trips**: trips planned before the packing agent have `packing_list = NULL`; the panel only renders when non-null. Re-generate or backfill to populate.
+- **Restart the Celery worker after any backend code change** — it caches imported code at startup; a regen will silently use the old code otherwise. (Hit repeatedly this session.)
+- **`taskkill /F /IM python.exe` kills the worker too.** Stop it surgically by PID (`Stop-Process -Id <pid>`); killing one entangled process can take the whole worker tree down.
+- **LiteAPI rates**: POST (not GET); `guestNationality` must be ISO-2 (`IN`, not `IND`); prices come back per the requested `currency`.
+- **Composite prominence is city-agnostic** but bounded by what OSM/Wikidata expose: the Louvre under-ranks because OSM tags that spot as "Louvre **Palace**" (sl 38) not "Louvre **Museum**" (~150); Akshardham-type temples tagged only `amenity=place_of_worship` (no `tourism`) get no tourist-intent boost.
+- **Hotel-upgrade approvals are a no-op** — `budget_upgrade` has no apply handler (#35).
+- **Groq is the permanent LLM** (llama-3.3-70b "large", llama-3.1-8b "small"). Do not switch to Claude/Anthropic.
+- **Place caches** (`places:*`, 6 h TTL) — cleared/`cache=None` paths re-fetch; the planner always fetches fresh.
+- **react-leaflet v4** — do not upgrade to v5 (needs React 19; project is React 18).

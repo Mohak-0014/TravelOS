@@ -1,13 +1,23 @@
 # TravelOS — Next Steps Task List
 
-Last updated: 2026-06-20
+Last updated: 2026-06-21
 
-## In progress / immediate (2026-06-20)
+## In progress / immediate (2026-06-21)
 
 | # | Task | Notes |
 |---|---|---|
-| B | **Push + commit pending work** | Push `bdf6f7f` (sharing) to `origin/master`; then commit the Golden Hour redesign and the packing/English-names fixes (3 logical commits). |
-| C | **Reset stuck `generating` trip** | One older trip is stuck in `generating` from a previously-killed worker run — reset to `planning`. |
+| A | **Commit this session's work** | 12 files uncommitted (places/restaurants/itinerary/hotels/trips + frontend + 2 new test files): composite prominence + geometry-aware fetch, restaurant food filter, prominence/variety + MUST-SEE prompt, regenerate-button fix, LiteAPI rates + per-trip currency fix. All gates green (ruff, mypy, tests). Suggested split: `feat(places)`, `fix(hotels)`, `fix(restaurants)`, `feat(itinerary)`, `fix(trips)`. |
+
+## New Features & Fixes (2026-06-21 requests)
+
+| # | Task | File(s) | Notes |
+|---|---|---|---|
+| 31 | **Flight prices** | new `backend/tools/flights.py` + agent/tool, frontend section | Add flight pricing for the trip. Needs a provider (Amadeus / Duffel / Kiwi-Tequila / Skyscanner) and an **origin / home airport** (new user-profile or trip field — not stored today). Backend: tool fetching round-trip prices for origin→destination on the trip dates → graph state. Frontend: a flights section. Largest of the new items. |
+| 32 | **Local Events frontend section** | `backend/api/routers/`, `backend/db/models.py`, `frontend/app/trips/[tripId]/page.tsx` | The Events agent (`events.py`) already fetches/scores events, but they only surface as `event_add` **approval banners** — there is no browsable list and no `events` endpoint. Persist events to a queryable table, add `GET /api/v1/trips/{id}/events`, and a "Local Events" section (cards: name, date, venue, category, Ticketmaster/Eventbrite badge). |
+| 33 | **Map as a sidebar** | `frontend/app/trips/[tripId]/page.tsx`, `frontend/components/.../TripMap` | Move the map from inline/modal into a **persistent sticky side column**, showing itinerary pins + the selected hotel. (react-leaflet v4 — do not upgrade to v5.) |
+| 34 | **Concierge full-column** | `frontend/app/trips/[tripId]/page.tsx` | Promote the concierge chat from the small popup/drawer (`chatOpen` right-edge panel) to a **full column** in the trip layout (persistent, not a popup). Re-flow the page into columns. |
+| 35 | **Hotel-upgrade accept bug** | `backend/api/routers/approvals.py`, `backend/agents/budget_optimizer.py` | **Bug**: ≥30% under budget → Budget Optimizer creates a `budget_upgrade` approval (an LLM *text* suggestion naming a hotel). The approvals resolve endpoint applies `concierge_swap`/`user_replace`/`concierge_add`/`event_add` but has **no `budget_upgrade` handler** → accepting does nothing to the hotel selection, so the shown hotel is unchanged ("a different option"). Fix: (a) `_propose_upgrade` picks a specific upgrade **candidate** and stores its `provider_hotel_id`/candidate id in the payload; (b) resolve handles `budget_upgrade` by setting that hotel `is_selected=True` (clearing others); add a test. |
+| 36 | **Deterministic must-see enforcement** | `backend/agents/itinerary_planner.py` | Composite ranking surfaces icons + a MUST-SEE block, but the LLM doesn't always schedule each (e.g. Louvre skipped on a 3-day Paris trip). Add a post-generation pass: if a top-N must-see is missing, swap it into the lowest-priority activity slot (keep day/time); guarantee ≈ `slots − 2` to leave variety. Ranking nuances: Louvre tagged "Louvre **Palace**" (sl 38) not "Museum" (~150); Akshardham-type temples are `amenity=place_of_worship` only (no `tourism` boost). |
 
 ## Priority Order
 
@@ -26,7 +36,7 @@ Tune the LLM prompts so agents produce more useful, higher-quality results. High
 
 | # | Task | File(s) | Notes |
 |---|---|---|---|
-| 23 | **Itinerary Planner — prominence + variety** | `backend/agents/itinerary_planner.py` (`_build_prompt`) | Observed: output stacks obscure, same-type POIs (~5 niche museums in a row in Tokyo) instead of iconic sights. Prompt should (a) strongly prefer well-known / major attractions, (b) cap same-type venues per day (≤2 museums), (c) balance indoor/outdoor + activity variety, (d) include a 1-day few-shot example. Consider passing a prominence signal (OSM `wikidata`/`wikipedia` tag presence) so the model can rank by fame. |
+| ~~23~~ ✅ | **Itinerary Planner — prominence + variety** — DONE 2026-06-21 (composite score + geometry-aware fetch + variety/MUST-SEE prompt) | `backend/agents/itinerary_planner.py` (`_build_prompt`) | Observed: output stacks obscure, same-type POIs (~5 niche museums in a row in Tokyo) instead of iconic sights. Prompt should (a) strongly prefer well-known / major attractions, (b) cap same-type venues per day (≤2 museums), (c) balance indoor/outdoor + activity variety, (d) include a 1-day few-shot example. Consider passing a prominence signal (OSM `wikidata`/`wikipedia` tag presence) so the model can rank by fame. |
 | 24 | **Travel Style — structured persona synthesis** | `backend/agents/travel_style.py` | Tighten the synthesis prompt to emit a consistent persona schema; degrade gracefully for new users with no history; weight the injected recent-rejections more explicitly. |
 | 25 | **Packing List — concise, destination-rich prompt** | `backend/agents/packing_list.py` (`_SYSTEM_PROMPT`) | Now truncation-hardened, but tune the prompt so the small model stops over-generating: hard cap ≤6 categories / ≤35 items, richer Destination-Specific items, weather-driven additions tied to `risk_flags`. |
 | 26 | **Weather adaptation — taste-aware replacements** | `backend/agents/weather.py` | Supersedes #7. When swapping a rained-out outdoor activity, inject `travel_style_profile` + nearby indoor candidates so replacements match user taste (art gallery, not bowling alley). |
@@ -44,14 +54,14 @@ Tune the LLM prompts so agents produce more useful, higher-quality results. High
 
 | # | Task | File(s) | Notes |
 |---|---|---|---|
-| 4 | **Add walking distance clustering to itinerary planner** | `backend/agents/itinerary_planner.py` `_build_prompt` | Bucket attractions into ~1 km grid cells before calling LLM. Inject cluster labels into prompt ("Group A — northwest near X"). Also inject `walking_tolerance` (low=500 m, medium=2 km, high=5 km) as a hard constraint. |
-| 5 | **Add time-of-day heuristics for venue scheduling** | `backend/tools/places.py`, `backend/agents/itinerary_planner.py` | Add `opening_hours` field to `Attraction` model from Overpass tags. Inject heuristic rules into prompt by type: museums 09:00-17:00, lunch 12:00-14:00, dinner 19:00-22:00, nightlife 21:00+. |
+| ~~4~~ ✅ | **Add walking distance clustering to itinerary planner** — DONE (`_cluster_attractions` + walking_tolerance) | `backend/agents/itinerary_planner.py` `_build_prompt` | Bucket attractions into ~1 km grid cells before calling LLM. Inject cluster labels into prompt ("Group A — northwest near X"). Also inject `walking_tolerance` (low=500 m, medium=2 km, high=5 km) as a hard constraint. |
+| ~~5~~ ✅ | **Add time-of-day heuristics for venue scheduling** — DONE (`opening_hours` + `_SCHEDULING_RULES`) | `backend/tools/places.py`, `backend/agents/itinerary_planner.py` | Add `opening_hours` field to `Attraction` model from Overpass tags. Inject heuristic rules into prompt by type: museums 09:00-17:00, lunch 12:00-14:00, dinner 19:00-22:00, nightlife 21:00+. |
 
 ### Concierge Enhancements
 
 | # | Task | File(s) | Notes |
 |---|---|---|---|
-| 6 | **Give Concierge a ProposeItineraryChange tool** | `backend/agents/concierge.py`, `backend/api/routers/concierge.py` | Add a `ProposeItineraryChange(day, item_index, replacement)` tool that creates an `ApprovalRequest` record. User sees an approval banner; on approve the swap is applied. Transforms Concierge from read-only Q&A into a real planning assistant. |
+| ~~6~~ ✅ | **Give Concierge a ProposeItineraryChange tool** — DONE (commit fc91260) | `backend/agents/concierge.py`, `backend/api/routers/concierge.py` | Add a `ProposeItineraryChange(day, item_index, replacement)` tool that creates an `ApprovalRequest` record. User sees an approval banner; on approve the swap is applied. Transforms Concierge from read-only Q&A into a real planning assistant. |
 
 ### New Agents
 
@@ -84,6 +94,15 @@ Tune the LLM prompts so agents produce more useful, higher-quality results. High
 | 22 | **Quick-wins: tasks #2, #7, #8** | `backend/api/main.py`, `backend/agents/weather.py`, `backend/graphs/validation.py` | #2: Qdrant collections init on startup. #7: weather agent uses travel_style_profile for activity replacements. #8: validation flags under-count days. All small. |
 
 ---
+
+## Done (2026-06-21 session)
+
+- [x] **#23 — Itinerary prominence + variety**: city-agnostic **composite prominence score** (rank-normalised Wikidata sitelinks + OSM `tourism`/heritage/Wikivoyage tags) — corrects the "borrowed fame" bias (a famous person's memorial no longer outranks India Gate). **Geometry-aware Overpass query** (landmark ways/relations get a dedicated block so a flood of Wikidata nodes can't starve them — fixed Paris missing Eiffel/Louvre). Variety + MUST-SEE prompt. Verified on Delhi and Paris.
+- [x] **#4 / #5** confirmed in place (walking-distance clustering; opening-hours + time-of-day heuristics).
+- [x] **Restaurant food filter** — Foursquare results constrained to food venues (no more "Ferrari Showroom" / "Rashtrapati Bhavan" meals).
+- [x] **Regenerate button fix** — backend guard only blocks `generating` (completed trips regenerate again); frontend optimistic `generating` + invalidate **hotels/weather** on completion (fixes "hotel selection doesn't show after a regen").
+- [x] **LiteAPI rates fix** — was failing on every run (GET vs POST). Now POST with the correct body (`occupancies`/`guestNationality`) + `roomTypes` parsing; **per-trip currency** threaded through; `guestNationality=IN` (ISO-2; `IND` is rejected). Hotels now priced — verified ₹ for an INR Paris trip.
+- [x] **Tests** — +`test_hotels.py`, +`test_restaurants.py`, + composite/geometry/must-see cases. Full gate green (ruff, mypy, ~110 unit tests). All **uncommitted** (see immediate task A).
 
 ## Done (2026-06-20 session)
 
