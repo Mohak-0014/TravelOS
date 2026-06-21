@@ -12,7 +12,7 @@ from backend.api.dependencies import get_current_active_user
 from backend.core.config import settings
 from backend.core.logging import get_logger
 from backend.db.base import get_db
-from backend.db.models import HotelCandidate, ItineraryItem, TravelerProfile, Trip, User
+from backend.db.models import Approval, HotelCandidate, ItineraryItem, TravelerProfile, Trip, User
 from backend.db.schemas import (
     HotelCandidateOut,
     ItineraryItemCreate,
@@ -22,6 +22,7 @@ from backend.db.schemas import (
     TripOut,
     TripUpdate,
 )
+from backend.tools.flights import FlightOffer, search_flights
 from backend.tools.geocode import geocode
 from backend.tools.weather import WeatherDay, fetch_weather
 
@@ -468,6 +469,91 @@ async def get_trip_weather(
         lat, lng = geo.lat, geo.lng
 
     return await fetch_weather(lat, lng, trip.start_date, trip.end_date)
+
+
+# ── Flights ──────────────────────────────────────────────────────────────────
+
+
+@router.get("/{trip_id}/flights", response_model=list[FlightOffer])
+async def get_trip_flights(
+    trip_id: str,
+    origin: str = Query(..., description="Departure airport IATA code (e.g. DEL, JFK, LHR)"),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[FlightOffer]:
+    """Search round-trip flights from the given origin airport using Amadeus."""
+    result = await db.execute(select(Trip).where(Trip.id == trip_id))
+    trip = _assert_owns(result.scalar_one_or_none(), current_user)
+
+    if len(origin) != 3 or not origin.isalpha():
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "VALIDATION_ERROR", "message": "origin must be a 3-letter IATA code."},
+        )
+
+    try:
+        from backend.tools import get_redis_client  # noqa: PLC0415
+
+        cache = get_redis_client()
+    except Exception:
+        cache = None
+
+    return await search_flights(
+        origin_iata=origin.upper(),
+        destination_city=trip.destination_city,
+        departure_date=trip.start_date,
+        return_date=trip.end_date,
+        num_travelers=trip.num_travelers,
+        currency=trip.budget_currency or "USD",
+        client_id=settings.AMADEUS_CLIENT_ID,
+        client_secret=settings.AMADEUS_CLIENT_SECRET,
+        cache=cache,
+    )
+
+
+# ── Events ───────────────────────────────────────────────────────────────────
+
+
+@router.get("/{trip_id}/events")
+async def list_trip_events(
+    trip_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:  # type: ignore[type-arg]
+    """Return all event_add approvals for the trip as browsable event cards."""
+    result = await db.execute(select(Trip).where(Trip.id == trip_id))
+    _assert_owns(result.scalar_one_or_none(), current_user)
+
+    rows = await db.execute(
+        select(Approval)
+        .where(Approval.trip_id == trip_id, Approval.change_type == "event_add")
+        .order_by(Approval.created_at)
+    )
+    events = []
+    for approval in rows.scalars().all():
+        p = approval.payload or {}
+        events.append(
+            {
+                "id": str(approval.id),
+                "approval_status": approval.status,
+                "event_name": p.get("event_name", ""),
+                "event_date": p.get("event_date"),
+                "start_time": p.get("start_time"),
+                "venue_name": p.get("venue_name", ""),
+                "category": p.get("category", ""),
+                "source": p.get("source", ""),
+                "url": p.get("url"),
+                "image_url": p.get("image_url"),
+                "price_min": p.get("price_min"),
+                "price_max": p.get("price_max"),
+                "price_currency": p.get("price_currency"),
+                "lat": p.get("lat"),
+                "lng": p.get("lng"),
+                "day_number": p.get("day_number"),
+                "summary": approval.summary or "",
+            }
+        )
+    return events
 
 
 # ── Share ─────────────────────────────────────────────────────────────────────
