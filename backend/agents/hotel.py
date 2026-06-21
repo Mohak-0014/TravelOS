@@ -75,6 +75,7 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
         check_out=trip.end_date,
         guests=trip.num_travelers,
         country=trip.destination_country,
+        currency=trip.budget_currency,
         cache=redis,
     )
     await redis.aclose()

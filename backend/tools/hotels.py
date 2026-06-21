@@ -14,6 +14,10 @@ logger = get_logger(__name__)
 _CACHE_TTL = 60 * 60  # 1 hour
 _LITEAPI_HOTELS_URL = "https://api.liteapi.travel/v3.0/data/hotels"
 _LITEAPI_RATES_URL = "https://api.liteapi.travel/v3.0/hotels/rates"
+# LiteAPI rates require the guest's nationality as an ISO-3166-1 alpha-2 code (India
+# is "IN", not "IND") — it affects availability and pricing. Defaulted to India; could
+# be derived from the user's profile in future.
+_GUEST_NATIONALITY = "IN"
 
 # Common destination → ISO-2 country code (expand as needed)
 _COUNTRY_CODES: dict[str, str] = {
@@ -167,8 +171,10 @@ class HotelOffer(BaseModel):
     raw_payload: dict
 
 
-def _cache_key(destination: str, check_in: date, check_out: date, guests: int) -> str:
-    raw = f"{destination}|{check_in}|{check_out}|{guests}"
+def _cache_key(
+    destination: str, check_in: date, check_out: date, guests: int, currency: str
+) -> str:
+    raw = f"{destination}|{check_in}|{check_out}|{guests}|{currency}"
     return f"hotels:{hashlib.sha256(raw.encode()).hexdigest()}"
 
 
@@ -177,6 +183,7 @@ async def _fetch_rates(
     check_in: date,
     check_out: date,
     guests: int,
+    currency: str = "USD",
 ) -> dict[str, tuple[float | None, float | None, str]]:
     """
     Fetch live rates from LiteAPI /v3.0/hotels/rates.
@@ -187,21 +194,28 @@ async def _fetch_rates(
         return {}
 
     nights = (check_out - check_in).days or 1
-    params: list[tuple[str, str | int | float | bool | None]] = [
-        ("checkin", check_in.isoformat()),
-        ("checkout", check_out.isoformat()),
-        ("adults", guests),
-        ("currency", "USD"),
-    ]
-    for hid in hotel_ids:
-        params.append(("hotelIds[]", hid))
+    # LiteAPI /v3.0/hotels/rates is a POST with a JSON body — a GET returns an empty 200,
+    # which is what was silently failing here. `occupancies` and `guestNationality` are
+    # required for the API to return any rates.
+    payload = {
+        "hotelIds": hotel_ids,
+        "occupancies": [{"adults": guests}],
+        "currency": currency,
+        "guestNationality": _GUEST_NATIONALITY,
+        "checkin": check_in.isoformat(),
+        "checkout": check_out.isoformat(),
+    }
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.get(
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
                 _LITEAPI_RATES_URL,
-                params=params,
-                headers={"X-API-Key": settings.LITEAPI_KEY},
+                json=payload,
+                headers={
+                    "X-API-Key": settings.LITEAPI_KEY,
+                    "Content-Type": "application/json",
+                    "accept": "application/json",
+                },
             )
             if resp.status_code != 200:
                 logger.warning(
@@ -220,27 +234,31 @@ async def _fetch_rates(
         hotel_id = str(item.get("hotelId", ""))
         if not hotel_id:
             continue
-        currency = item.get("currency", "USD") or "USD"
 
-        # Walk rooms → rates to find the cheapest room total
+        # Walk roomTypes → rates → retailRate.total for the cheapest stay total. The
+        # rates response nests prices under "roomTypes" (not "rooms"); fall back to
+        # "rooms" defensively in case the schema varies.
         best_total: float | None = None
-        for room in item.get("rooms", []):
+        best_currency = currency
+        for room in item.get("roomTypes") or item.get("rooms") or []:
             for rate in room.get("rates", []):
-                retail = rate.get("retailRate", {})
-                totals = retail.get("total", [])
-                if totals:
-                    amt = totals[0].get("amount")
-                    if amt is not None:
-                        try:
-                            val = float(amt)
-                            if best_total is None or val < best_total:
-                                best_total = val
-                        except (TypeError, ValueError):
-                            pass
+                totals = rate.get("retailRate", {}).get("total", [])
+                if not totals:
+                    continue
+                amt = totals[0].get("amount")
+                if amt is None:
+                    continue
+                try:
+                    val = float(amt)
+                except (TypeError, ValueError):
+                    continue
+                if best_total is None or val < best_total:
+                    best_total = val
+                    best_currency = totals[0].get("currency") or currency
 
         if best_total is not None:
             pn = round(best_total / nights, 2)
-            result[hotel_id] = (pn, round(best_total, 2), currency)
+            result[hotel_id] = (pn, round(best_total, 2), best_currency)
 
     logger.info("liteapi_rates_ok", fetched=len(result), requested=len(hotel_ids))
     return result
@@ -252,6 +270,7 @@ async def _search_liteapi(
     check_out: date,
     guests: int,
     country: str | None = None,
+    currency: str = "USD",
 ) -> list[HotelOffer]:
     if not settings.LITEAPI_KEY:
         logger.warning("liteapi_key_missing")
@@ -308,7 +327,7 @@ async def _search_liteapi(
 
     # Enrich with live rates
     hotel_ids = [o.hotel_id for o in offers]
-    rates = await _fetch_rates(hotel_ids, check_in, check_out, guests)
+    rates = await _fetch_rates(hotel_ids, check_in, check_out, guests, currency)
     for offer in offers:
         if offer.hotel_id in rates:
             pn, total, currency = rates[offer.hotel_id]
@@ -325,19 +344,20 @@ async def search_hotels(
     check_out: date,
     guests: int = 1,
     country: str | None = None,
+    currency: str = "USD",
     cache: Redis | None = None,  # type: ignore[type-arg]
 ) -> list[HotelOffer]:
     """
     Search hotels via LiteAPI /data/hotels (static metadata + star/location).
     Returns [] on failure — never raises.
     """
-    key = _cache_key(destination, check_in, check_out, guests)
+    key = _cache_key(destination, check_in, check_out, guests, currency)
     cached = await redis_get_cached(cache, key)
     if cached:
         logger.info("hotels_cache_hit", destination=destination)
         return [HotelOffer(**h) for h in cached]
 
-    offers = await _search_liteapi(destination, check_in, check_out, guests, country)
+    offers = await _search_liteapi(destination, check_in, check_out, guests, country, currency)
 
     if offers:
         payload = [o.model_dump() for o in offers]
