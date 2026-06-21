@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useScroll, useTransform } from "framer-motion";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
@@ -344,7 +344,7 @@ function DayNav({
   onSelect: (d: number) => void;
 }) {
   return (
-    <nav className="flex flex-col gap-1">
+    <nav className="flex flex-col gap-0.5">
       <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-2 px-2">
         Days
       </p>
@@ -352,13 +352,18 @@ function DayNav({
         <button
           key={d}
           onClick={() => onSelect(d)}
-          className={`w-full text-left px-3 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
-            d === activeDay
-              ? "bg-electric-500/15 border border-electric-500/30 text-electric-400"
-              : "text-slate-500 hover:text-slate-300 hover:bg-ink-900/[0.04]"
+          className={`relative w-full text-left px-3 py-2 rounded-xl text-sm font-medium transition-colors duration-150 ${
+            d === activeDay ? "text-electric-400" : "text-slate-500 hover:text-slate-300"
           }`}
         >
-          Day {d}
+          {d === activeDay && (
+            <motion.div
+              layoutId="day-active-bg"
+              className="absolute inset-0 bg-electric-500/15 border border-electric-500/30 rounded-xl"
+              transition={{ type: "spring", damping: 30, stiffness: 340 }}
+            />
+          )}
+          <span className="relative z-10">Day {d}</span>
         </button>
       ))}
     </nav>
@@ -1213,6 +1218,8 @@ export default function TripDetailPage() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const { scrollY } = useScroll();
+  const heroBgY = useTransform(scrollY, [0, 300], [0, 90]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1463,14 +1470,19 @@ export default function TripDetailPage() {
       </div>
 
       {/* ── Hero Banner ────────────────────────────────────────────────────── */}
-      <div
-        className={`relative h-48 bg-gradient-to-br ${gradient} overflow-hidden`}
-        style={trip.cover_image_url ? {
-          backgroundImage: `url(${trip.cover_image_url})`,
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-        } : undefined}
-      >
+      <div className="relative h-56 overflow-hidden">
+        {/* Parallax background layer */}
+        <motion.div
+          style={{
+            y: heroBgY,
+            ...(trip.cover_image_url ? {
+              backgroundImage: `url(${trip.cover_image_url})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+            } : {}),
+          }}
+          className={`absolute -top-24 inset-x-0 bottom-0 ${!trip.cover_image_url ? `bg-gradient-to-br ${gradient}` : ""}`}
+        />
         {/* Overlay — heavier when photo is present for text legibility */}
         {trip.cover_image_url
           ? <div className="absolute inset-0 bg-gradient-to-t from-ink-900/90 via-ink-900/45 to-ink-900/10" />
@@ -1847,7 +1859,11 @@ export default function TripDetailPage() {
                             const isLast = itemIdx === dayItems.length - 1;
 
                             return (
-                              <div key={item.id}>
+                              <motion.div
+                                key={item.id}
+                                whileHover={{ x: 3 }}
+                                transition={{ duration: 0.15 }}
+                              >
                                 <div className="flex gap-4 py-3">
                                   {/* Timeline line + icon */}
                                   <div className="flex flex-col items-center shrink-0">
@@ -1958,20 +1974,22 @@ export default function TripDetailPage() {
                                     )}
                                   </div>
                                 </div>
-                              </div>
+                              </motion.div>
                             );
                           })}
                         </div>
 
                         {/* Ask concierge chip */}
                         <div className="px-5 pb-4">
-                          <button
+                          <motion.button
+                            whileHover={{ scale: 1.02, x: 2 }}
+                            whileTap={{ scale: 0.97 }}
                             onClick={() => setChatOpen(true)}
                             className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-electric-400 transition-colors py-1.5 px-3 rounded-full border border-ink-900/10 hover:border-electric-500/30 hover:bg-electric-500/8"
                           >
                             <Compass className="w-3 h-3" />
                             Ask Concierge about Day {day} →
-                          </button>
+                          </motion.button>
                         </div>
                       </motion.div>
                     );
@@ -2086,8 +2104,16 @@ export default function TripDetailPage() {
                   )}
 
                   {/* Other hotel candidates */}
-                  {otherHotels.map((hotel) => (
-                    <div key={hotel.id} className="glass-card p-4 opacity-80 hover:opacity-100 transition-opacity">
+                  {otherHotels.map((hotel, hidx) => (
+                    <motion.div
+                      key={hotel.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      whileInView={{ opacity: 1, y: 0 }}
+                      viewport={{ once: true }}
+                      transition={{ delay: hidx * 0.07, duration: 0.35 }}
+                      whileHover={{ y: -2 }}
+                      className="glass-card p-4"
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-0.5">
@@ -2155,7 +2181,7 @@ export default function TripDetailPage() {
                           </motion.button>
                         </div>
                       </div>
-                    </div>
+                    </motion.div>
                   ))}
                 </div>
               </motion.section>
@@ -2325,16 +2351,23 @@ export default function TripDetailPage() {
 
               {/* Map — persistent sticky column showing itinerary pins + selected hotel */}
               {trip.latitude != null && trip.longitude != null && (pinnedItems.length > 0 || (selectedHotel?.latitude != null)) && (
-                <div className="glass-card overflow-hidden">
-                  <div className="flex items-center gap-2 px-4 pt-4 pb-2">
-                    <MapPin className="w-3.5 h-3.5 text-electric-400" />
-                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
-                      Map
-                    </p>
+                <div className="rounded-2xl overflow-hidden border border-white/[0.06] shadow-xl">
+                  {/* Map header */}
+                  <div className="flex items-center gap-2.5 px-4 py-3 bg-space-800 border-b border-white/[0.05]">
+                    <div className="w-7 h-7 rounded-xl bg-electric-500/15 border border-electric-500/25 flex items-center justify-center shrink-0">
+                      <MapPin className="w-3.5 h-3.5 text-electric-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-slate-200">{trip.destination_city}</p>
+                      <p className="text-[10px] text-slate-500">{pinnedItems.length} places mapped</p>
+                    </div>
                     {selectedHotel && (
-                      <span className="ml-auto text-[10px] text-amber-400/80 font-medium">🏨 {selectedHotel.name.split(" ").slice(0, 2).join(" ")}</span>
+                      <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full font-medium shrink-0">
+                        🏨 Hotel
+                      </span>
                     )}
                   </div>
+
                   <TripMap
                     items={pinnedItems}
                     centerLat={trip.latitude}
@@ -2344,8 +2377,23 @@ export default function TripDetailPage() {
                         ? { lat: selectedHotel.latitude, lng: selectedHotel.longitude, name: selectedHotel.name }
                         : null
                     }
-                    height="340px"
+                    height="360px"
                   />
+
+                  {/* Legend */}
+                  <div className="flex items-center gap-3 px-4 py-2.5 bg-space-800 border-t border-white/[0.05]">
+                    {[
+                      { color: "#f87171", label: "Activity" },
+                      { color: "#fbbf24", label: "Meal" },
+                      { color: "#34d399", label: "Transport" },
+                      { color: "#f59e0b", label: "Hotel", size: "w-2.5 h-2.5" },
+                    ].map(({ color, label, size }) => (
+                      <div key={label} className="flex items-center gap-1.5">
+                        <div className={`${size ?? "w-2 h-2"} rounded-full shrink-0`} style={{ background: color }} />
+                        <span className="text-[9px] text-slate-600 uppercase tracking-wide">{label}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -2359,96 +2407,149 @@ export default function TripDetailPage() {
           {/* ── CONCIERGE COLUMN (2xl+ only — persistent, no toggle) ──────── */}
           <div className="hidden 2xl:flex flex-col w-[320px] shrink-0">
             <div
-              className="sticky top-24 glass-card overflow-hidden flex flex-col"
+              className="sticky top-24 rounded-2xl border border-white/[0.07] overflow-hidden flex flex-col bg-space-800 shadow-xl"
               style={{ height: "calc(100vh - 7rem)" }}
             >
               {/* Header */}
-              <div className="flex items-center gap-3 px-4 py-3 border-b border-ink-900/10 shrink-0">
-                <div className="w-7 h-7 rounded-xl bg-electric-gradient flex items-center justify-center shadow-electric-sm">
-                  <Compass className="w-3.5 h-3.5 text-white" />
+              <div className="relative flex items-center gap-3 px-4 py-4 border-b border-white/[0.06] shrink-0 bg-gradient-to-r from-electric-500/8 via-purple-500/4 to-transparent">
+                <div className="relative w-9 h-9 rounded-2xl bg-electric-gradient flex items-center justify-center shadow-electric-sm shrink-0">
+                  <Compass className="w-4 h-4 text-white" />
+                  <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-space-800 flex items-center justify-center">
+                    <span className="absolute w-full h-full rounded-full bg-emerald-400 animate-ping opacity-60" />
+                  </span>
                 </div>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-slate-200">AI Concierge</p>
-                  <p className="text-[10px] text-slate-500">Powered by TravelOS agents</p>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-white">AI Concierge</p>
+                  <p className="text-[10px] text-emerald-400/80 flex items-center gap-1">
+                    <span className="w-1 h-1 rounded-full bg-emerald-400 inline-block" />
+                    {trip.destination_city} specialist
+                  </p>
                 </div>
               </div>
 
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 scrollbar-hide">
                 {chatMessages.length === 0 && (
-                  <div className="text-center py-8">
-                    <p className="text-xs text-slate-600 leading-relaxed">
-                      Ask me anything about your trip — restaurants, packing tips, local advice…
+                  <div className="flex flex-col items-center px-2 py-8">
+                    {/* Animated orb */}
+                    <div className="relative w-16 h-16 mb-4 shrink-0">
+                      <div className="absolute inset-0 rounded-full bg-electric-gradient opacity-15 blur-xl animate-pulse" />
+                      <div className="absolute inset-0 rounded-full border border-electric-500/20 animate-ping" style={{ animationDuration: "3s" }} />
+                      <div className="absolute inset-3 rounded-full bg-electric-gradient/20 flex items-center justify-center border border-electric-500/30">
+                        <Compass className="w-6 h-6 text-electric-400" />
+                      </div>
+                    </div>
+                    <h3 className="text-sm font-bold text-slate-100 mb-1 text-center">
+                      Your {trip.destination_city} Guide
+                    </h3>
+                    <p className="text-[11px] text-slate-500 text-center leading-relaxed mb-5 max-w-[200px]">
+                      Real-time advice on restaurants, hidden spots, logistics and more
                     </p>
-                    <div className="flex flex-wrap gap-1.5 justify-center mt-3">
-                      {["Best restaurants nearby?", "What should I pack?", "Local transport tips"].map((q) => (
-                        <button
+                    <div className="w-full space-y-2">
+                      {[
+                        { q: `Best restaurants in ${trip.destination_city}?`, icon: "🍽" },
+                        { q: "What should I pack?", icon: "🧳" },
+                        { q: "Local transport tips", icon: "🚇" },
+                      ].map(({ q, icon }) => (
+                        <motion.button
                           key={q}
+                          whileHover={{ x: 2 }}
+                          whileTap={{ scale: 0.98 }}
                           onClick={() => {
                             setChatMessages((prev) => [...prev, { role: "user", text: q }]);
                             setChatLoading(true);
                             sendMessage(q).finally(() => setChatLoading(false));
                           }}
-                          className="text-[10px] text-electric-400 bg-electric-500/10 border border-electric-500/20 px-2.5 py-1 rounded-full hover:bg-electric-500/20 transition-colors"
+                          className="w-full flex items-center gap-3 text-left px-3.5 py-2.5 rounded-xl text-xs bg-electric-500/8 border border-electric-500/15 text-slate-300 hover:bg-electric-500/15 hover:border-electric-500/30 hover:text-slate-100 transition-all group"
                         >
-                          {q}
-                        </button>
+                          <span className="text-sm leading-none">{icon}</span>
+                          <span className="flex-1">{q}</span>
+                          <ChevronRight className="w-3 h-3 text-slate-600 group-hover:text-electric-400 transition-colors" />
+                        </motion.button>
                       ))}
                     </div>
                   </div>
                 )}
                 {chatMessages.map((msg, i) => (
-                  <div key={i}>
-                    <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                      <div
-                        className={`max-w-[85%] text-xs px-3.5 py-2.5 rounded-2xl leading-relaxed ${
-                          msg.role === "user"
-                            ? "bg-electric-gradient text-white rounded-br-sm shadow-electric-sm"
-                            : "glass-light text-slate-300 rounded-bl-sm border border-ink-900/10"
-                        }`}
-                      >
-                        {msg.text}
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ type: "spring", damping: 28, stiffness: 380 }}
+                  >
+                    {msg.role === "assistant" ? (
+                      <div className="flex items-start gap-2.5">
+                        <div className="w-7 h-7 rounded-xl bg-electric-gradient flex items-center justify-center shrink-0 mt-0.5 shadow-electric-sm">
+                          <Compass className="w-3 h-3 text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="bg-space-700/80 border border-electric-500/10 text-slate-200 text-xs px-3.5 py-2.5 rounded-2xl rounded-tl-sm leading-relaxed">
+                            {msg.text}
+                          </div>
+                          {msg.sources && msg.sources.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1.5">
+                              {msg.sources.slice(0, 4).map((s, j) => (
+                                <span key={j} className="text-[10px] bg-ink-900/[0.04] text-slate-500 px-2 py-0.5 rounded-full border border-ink-900/10">
+                                  {s.name}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                    {msg.sources && msg.sources.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1.5 ml-1">
-                        {msg.sources.slice(0, 4).map((s, j) => (
-                          <span key={j} className="text-[10px] bg-ink-900/[0.04] text-slate-500 px-2 py-0.5 rounded-full border border-ink-900/10">
-                            {s.name}
-                          </span>
-                        ))}
+                    ) : (
+                      <div className="flex justify-end">
+                        <div className="bg-electric-gradient text-white text-xs px-3.5 py-2.5 rounded-2xl rounded-br-sm shadow-electric-sm max-w-[85%] leading-relaxed">
+                          {msg.text}
+                        </div>
                       </div>
                     )}
-                  </div>
+                  </motion.div>
                 ))}
                 {chatLoading && (
-                  <div className="flex gap-1.5 items-center px-3 py-2">
-                    {[0, 1, 2].map((i) => (
-                      <div key={i} className="w-1.5 h-1.5 bg-electric-400 rounded-full animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
-                    ))}
+                  <div className="flex items-start gap-2.5">
+                    <div className="w-7 h-7 rounded-xl bg-electric-gradient flex items-center justify-center shrink-0 shadow-electric-sm">
+                      <Compass className="w-3 h-3 text-white" />
+                    </div>
+                    <div className="bg-space-700/80 border border-electric-500/10 px-4 py-3 rounded-2xl rounded-tl-sm">
+                      <div className="flex gap-1.5 items-center h-3">
+                        {[0, 1, 2].map((i) => (
+                          <motion.div
+                            key={i}
+                            className="w-1.5 h-1.5 bg-electric-400 rounded-full"
+                            animate={{ y: [-3, 0, -3] }}
+                            transition={{ repeat: Infinity, duration: 0.9, delay: i * 0.18, ease: "easeInOut" }}
+                          />
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 )}
                 <div ref={chatEndRef} />
               </div>
 
               {/* Input */}
-              <form onSubmit={handleChatSubmit} className="flex gap-2 px-3 py-3 border-t border-ink-900/10 shrink-0">
-                <input
-                  type="text"
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  disabled={chatLoading}
-                  placeholder="Ask anything…"
-                  className="input-dark text-xs py-2 flex-1"
-                />
-                <button
-                  type="submit"
-                  disabled={chatLoading || !chatInput.trim()}
-                  className="w-9 h-9 rounded-xl bg-electric-gradient text-white flex items-center justify-center hover:opacity-90 disabled:opacity-40 transition-opacity shadow-electric-sm shrink-0"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </button>
-              </form>
+              <div className="px-4 py-3 border-t border-white/[0.06] shrink-0 bg-gradient-to-t from-space-800/60 to-transparent">
+                <form onSubmit={handleChatSubmit} className="flex gap-2 items-center">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    disabled={chatLoading}
+                    placeholder={`Ask about ${trip.destination_city}…`}
+                    className="flex-1 bg-space-700 border border-white/[0.07] focus:border-electric-500/50 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 outline-none transition-all"
+                  />
+                  <motion.button
+                    type="submit"
+                    disabled={chatLoading || !chatInput.trim()}
+                    whileHover={{ scale: 1.06 }}
+                    whileTap={{ scale: 0.94 }}
+                    className="w-9 h-9 rounded-xl bg-electric-gradient text-white flex items-center justify-center disabled:opacity-40 transition-opacity shadow-electric-sm shrink-0"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                  </motion.button>
+                </form>
+              </div>
             </div>
           </div>
 
@@ -2465,39 +2566,45 @@ export default function TripDetailPage() {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 20, scale: 0.95 }}
               transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-              className="w-[360px] max-w-[calc(100vw-2rem)] glass-card overflow-hidden flex flex-col"
+              className="w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border border-white/[0.07] overflow-hidden flex flex-col bg-space-800 shadow-2xl"
               style={{ height: "50vh", maxHeight: "480px" }}
             >
               {/* Chat header */}
-              <div className="flex items-center gap-3 px-4 py-3 border-b border-ink-900/10 shrink-0">
-                <div className="w-7 h-7 rounded-xl bg-electric-gradient flex items-center justify-center shadow-electric-sm">
+              <div className="relative flex items-center gap-3 px-4 py-3.5 border-b border-white/[0.06] shrink-0 bg-gradient-to-r from-electric-500/8 via-purple-500/4 to-transparent">
+                <div className="relative w-8 h-8 rounded-xl bg-electric-gradient flex items-center justify-center shadow-electric-sm shrink-0">
                   <Compass className="w-3.5 h-3.5 text-white" />
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 border border-space-800" />
                 </div>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-slate-200">AI Concierge</p>
-                  <p className="text-[10px] text-slate-500">Powered by TravelOS agents</p>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-white">AI Concierge</p>
+                  <p className="text-[10px] text-emerald-400/80">{trip.destination_city} specialist</p>
                 </div>
                 <button
                   onClick={() => setChatOpen(false)}
-                  className="text-slate-500 hover:text-slate-300 transition-colors"
+                  className="text-slate-500 hover:text-slate-300 transition-colors p-1"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 scrollbar-hide">
                 {chatMessages.length === 0 && (
-                  <div className="text-center py-8">
-                    <p className="text-xs text-slate-600 leading-relaxed">
-                      Ask me anything about your trip — restaurants, packing tips, local advice…
-                    </p>
-                    <div className="flex flex-wrap gap-1.5 justify-center mt-3">
+                  <div className="flex flex-col items-center py-6">
+                    <div className="relative w-12 h-12 mb-3 shrink-0">
+                      <div className="absolute inset-0 rounded-full bg-electric-gradient opacity-15 blur-lg animate-pulse" />
+                      <div className="absolute inset-2 rounded-full bg-electric-gradient/20 flex items-center justify-center border border-electric-500/30">
+                        <Compass className="w-5 h-5 text-electric-400" />
+                      </div>
+                    </div>
+                    <p className="text-xs font-semibold text-slate-200 mb-0.5 text-center">Your {trip.destination_city} Guide</p>
+                    <p className="text-[10px] text-slate-500 text-center mb-4 leading-relaxed">Ask anything about your trip</p>
+                    <div className="w-full space-y-1.5">
                       {[
-                        "Best restaurants nearby?",
-                        "What should I pack?",
-                        "Local transport tips",
-                      ].map((q) => (
+                        { q: `Best restaurants in ${trip.destination_city}?`, icon: "🍽" },
+                        { q: "What should I pack?", icon: "🧳" },
+                        { q: "Local transport tips", icon: "🚇" },
+                      ].map(({ q, icon }) => (
                         <button
                           key={q}
                           onClick={() => {
@@ -2508,9 +2615,11 @@ export default function TripDetailPage() {
                             setChatLoading(true);
                             sendMessage(q).finally(() => setChatLoading(false));
                           }}
-                          className="text-[10px] text-electric-400 bg-electric-500/10 border border-electric-500/20 px-2.5 py-1 rounded-full hover:bg-electric-500/20 transition-colors"
+                          className="w-full flex items-center gap-2.5 text-left px-3 py-2 rounded-xl text-xs bg-electric-500/8 border border-electric-500/15 text-slate-300 hover:bg-electric-500/15 hover:text-slate-100 transition-all group"
                         >
-                          {q}
+                          <span className="text-sm leading-none">{icon}</span>
+                          <span className="flex-1">{q}</span>
+                          <ChevronRight className="w-3 h-3 text-slate-600 group-hover:text-electric-400 transition-colors shrink-0" />
                         </button>
                       ))}
                     </div>
@@ -2518,70 +2627,86 @@ export default function TripDetailPage() {
                 )}
 
                 {chatMessages.map((msg, i) => (
-                  <div key={i}>
-                    <div
-                      className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                    >
-                      <div
-                        className={`max-w-[85%] text-xs px-3.5 py-2.5 rounded-2xl leading-relaxed ${
-                          msg.role === "user"
-                            ? "bg-electric-gradient text-white rounded-br-sm shadow-electric-sm"
-                            : "glass-light text-slate-300 rounded-bl-sm border border-ink-900/10"
-                        }`}
-                      >
-                        {msg.text}
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ type: "spring", damping: 28, stiffness: 380 }}
+                  >
+                    {msg.role === "assistant" ? (
+                      <div className="flex items-start gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-electric-gradient flex items-center justify-center shrink-0 mt-0.5 shadow-electric-sm">
+                          <Compass className="w-2.5 h-2.5 text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="bg-space-700/80 border border-electric-500/10 text-slate-200 text-xs px-3 py-2.5 rounded-2xl rounded-tl-sm leading-relaxed">
+                            {msg.text}
+                          </div>
+                          {msg.sources && msg.sources.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1.5">
+                              {msg.sources.slice(0, 4).map((s, j) => (
+                                <span key={j} className="text-[10px] bg-ink-900/[0.04] text-slate-500 px-2 py-0.5 rounded-full border border-ink-900/10">
+                                  {s.name}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                    {msg.sources && msg.sources.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1.5 ml-1">
-                        {msg.sources.slice(0, 4).map((s, j) => (
-                          <span
-                            key={j}
-                            className="text-[10px] bg-ink-900/[0.04] text-slate-500 px-2 py-0.5 rounded-full border border-ink-900/10"
-                          >
-                            {s.name}
-                          </span>
-                        ))}
+                    ) : (
+                      <div className="flex justify-end">
+                        <div className="bg-electric-gradient text-white text-xs px-3 py-2.5 rounded-2xl rounded-br-sm shadow-electric-sm max-w-[85%] leading-relaxed">
+                          {msg.text}
+                        </div>
                       </div>
                     )}
-                  </div>
+                  </motion.div>
                 ))}
 
                 {chatLoading && (
-                  <div className="flex gap-1.5 items-center px-3 py-2">
-                    {[0, 1, 2].map((i) => (
-                      <div
-                        key={i}
-                        className="w-1.5 h-1.5 bg-electric-400 rounded-full animate-bounce"
-                        style={{ animationDelay: `${i * 0.15}s` }}
-                      />
-                    ))}
+                  <div className="flex items-start gap-2">
+                    <div className="w-6 h-6 rounded-lg bg-electric-gradient flex items-center justify-center shrink-0 shadow-electric-sm">
+                      <Compass className="w-2.5 h-2.5 text-white" />
+                    </div>
+                    <div className="bg-space-700/80 border border-electric-500/10 px-3.5 py-3 rounded-2xl rounded-tl-sm">
+                      <div className="flex gap-1.5 items-center h-3">
+                        {[0, 1, 2].map((i) => (
+                          <motion.div
+                            key={i}
+                            className="w-1.5 h-1.5 bg-electric-400 rounded-full"
+                            animate={{ y: [-3, 0, -3] }}
+                            transition={{ repeat: Infinity, duration: 0.9, delay: i * 0.18, ease: "easeInOut" }}
+                          />
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 )}
                 <div ref={chatEndRef} />
               </div>
 
               {/* Input */}
-              <form
-                onSubmit={handleChatSubmit}
-                className="flex gap-2 px-3 py-3 border-t border-ink-900/10 shrink-0"
-              >
-                <input
-                  type="text"
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  disabled={chatLoading}
-                  placeholder="Ask anything…"
-                  className="input-dark text-xs py-2 flex-1"
-                />
-                <button
-                  type="submit"
-                  disabled={chatLoading || !chatInput.trim()}
-                  className="w-9 h-9 rounded-xl bg-electric-gradient text-white flex items-center justify-center hover:opacity-90 disabled:opacity-40 transition-opacity shadow-electric-sm shrink-0"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </button>
-              </form>
+              <div className="px-3 py-3 border-t border-white/[0.06] shrink-0">
+                <form onSubmit={handleChatSubmit} className="flex gap-2 items-center">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    disabled={chatLoading}
+                    placeholder={`Ask about ${trip.destination_city}…`}
+                    className="flex-1 bg-space-700 border border-white/[0.07] focus:border-electric-500/50 rounded-xl px-3 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 outline-none transition-all"
+                  />
+                  <motion.button
+                    type="submit"
+                    disabled={chatLoading || !chatInput.trim()}
+                    whileHover={{ scale: 1.06 }}
+                    whileTap={{ scale: 0.94 }}
+                    className="w-9 h-9 rounded-xl bg-electric-gradient text-white flex items-center justify-center disabled:opacity-40 transition-opacity shadow-electric-sm shrink-0"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                  </motion.button>
+                </form>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
