@@ -2,22 +2,16 @@
 
 Last updated: 2026-06-21
 
-## In progress / immediate (2026-06-21)
-
-| # | Task | Notes |
-|---|---|---|
-| A | **Commit this session's work** | 12 files uncommitted (places/restaurants/itinerary/hotels/trips + frontend + 2 new test files): composite prominence + geometry-aware fetch, restaurant food filter, prominence/variety + MUST-SEE prompt, regenerate-button fix, LiteAPI rates + per-trip currency fix. All gates green (ruff, mypy, tests). Suggested split: `feat(places)`, `fix(hotels)`, `fix(restaurants)`, `feat(itinerary)`, `fix(trips)`. |
-
 ## New Features & Fixes (2026-06-21 requests)
 
 | # | Task | File(s) | Notes |
 |---|---|---|---|
-| 31 | **Flight prices** | new `backend/tools/flights.py` + agent/tool, frontend section | Add flight pricing for the trip. Needs a provider (Amadeus / Duffel / Kiwi-Tequila / Skyscanner) and an **origin / home airport** (new user-profile or trip field — not stored today). Backend: tool fetching round-trip prices for origin→destination on the trip dates → graph state. Frontend: a flights section. Largest of the new items. |
-| 32 | **Local Events frontend section** | `backend/api/routers/`, `backend/db/models.py`, `frontend/app/trips/[tripId]/page.tsx` | The Events agent (`events.py`) already fetches/scores events, but they only surface as `event_add` **approval banners** — there is no browsable list and no `events` endpoint. Persist events to a queryable table, add `GET /api/v1/trips/{id}/events`, and a "Local Events" section (cards: name, date, venue, category, Ticketmaster/Eventbrite badge). |
-| 33 | **Map as a sidebar** | `frontend/app/trips/[tripId]/page.tsx`, `frontend/components/.../TripMap` | Move the map from inline/modal into a **persistent sticky side column**, showing itinerary pins + the selected hotel. (react-leaflet v4 — do not upgrade to v5.) |
-| 34 | **Concierge full-column** | `frontend/app/trips/[tripId]/page.tsx` | Promote the concierge chat from the small popup/drawer (`chatOpen` right-edge panel) to a **full column** in the trip layout (persistent, not a popup). Re-flow the page into columns. |
-| 35 | **Hotel-upgrade accept bug** | `backend/api/routers/approvals.py`, `backend/agents/budget_optimizer.py` | **Bug**: ≥30% under budget → Budget Optimizer creates a `budget_upgrade` approval (an LLM *text* suggestion naming a hotel). The approvals resolve endpoint applies `concierge_swap`/`user_replace`/`concierge_add`/`event_add` but has **no `budget_upgrade` handler** → accepting does nothing to the hotel selection, so the shown hotel is unchanged ("a different option"). Fix: (a) `_propose_upgrade` picks a specific upgrade **candidate** and stores its `provider_hotel_id`/candidate id in the payload; (b) resolve handles `budget_upgrade` by setting that hotel `is_selected=True` (clearing others); add a test. |
-| 36 | **Deterministic must-see enforcement** | `backend/agents/itinerary_planner.py` | Composite ranking surfaces icons + a MUST-SEE block, but the LLM doesn't always schedule each (e.g. Louvre skipped on a 3-day Paris trip). Add a post-generation pass: if a top-N must-see is missing, swap it into the lowest-priority activity slot (keep day/time); guarantee ≈ `slots − 2` to leave variety. Ranking nuances: Louvre tagged "Louvre **Palace**" (sl 38) not "Museum" (~150); Akshardham-type temples are `amenity=place_of_worship` only (no `tourism` boost). |
+| ~~31~~ ✅ | **Flight prices** — DONE 2026-06-21 | `backend/tools/flights.py` (new), `backend/api/routers/trips.py`, `frontend/app/trips/[tripId]/page.tsx`, `frontend/lib/api.ts` | Amadeus sandbox OAuth2 + `/v2/shopping/flight-offers`; origin as query param; Redis-cached token + prices; `GET /api/v1/trips/{id}/flights?origin=XXX`; frontend search form + flight cards. |
+| ~~32~~ ✅ | **Local Events frontend section** — DONE 2026-06-21 | `backend/api/routers/trips.py`, `frontend/app/trips/[tripId]/page.tsx`, `frontend/lib/api.ts` | `GET /api/v1/trips/{id}/events` reads existing `event_add` Approval records (no new table/migration); frontend events cards with image, venue, date, category chip, source badge, tickets link. |
+| ~~33~~ ✅ | **Map as a sidebar** — DONE 2026-06-21 | `frontend/app/trips/[tripId]/page.tsx`, `frontend/app/trips/[tripId]/TripMap.tsx` | Map promoted to persistent sticky right column (280→300px); hotel amber pin; 340px height; visible when hotel has coords; react-leaflet v4 kept. |
+| ~~34~~ ✅ | **Concierge full-column** — DONE 2026-06-21 | `frontend/app/trips/[tripId]/page.tsx` | 4th column at `2xl` breakpoint (`hidden 2xl:flex w-[320px]`); persistent chat with header, messages, quick questions, loading, input; `calc(100vh - 7rem)` height; FAB hidden at 2xl. |
+| ~~35~~ ✅ | **Hotel-upgrade accept bug** — DONE 2026-06-21 | `backend/api/routers/approvals.py`, `backend/agents/budget_optimizer.py` | `_propose_upgrade` now queries DB for a concrete higher-star candidate and stores `candidate_id`; resolve handler flips `is_selected`; integration test added. |
+| ~~36~~ ✅ | **Deterministic must-see enforcement** — DONE 2026-06-21 | `backend/agents/itinerary_planner.py` | Post-generation `_enforce_must_see` pass; swaps missing landmarks into lowest-priority slots (LLM-invented first); cap = `activity_count − trip_days × 2`; 6 unit tests. |
 
 ## Priority Order
 
@@ -97,6 +91,7 @@ Tune the LLM prompts so agents produce more useful, higher-quality results. High
 
 ## Done (2026-06-21 session)
 
+- [x] **Task A — Committed session's work**: 12 files (places/restaurants/itinerary/hotels/trips + frontend + 2 new test files) committed in 5 conventional-commit splits: `feat(places)` geometry-aware fetch + composite prominence ranking, `feat(itinerary)` prominence/variety prompt + must-see landmarks, `fix(hotels)` POST rates with correct body and per-trip currency, `fix(restaurants)` keep only food venues from Foursquare, `fix(trips)` regenerate completed trips and refresh hotels in UI. All gates green (ruff, mypy, tests). Commits: 78d74c8, 82a35f4, 5a1752f, bf8ea75, 6d92e1b.
 - [x] **#23 — Itinerary prominence + variety**: city-agnostic **composite prominence score** (rank-normalised Wikidata sitelinks + OSM `tourism`/heritage/Wikivoyage tags) — corrects the "borrowed fame" bias (a famous person's memorial no longer outranks India Gate). **Geometry-aware Overpass query** (landmark ways/relations get a dedicated block so a flood of Wikidata nodes can't starve them — fixed Paris missing Eiffel/Louvre). Variety + MUST-SEE prompt. Verified on Delhi and Paris.
 - [x] **#4 / #5** confirmed in place (walking-distance clustering; opening-hours + time-of-day heuristics).
 - [x] **Restaurant food filter** — Foursquare results constrained to food venues (no more "Ferrari Showroom" / "Rashtrapati Bhavan" meals).
