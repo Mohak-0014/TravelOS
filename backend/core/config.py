@@ -34,8 +34,7 @@ class Settings(BaseSettings):
     TICKETMASTER_API_KEY: str = ""
     EVENTBRITE_TOKEN: str = ""
     UNSPLASH_ACCESS_KEY: str = ""
-    AMADEUS_CLIENT_ID: str = ""
-    AMADEUS_CLIENT_SECRET: str = ""
+    DUFFEL_API_KEY: str = ""
     # Overpass API (OpenStreetMap) — no key required
 
     # Auth

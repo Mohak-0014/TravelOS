@@ -481,7 +481,7 @@ async def get_trip_flights(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[FlightOffer]:
-    """Search round-trip flights from the given origin airport using Amadeus."""
+    """Search round-trip flights from the given origin airport using Duffel."""
     result = await db.execute(select(Trip).where(Trip.id == trip_id))
     trip = _assert_owns(result.scalar_one_or_none(), current_user)
 
@@ -505,8 +505,7 @@ async def get_trip_flights(
         return_date=trip.end_date,
         num_travelers=trip.num_travelers,
         currency=trip.budget_currency or "USD",
-        client_id=settings.AMADEUS_CLIENT_ID,
-        client_secret=settings.AMADEUS_CLIENT_SECRET,
+        api_key=settings.DUFFEL_API_KEY,
         cache=cache,
     )
 
