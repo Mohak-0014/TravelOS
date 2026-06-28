@@ -4,11 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.api.dependencies import get_current_active_user
+from backend.api.dependencies import get_current_active_user, get_owned_trip
 from backend.core.logging import get_logger
 from backend.db.base import get_db
 from backend.db.models import Approval, HotelCandidate, ItineraryItem, Trip, User, UserFeedback
 from backend.db.schemas import ApprovalCreate, ApprovalDecision, ApprovalOut
+from backend.workflows.outbox import enqueue
 
 logger = get_logger(__name__)
 
@@ -42,18 +43,14 @@ def _assert_trip_owned(trip: Trip | None, user: User) -> Trip:
     status_code=status.HTTP_201_CREATED,
 )
 async def create_approval(
-    trip_id: str,
     body: ApprovalCreate,
-    current_user: User = Depends(get_current_active_user),
+    trip: Trip = Depends(get_owned_trip),
     db: AsyncSession = Depends(get_db),
 ) -> Approval:
-    trip_result = await db.execute(select(Trip).where(Trip.id == trip_id))
-    trip = _assert_trip_owned(trip_result.scalar_one_or_none(), current_user)
-
     item_result = await db.execute(
         select(ItineraryItem).where(
             ItineraryItem.id == body.item_id,
-            ItineraryItem.trip_id == trip_id,
+            ItineraryItem.trip_id == trip.id,
         )
     )
     item = item_result.scalar_one_or_none()
@@ -67,7 +64,7 @@ async def create_approval(
         summary += f". Reason: {body.reason}"
 
     approval = Approval(
-        trip_id=trip_id,
+        trip_id=trip.id,
         proposed_by="user",
         change_type="user_replace",
         summary=summary,
@@ -89,15 +86,11 @@ async def create_approval(
 
 @router.get("/api/v1/trips/{trip_id}/approvals", response_model=list[ApprovalOut])
 async def list_approvals(
-    trip_id: str,
     status: str | None = None,
-    current_user: User = Depends(get_current_active_user),
+    trip: Trip = Depends(get_owned_trip),
     db: AsyncSession = Depends(get_db),
 ) -> list[Approval]:
-    result = await db.execute(select(Trip).where(Trip.id == trip_id))
-    _assert_trip_owned(result.scalar_one_or_none(), current_user)
-
-    query = select(Approval).where(Approval.trip_id == trip_id)
+    query = select(Approval).where(Approval.trip_id == trip.id)
     if status:
         query = query.where(Approval.status == status)
     query = query.order_by(Approval.created_at.desc())
@@ -301,7 +294,9 @@ async def resolve_approval(
     await db.commit()
     await db.refresh(approval)
 
-    # Record feedback for the learning loop
+    # Record feedback for the learning loop. The CPU-heavy embedding still runs in Celery,
+    # but is dispatched via the transactional outbox so the UserFeedback row and its embed
+    # task commit atomically — no lost embedding if we die between commit and enqueue.
     try:
         context_tags = _extract_context_tags(approval.change_type, approval.payload or {})
         feedback = UserFeedback(
@@ -314,13 +309,13 @@ async def resolve_approval(
             summary=approval.summary or "",
         )
         db.add(feedback)
+        await db.flush()  # assign feedback.id before staging the outbox row
+        await enqueue(
+            db,
+            "backend.workflows.celery_tasks.embed_feedback_async",
+            {"feedback_id": str(feedback.id)},
+        )
         await db.commit()
-        await db.refresh(feedback)
-
-        # Embed the feedback vector in Celery (CPU-heavy — never in request path)
-        from backend.workflows.celery_tasks import embed_feedback_async  # noqa: PLC0415
-
-        embed_feedback_async.delay(str(feedback.id))
     except Exception as exc:
         logger.warning("feedback_write_failed", approval_id=approval_id, error=str(exc))
 

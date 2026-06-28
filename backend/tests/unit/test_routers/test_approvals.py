@@ -322,6 +322,35 @@ async def test_approve_updates_item_title(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_resolve_writes_outbox_embed_event(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Resolving an approval stages the feedback-embedding task in the outbox (atomically),
+    instead of calling .delay() after commit."""
+    from sqlalchemy import select
+
+    from backend.db.models import OutboxEvent
+
+    token = await _auth(client, "outbox_appr@test.com")
+    trip = await _create_trip(client, token)
+    item = await _add_item(client, token, trip["id"])
+    approval = await _create_approval(client, token, trip["id"], item["id"])
+
+    resp = await client.post(
+        f"/api/v1/approvals/{approval['id']}",
+        json={"decision": "approved"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+
+    rows = list((await db_session.execute(select(OutboxEvent))).scalars().all())
+    assert len(rows) == 1
+    assert rows[0].task_name == "backend.workflows.celery_tasks.embed_feedback_async"
+    assert rows[0].status == "pending"
+    assert "feedback_id" in rows[0].payload
+
+
+@pytest.mark.asyncio
 async def test_approve_restores_trip_status_to_planned(client: AsyncClient) -> None:
     token = await _auth(client, "approve_status@test.com")
     trip = await _create_trip(client, token)
