@@ -3,13 +3,13 @@
 @tailwind utilities;
 
 :root {
-  --background: #fbf7f0;
-  --foreground: #14223d;
-  --glass-bg: rgba(255, 255, 255, 0.7);
-  --glass-border: rgba(20, 34, 61, 0.08);
-  --electric: #36a3e0; /* sky */
-  --gold: #f5a623;
-  --coral: #ff6b5c;
+  --background: #f6f8fc;
+  --foreground: #0f172a;
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(15, 23, 42, 0.08);
+  --electric: #0ea5e9; /* sky-blue */
+  --gold: #f59e0b;
+  --coral: #fb7185;
 }
 
 * {
@@ -25,12 +25,14 @@ body {
   background: var(--background);
   font-family: var(--font-jakarta), system-ui, sans-serif;
   min-height: 100vh;
-  overflow-x: hidden;
+  /* clip (not hidden) so stray horizontal overflow is trimmed WITHOUT
+     creating a scroll container that would break position: sticky. */
+  overflow-x: clip;
 }
 
 ::selection {
-  background: rgba(255, 107, 92, 0.22);
-  color: #14223d;
+  background: rgba(14, 165, 233, 0.22);
+  color: #0f172a;
 }
 
 /* ── Scrollbar ────────────────────────────────────────────────────────── */
@@ -38,15 +40,15 @@ body {
   width: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: #f4eee2;
+  background: #e9eef7;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 107, 92, 0.35);
+  background: rgba(14, 165, 233, 0.45);
   border-radius: 6px;
-  border: 2px solid #f4eee2;
+  border: 2px solid #e9eef7;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 107, 92, 0.6);
+  background: rgba(14, 165, 233, 0.7);
 }
 
 /* ── Card + surface utilities ─────────────────────────────────────────── */
@@ -55,80 +57,80 @@ body {
     background: rgba(255, 255, 255, 0.72);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(20, 34, 61, 0.07);
+    border: 1px solid rgba(15, 23, 42, 0.08);
   }
 
   .glass-light {
-    background: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.55);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(20, 34, 61, 0.06);
+    border: 1px solid rgba(15, 23, 42, 0.06);
   }
 
   .glass-card {
-    background: rgba(255, 255, 255, 0.86);
+    background: rgba(255, 255, 255, 0.78);
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
-    border: 1px solid rgba(20, 34, 61, 0.07);
+    border: 1px solid rgba(15, 23, 42, 0.08);
     border-radius: 20px;
     box-shadow:
-      0 10px 34px rgba(20, 34, 61, 0.08),
-      0 2px 8px rgba(20, 34, 61, 0.04);
+      0 12px 40px rgba(15, 23, 42, 0.08),
+      0 2px 8px rgba(15, 23, 42, 0.04);
   }
 
   .glass-card:hover {
-    border-color: rgba(255, 107, 92, 0.28);
+    border-color: rgba(14, 165, 233, 0.35);
     box-shadow:
-      0 24px 50px rgba(20, 34, 61, 0.14),
-      0 0 0 1px rgba(255, 107, 92, 0.12);
+      0 24px 56px rgba(15, 23, 42, 0.12),
+      0 0 0 1px rgba(14, 165, 233, 0.14);
   }
 
-  /* warm sunset gradient text */
+  /* luminous sky → indigo → coral brand shimmer */
   .gradient-text {
-    background: linear-gradient(120deg, #ff6b5c 0%, #ff944d 45%, #f5a623 100%);
+    background: linear-gradient(120deg, #0ea5e9 0%, #6366f1 52%, #fb7185 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
 
   .gradient-text-gold {
-    background: linear-gradient(120deg, #f5a623 0%, #ff8a3c 100%);
+    background: linear-gradient(120deg, #f59e0b 0%, #ea580c 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
 
   .gradient-text-sky {
-    background: linear-gradient(120deg, #36a3e0 0%, #5bb8e8 100%);
+    background: linear-gradient(120deg, #0ea5e9 0%, #38bdf8 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
 
   .electric-border {
-    border: 1px solid rgba(54, 163, 224, 0.35);
+    border: 1px solid rgba(14, 165, 233, 0.35);
     box-shadow:
-      0 1px 3px rgba(20, 34, 61, 0.04),
-      inset 0 0 12px rgba(54, 163, 224, 0.05);
+      0 1px 3px rgba(15, 23, 42, 0.06),
+      inset 0 0 12px rgba(14, 165, 233, 0.08);
   }
 
   /* ── Buttons ───────────────────────────────────────────────────────── */
   .btn-primary {
-    background: linear-gradient(135deg, #ff6b5c 0%, #f5803c 100%);
-    color: white;
+    background: linear-gradient(135deg, #fcd34d 0%, #f59e0b 100%);
+    color: #1a1206;
     border: none;
     border-radius: 14px;
     padding: 12px 24px;
-    font-weight: 600;
+    font-weight: 700;
     font-size: 0.9rem;
     cursor: pointer;
     transition: all 0.2s ease;
-    box-shadow: 0 8px 20px rgba(255, 107, 92, 0.32);
+    box-shadow: 0 8px 22px rgba(245, 158, 11, 0.35);
   }
 
   .btn-primary:hover {
     transform: translateY(-1px);
-    box-shadow: 0 12px 28px rgba(255, 107, 92, 0.45);
+    box-shadow: 0 12px 30px rgba(245, 158, 11, 0.5);
   }
 
   .btn-primary:active {
@@ -136,9 +138,9 @@ body {
   }
 
   .btn-ghost {
-    background: rgba(20, 34, 61, 0.04);
-    color: #475a78;
-    border: 1px solid rgba(20, 34, 61, 0.1);
+    background: rgba(15, 23, 42, 0.04);
+    color: #334155;
+    border: 1px solid rgba(15, 23, 42, 0.12);
     border-radius: 12px;
     padding: 10px 20px;
     font-size: 0.875rem;
@@ -147,18 +149,18 @@ body {
   }
 
   .btn-ghost:hover {
-    background: rgba(20, 34, 61, 0.07);
-    color: #14223d;
-    border-color: rgba(20, 34, 61, 0.18);
+    background: rgba(15, 23, 42, 0.07);
+    color: #0f172a;
+    border-color: rgba(14, 165, 233, 0.45);
   }
 
   /* ── Inputs (class name kept for compatibility) ────────────────────── */
   .input-dark {
-    background: rgba(255, 255, 255, 0.85);
-    border: 1px solid rgba(20, 34, 61, 0.12);
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(15, 23, 42, 0.12);
     border-radius: 12px;
     padding: 12px 16px;
-    color: #14223d;
+    color: #0f172a;
     font-size: 0.9rem;
     outline: none;
     transition: all 0.2s ease;
@@ -166,12 +168,12 @@ body {
   }
 
   .input-dark::placeholder {
-    color: #94a3b4;
+    color: #94a3b8;
   }
 
   .input-dark:focus {
-    border-color: rgba(255, 107, 92, 0.55);
-    box-shadow: 0 0 0 3px rgba(255, 107, 92, 0.12);
+    border-color: rgba(14, 165, 233, 0.6);
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.14);
   }
 
   .status-badge {
@@ -186,9 +188,9 @@ body {
   }
 
   .tag-chip {
-    background: rgba(54, 163, 224, 0.12);
-    border: 1px solid rgba(54, 163, 224, 0.25);
-    color: #2487c4;
+    background: rgba(14, 165, 233, 0.1);
+    border: 1px solid rgba(14, 165, 233, 0.28);
+    color: #0284c7;
     padding: 4px 12px;
     border-radius: 100px;
     font-size: 0.75rem;
@@ -199,7 +201,7 @@ body {
   .route-dash {
     background-image: linear-gradient(
       90deg,
-      rgba(20, 34, 61, 0.25) 0 6px,
+      rgba(15, 23, 42, 0.22) 0 6px,
       transparent 6px 12px
     );
     background-size: 12px 2px;
@@ -210,26 +212,37 @@ body {
 
 /* ── Texture overlays ─────────────────────────────────────────────────── */
 @layer utilities {
-  /* faint grain so cream surfaces feel like paper, not flat color */
+  /* faint grain so flat surfaces feel atmospheric (used on colored cards) */
   .noise::after {
     content: "";
     position: absolute;
     inset: 0;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.05'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.06'/%3E%3C/svg%3E");
     pointer-events: none;
-    opacity: 0.5;
+    opacity: 0.4;
     z-index: 0;
-    mix-blend-mode: multiply;
+    mix-blend-mode: overlay;
   }
 
   .shimmer-bg {
     background: linear-gradient(
       90deg,
       rgba(255, 255, 255, 0) 0%,
-      rgba(255, 255, 255, 0.65) 50%,
+      rgba(255, 255, 255, 0.18) 50%,
       rgba(255, 255, 255, 0) 100%
     );
     background-size: 200% 100%;
     animation: shimmer 2s linear infinite;
+  }
+
+  /* respect reduced-motion globally for CSS-driven loops */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+    }
   }
 }

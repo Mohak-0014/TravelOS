@@ -16,6 +16,14 @@ import {
   Map,
   Calendar,
   User,
+  Check,
+  Landmark,
+  Mountain,
+  Utensils,
+  Leaf,
+  Moon,
+  Palette,
+  BookOpen,
 } from "lucide-react";
 import Link from "next/link";
 import { api } from "@/lib/api";
@@ -187,6 +195,28 @@ const TRACK_COLOR_MAP: Record<string, string> = {
   coral: "bg-coral-500/30",
 };
 
+const INTERESTS = [
+  { id: "culture", label: "Culture", icon: Landmark },
+  { id: "adventure", label: "Adventure", icon: Mountain },
+  { id: "food", label: "Food & Drink", icon: Utensils },
+  { id: "nature", label: "Nature", icon: Leaf },
+  { id: "nightlife", label: "Nightlife", icon: Moon },
+  { id: "art", label: "Art & Museums", icon: Palette },
+  { id: "history", label: "History", icon: BookOpen },
+  { id: "wellness", label: "Wellness", icon: Heart },
+];
+
+const FOOD_PREFS = [
+  { id: "local_cuisine", label: "Local Cuisine", emoji: "🌍" },
+  { id: "street_food", label: "Street Food", emoji: "🌮" },
+  { id: "fine_dining", label: "Fine Dining", emoji: "🍽️" },
+  { id: "vegetarian", label: "Vegetarian", emoji: "🥦" },
+  { id: "vegan", label: "Vegan", emoji: "🌱" },
+  { id: "seafood", label: "Seafood", emoji: "🦞" },
+  { id: "halal", label: "Halal", emoji: "☪️" },
+  { id: "kosher", label: "Kosher", emoji: "✡️" },
+];
+
 function PreferenceSlider({
   config,
   value,
@@ -262,6 +292,8 @@ export default function ProfilePage() {
 
   // Local preference state for optimistic editing
   const [localPrefs, setLocalPrefs] = useState<Partial<Record<PrefKey, string>>>({});
+  const [localInterests, setLocalInterests] = useState<Set<string>>(new Set());
+  const [localFoodPrefs, setLocalFoodPrefs] = useState<Set<string>>(new Set());
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   useEffect(() => {
@@ -289,11 +321,13 @@ export default function ProfilePage() {
         luxury_tier: prefs.luxury_tier ?? "mid",
         budget_behavior: prefs.budget_behavior ?? "balanced",
       });
+      setLocalInterests(new Set(prefs.interests ?? []));
+      setLocalFoodPrefs(new Set(prefs.food_prefs ?? []));
     }
   }, [prefs]);
 
   const mutation = useMutation({
-    mutationFn: (body: Partial<Record<PrefKey, string>>) =>
+    mutationFn: (body: Record<string, unknown>) =>
       api.put("/api/v1/preferences", body),
     onMutate: () => setSaveStatus("saving"),
     onSuccess: () => {
@@ -313,7 +347,11 @@ export default function ProfilePage() {
   }, []);
 
   const handleSave = () => {
-    mutation.mutate(localPrefs);
+    mutation.mutate({
+      ...localPrefs,
+      interests: Array.from(localInterests),
+      food_prefs: Array.from(localFoodPrefs),
+    });
   };
 
   const handleLogout = () => {
@@ -422,6 +460,86 @@ export default function ProfilePage() {
                     onChange={handlePrefChange}
                   />
                 ))}
+              </div>
+
+              {/* ── Interests ─────────────────────────────────────── */}
+              <div className="pt-6 border-t border-ink-900/8">
+                <div className="flex items-center gap-2 mb-3">
+                  <Heart className="w-3.5 h-3.5 text-slate-400" />
+                  <span className="text-xs font-semibold text-slate-300 uppercase tracking-widest">
+                    Interests
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {INTERESTS.map(({ id, label, icon: Icon }) => {
+                    const selected = localInterests.has(id);
+                    return (
+                      <button
+                        key={id}
+                        onClick={() =>
+                          setLocalInterests((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(id)) next.delete(id);
+                            else next.add(id);
+                            return next;
+                          })
+                        }
+                        className={`flex items-center gap-2 p-2.5 rounded-xl border text-left text-xs transition-all ${
+                          selected
+                            ? "border-electric-500/50 bg-electric-500/12 text-slate-100"
+                            : "border-ink-900/10 bg-ink-900/[0.03] text-slate-400 hover:bg-ink-900/[0.05]"
+                        }`}
+                      >
+                        <Icon
+                          className={`w-3.5 h-3.5 shrink-0 ${selected ? "text-electric-400" : ""}`}
+                        />
+                        <span className="font-medium">{label}</span>
+                        {selected && (
+                          <Check className="w-3 h-3 text-electric-400 ml-auto shrink-0" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* ── Food Preferences ──────────────────────────────── */}
+              <div className="pt-6 border-t border-ink-900/8">
+                <div className="flex items-center gap-2 mb-3">
+                  <Utensils className="w-3.5 h-3.5 text-slate-400" />
+                  <span className="text-xs font-semibold text-slate-300 uppercase tracking-widest">
+                    Food Preferences
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {FOOD_PREFS.map(({ id, label, emoji }) => {
+                    const selected = localFoodPrefs.has(id);
+                    return (
+                      <button
+                        key={id}
+                        onClick={() =>
+                          setLocalFoodPrefs((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(id)) next.delete(id);
+                            else next.add(id);
+                            return next;
+                          })
+                        }
+                        className={`flex items-center gap-2 p-2.5 rounded-xl border text-left text-xs transition-all ${
+                          selected
+                            ? "border-gold-400/50 bg-gold-400/12 text-slate-100"
+                            : "border-ink-900/10 bg-ink-900/[0.03] text-slate-400 hover:bg-ink-900/[0.05]"
+                        }`}
+                      >
+                        <span className="text-sm shrink-0">{emoji}</span>
+                        <span className="font-medium">{label}</span>
+                        {selected && (
+                          <Check className="w-3 h-3 text-gold-400 ml-auto shrink-0" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="flex items-center gap-3 mt-7 pt-5 border-t border-ink-900/8">
