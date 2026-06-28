@@ -2,8 +2,20 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from backend.api.dependencies import get_cache
 from backend.api.main import app
+from backend.api.rate_limit import limiter
+from backend.core.config import settings
 from backend.db.base import Base, get_db
+
+# Rate limiting is disabled in tests: every request shares the same test-client IP,
+# which would otherwise trip per-IP limits across the suite.
+limiter.enabled = False
+
+# Resilience (retry + circuit breaker) is disabled in tests so tool calls make a single
+# attempt with no backoff, and breaker state can't leak across tests. The mechanism is
+# covered directly in tests/unit/test_tools/test_resilience.py.
+settings.RESILIENCE_ENABLED = False
 
 # Use an in-memory SQLite database for unit/integration tests that don't need Postgres features.
 # For tests that need Postgres-specific features (UUID, JSONB), point at a real test DB.
@@ -33,7 +45,12 @@ async def client(db_session: AsyncSession):
     async def override_get_db():
         yield db_session
 
+    async def override_get_cache():
+        # Tests run without Redis; yield None so cache-aside helpers no-op.
+        yield None
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_cache] = override_get_cache
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
