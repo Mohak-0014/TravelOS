@@ -1,19 +1,20 @@
 import type { Config } from "tailwindcss";
 
 /**
- * ── TravelOS · "Golden Hour" design system ──────────────────────────────────
- * A warm, light, wanderlust palette: sunrise sky, sandy cream, sunset coral,
- * golden amber, ocean teal. Token names are kept (space/electric/gold/coral/
- * emerald) so the existing class vocabulary re-themes app-wide automatically.
+ * ── TravelOS · "Daylight Voyage" design system ──────────────────────────────
+ * A bright, airy daytime palette: soft cloud-white surfaces, clear sky-blue
+ * accents, warm amber lights, and a coral pop. Token names are kept (space/
+ * electric/gold/coral/emerald/slate/ink) so the existing class vocabulary
+ * re-themes app-wide automatically.
  *
- *  - `space-*`   → cream / sand surface ramp (was deep space)
- *  - `electric-*`→ sky azure accent (links, focus, secondary)
- *  - `coral-*`   → sunset coral (primary CTA)
- *  - `gold-*`    → golden amber
- *  - `emerald-*` → tropical teal-green (success)
- *  - `slate-*`   → REFLECTED ink ramp, so existing `text-slate-100` (was light
- *                  on dark) becomes dark ink on light, etc.
- *  - `purple-*`  → remapped to warm peach/coral so old cold gradients run warm
+ *  - `space-*`   → light surface ramp; 950 = elevated/brightest (pure white)
+ *  - `slate-*`   → dark text ramp on light (slate-100 = darkest heading)
+ *  - `ink-*`     → dark hairline ramp, so `border-ink-900/8` reads on light
+ *  - `electric-*`→ sky-blue accent (links, focus, secondary)
+ *  - `gold-*`    → warm amber (primary CTA + sunlight)
+ *  - `coral-*`   → coral/rose (tertiary accent)
+ *  - `emerald-*` → success green
+ *  - `purple-*`  → soft violet (cool gradients / glows)
  */
 const config: Config = {
   darkMode: "class",
@@ -25,79 +26,79 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // ── Surface ramp: warm sand → cream → white ───────────────────────
+        // ── Surface ramp: soft cloud-white → lifted ───────────────────────
         space: {
-          950: "#fffdf8", // lightest (elevated)
-          900: "#fbf7f0", // main app background
-          800: "#f4eee2", // alternating section background
-          700: "#ece4d4",
-          600: "#e3d9c6",
-          500: "#d8ccb5",
+          950: "#ffffff", // elevated (brightest, e.g. cards)
+          900: "#f6f8fc", // main app background — soft cloud
+          800: "#eef2fb", // alternating section background
+          700: "#e4ebf7",
+          600: "#d8e3f3",
+          500: "#cbd9ee",
         },
-        // ── Ink: warm navy, used as the foreground "dark" ─────────────────
+        // ── Hairline ink: dark, so low-alpha borders read on light ────────
         ink: {
-          900: "#14223d",
-          700: "#27395b",
-          500: "#475a78",
+          900: "#0f172a",
+          700: "#1e293b",
+          500: "#475569",
           400: "#64748b",
-          300: "#8b99ad",
+          300: "#94a3b8",
         },
         glass: {
-          DEFAULT: "rgba(255, 255, 255, 0.7)",
+          DEFAULT: "rgba(255, 255, 255, 0.72)",
           light: "rgba(255, 255, 255, 0.55)",
-          border: "rgba(20, 34, 61, 0.08)",
+          border: "rgba(15, 23, 42, 0.08)",
         },
-        // ── Sky azure (interactive accent) ────────────────────────────────
+        // ── Sky-blue (interactive accent) ─────────────────────────────────
         electric: {
-          300: "#9bd4f3",
-          400: "#5bb8e8",
-          500: "#36a3e0",
-          600: "#2487c4",
-          glow: "rgba(54, 163, 224, 0.4)",
+          300: "#7dd3fc",
+          400: "#38bdf8",
+          500: "#0ea5e9",
+          600: "#0284c7",
+          glow: "rgba(14, 165, 233, 0.40)",
         },
-        // ── Golden amber ──────────────────────────────────────────────────
+        // ── Warm amber (primary CTA + sunlight) ───────────────────────────
         gold: {
-          300: "#ffd57d",
-          400: "#ffc24d",
-          500: "#f5a623",
-          600: "#dd8a14",
-          glow: "rgba(245, 166, 35, 0.4)",
+          300: "#fcd34d",
+          400: "#fbbf24",
+          500: "#f59e0b",
+          600: "#d97706",
+          glow: "rgba(245, 158, 11, 0.40)",
         },
-        // ── Sunset coral (primary) ────────────────────────────────────────
+        // ── Coral / rose (tertiary accent) ────────────────────────────────
         coral: {
-          300: "#ffb3a6",
-          400: "#ff8a73",
-          500: "#ff6b5c",
-          600: "#ed4f3d",
-          glow: "rgba(255, 107, 92, 0.4)",
+          300: "#fda4af",
+          400: "#fb7185",
+          500: "#f43f5e",
+          600: "#e11d48",
+          glow: "rgba(244, 63, 94, 0.38)",
         },
-        // ── Tropical teal-green (success) ─────────────────────────────────
+        // ── Success green ─────────────────────────────────────────────────
         emerald: {
-          400: "#34c79a",
-          500: "#1fa97a",
-          600: "#178a63",
-          glow: "rgba(31, 169, 122, 0.4)",
+          400: "#10b981",
+          500: "#059669",
+          600: "#047857",
+          glow: "rgba(5, 150, 105, 0.40)",
         },
-        // ── Reflected slate ramp (light-on-dark → ink-on-light) ───────────
+        // ── Dark text ramp on light (slate-100 = darkest heading) ─────────
         slate: {
-          50: "#0d1830",
-          100: "#14223d", // primary headings
-          200: "#1d2e4c",
-          300: "#33425f", // strong secondary
-          400: "#4f6079", // body / muted text
-          500: "#6b7a90", // more muted
-          600: "#94a3b4", // subtle
-          700: "#bcc6d2", // faint
-          800: "#dbe1e9", // light divider
-          900: "#eef1f6", // near-surface
-          950: "#f6f8fb",
+          50: "#0b1220", // strongest text
+          100: "#0f172a", // primary headings
+          200: "#1e293b",
+          300: "#334155", // strong secondary
+          400: "#475569", // body / muted
+          500: "#64748b", // more muted
+          600: "#94a3b8", // subtle
+          700: "#cbd5e1", // faint
+          800: "#e2e8f0", // divider
+          900: "#eef2f7", // near-surface
+          950: "#f8fafc",
         },
-        // ── Warm remap of purple (kills cold gradients) ───────────────────
+        // ── Soft violet (cool gradients / glows) ──────────────────────────
         purple: {
-          300: "#ffd1a8",
-          400: "#ffae84",
-          500: "#ff8a73",
-          600: "#f4684f",
+          300: "#c4b5fd",
+          400: "#a78bfa",
+          500: "#8b5cf6",
+          600: "#7c3aed",
         },
       },
       fontFamily: {
@@ -109,28 +110,29 @@ const config: Config = {
         "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
         "gradient-conic": "conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))",
         "glass-gradient":
-          "linear-gradient(135deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.55) 100%)",
-        // electric-gradient is the brand CTA → warm sunset (coral → amber)
-        "electric-gradient": "linear-gradient(135deg, #ff6b5c 0%, #f5a623 100%)",
-        "sunset-gradient": "linear-gradient(135deg, #ff6b5c 0%, #ffa34d 50%, #f5a623 100%)",
-        "gold-gradient": "linear-gradient(135deg, #f5a623 0%, #ff8a3c 100%)",
-        "sky-gradient": "linear-gradient(180deg, #cfeafd 0%, #eaf4fb 45%, #fef6ec 100%)",
+          "linear-gradient(135deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.60) 100%)",
+        // electric-gradient is the brand fill → sky-blue (white text reads on it)
+        "electric-gradient": "linear-gradient(135deg, #38bdf8 0%, #0284c7 100%)",
+        "sunset-gradient": "linear-gradient(135deg, #fb7185 0%, #fbbf24 55%, #f59e0b 100%)",
+        "gold-gradient": "linear-gradient(135deg, #fcd34d 0%, #f59e0b 100%)",
+        // bright daytime sky bands
+        "sky-gradient": "linear-gradient(180deg, #aee3ff 0%, #d6efff 55%, #f6f8fc 100%)",
         "dawn-gradient":
-          "linear-gradient(180deg, #bfe3fb 0%, #ffe4cf 55%, #ffd2b0 78%, #fbf7f0 100%)",
-        "sand-gradient": "linear-gradient(180deg, #fbf7f0 0%, #f4eee2 100%)",
+          "linear-gradient(180deg, #8fd3ff 0%, #bfe8ff 40%, #e8f5ff 72%, #f6f8fc 100%)",
+        "sand-gradient": "linear-gradient(180deg, #f6f8fc 0%, #eef2fb 100%)",
         "space-gradient":
-          "radial-gradient(ellipse at top, #d8eefc 0%, #eaf4fb 40%, #fbf7f0 100%)",
+          "radial-gradient(ellipse at top, #ffffff 0%, #f1f6fd 42%, #f6f8fc 100%)",
       },
       boxShadow: {
-        glass: "0 10px 34px rgba(20, 34, 61, 0.08), 0 2px 8px rgba(20, 34, 61, 0.04)",
-        "electric-sm": "0 6px 16px rgba(255, 107, 92, 0.28)",
-        electric: "0 10px 30px rgba(255, 107, 92, 0.40), 0 2px 10px rgba(245, 166, 35, 0.20)",
-        "gold-sm": "0 6px 16px rgba(245, 166, 35, 0.30)",
-        gold: "0 10px 30px rgba(245, 166, 35, 0.40)",
-        "coral-sm": "0 6px 16px rgba(255, 107, 92, 0.30)",
+        glass: "0 10px 40px rgba(15, 23, 42, 0.08), 0 2px 10px rgba(15, 23, 42, 0.04)",
+        "electric-sm": "0 6px 18px rgba(14, 165, 233, 0.30)",
+        electric: "0 10px 36px rgba(14, 165, 233, 0.35), 0 2px 12px rgba(56, 189, 248, 0.20)",
+        "gold-sm": "0 6px 18px rgba(245, 158, 11, 0.30)",
+        gold: "0 10px 34px rgba(245, 158, 11, 0.42)",
+        "coral-sm": "0 6px 18px rgba(244, 63, 94, 0.30)",
         "card-hover":
-          "0 24px 50px rgba(20, 34, 61, 0.14), 0 0 0 1px rgba(20, 34, 61, 0.05)",
-        soft: "0 8px 24px rgba(20, 34, 61, 0.07)",
+          "0 30px 60px rgba(15, 23, 42, 0.12), 0 0 0 1px rgba(14, 165, 233, 0.16)",
+        soft: "0 10px 30px rgba(15, 23, 42, 0.08)",
       },
       backdropBlur: {
         glass: "16px",
@@ -146,7 +148,8 @@ const config: Config = {
         "cloud-drift-slow": "cloud-drift 90s linear infinite",
         sway: "sway 7s ease-in-out infinite",
         shimmer: "shimmer 2s linear infinite",
-        "sun-pulse": "sun-pulse 6s ease-in-out infinite",
+        twinkle: "twinkle 3s ease-in-out infinite",
+        "spin-slow": "spin 26s linear infinite",
       },
       keyframes: {
         float: {
@@ -154,8 +157,8 @@ const config: Config = {
           "50%": { transform: "translateY(-12px)" },
         },
         "pulse-glow": {
-          "0%, 100%": { boxShadow: "0 0 12px rgba(255,107,92,0.4)" },
-          "50%": { boxShadow: "0 0 28px rgba(255,107,92,0.75)" },
+          "0%, 100%": { boxShadow: "0 0 12px rgba(245,158,11,0.35)" },
+          "50%": { boxShadow: "0 0 28px rgba(245,158,11,0.65)" },
         },
         "slide-up": {
           "0%": { opacity: "0", transform: "translateY(20px)" },
@@ -173,9 +176,9 @@ const config: Config = {
           "0%, 100%": { transform: "rotate(-2deg)" },
           "50%": { transform: "rotate(2deg)" },
         },
-        "sun-pulse": {
-          "0%, 100%": { opacity: "0.55", transform: "scale(1)" },
-          "50%": { opacity: "0.8", transform: "scale(1.05)" },
+        twinkle: {
+          "0%, 100%": { opacity: "0.2", transform: "scale(0.85)" },
+          "50%": { opacity: "1", transform: "scale(1)" },
         },
         shimmer: {
           "0%": { backgroundPosition: "-200% 0" },

@@ -105,18 +105,18 @@ function ProgressBar({ step, total }: { step: number; total: number }) {
                 animate={{
                   scale: current ? 1.15 : 1,
                   backgroundColor: done
-                    ? "#3b82f6"
+                    ? "#2dd4bf"
                     : current
-                      ? "rgba(59,130,246,0.15)"
+                      ? "rgba(45,212,191,0.15)"
                       : "rgba(255,255,255,0.06)",
                   borderColor:
-                    done || current ? "#3b82f6" : "rgba(255,255,255,0.1)",
+                    done || current ? "#2dd4bf" : "rgba(255,255,255,0.1)",
                 }}
                 transition={{ duration: 0.3 }}
                 className="w-8 h-8 rounded-full border-2 flex items-center justify-center"
               >
                 {done ? (
-                  <CheckCircle2 className="w-4 h-4 text-white" />
+                  <CheckCircle2 className="w-4 h-4 text-[#0b1437]" />
                 ) : (
                   <span
                     className={`text-xs font-bold ${
@@ -148,7 +148,7 @@ function ProgressBar({ step, total }: { step: number; total: number }) {
         <motion.div
           className="absolute left-0 top-0 h-full rounded-full"
           style={{
-            background: "linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)",
+            background: "linear-gradient(135deg, #2dd4bf 0%, #8b5cf6 100%)",
           }}
           animate={{ width: `${(step / (total - 1)) * 100}%` }}
           transition={{ duration: 0.4, ease: "easeInOut" }}
@@ -177,7 +177,7 @@ function StepDestination({
         transition={{ delay: 0.05 }}
       >
         <div className="inline-flex w-14 h-14 rounded-2xl bg-electric-gradient items-center justify-center shadow-electric mb-5 animate-float-slow">
-          <Globe2 className="w-7 h-7 text-white" />
+          <Globe2 className="w-7 h-7 text-[#0b1437]" />
         </div>
       </motion.div>
 
@@ -216,7 +216,7 @@ function StepDestination({
             if (e.key === "Enter" && destination.trim()) onNext();
           }}
           className="w-full pl-10 pr-4 py-4 text-4xl font-light bg-transparent border-b-2 border-ink-900/10 focus:border-electric-500 focus:outline-none text-slate-100 placeholder-slate-700 transition-colors duration-300"
-          style={{ caretColor: "#3b82f6" }}
+          style={{ caretColor: "#2dd4bf" }}
         />
       </motion.div>
 
@@ -298,7 +298,7 @@ function StepDates({
         animate={{ opacity: 1, y: 0 }}
       >
         <div className="inline-flex w-14 h-14 rounded-2xl bg-electric-gradient items-center justify-center shadow-electric mb-5">
-          <Calendar className="w-7 h-7 text-white" />
+          <Calendar className="w-7 h-7 text-[#0b1437]" />
         </div>
       </motion.div>
 
@@ -448,7 +448,7 @@ function StepTravelersBudget({
     <div className="text-center">
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
         <div className="inline-flex w-14 h-14 rounded-2xl bg-electric-gradient items-center justify-center shadow-electric mb-5">
-          <Users className="w-7 h-7 text-white" />
+          <Users className="w-7 h-7 text-[#0b1437]" />
         </div>
       </motion.div>
 
@@ -655,7 +655,7 @@ function StepLaunch({
     <div className="text-center">
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
         <div className="inline-flex w-14 h-14 rounded-2xl bg-electric-gradient items-center justify-center shadow-electric mb-5 animate-pulse-glow">
-          <Sparkles className="w-7 h-7 text-white" />
+          <Sparkles className="w-7 h-7 text-[#0b1437]" />
         </div>
       </motion.div>
 

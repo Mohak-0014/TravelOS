@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
-import SkyScene from "@/components/travel/SkyScene";
+import DaySky from "@/components/travel/DaySky";
 
 // ── Step config ───────────────────────────────────────────────────────────────
 
@@ -161,7 +161,7 @@ export default function OnboardingPage() {
 
   return (
     <div className="relative min-h-screen bg-space-900 flex flex-col items-center justify-center overflow-hidden px-4 py-12">
-      <SkyScene />
+      <DaySky showHorizon={false} />
 
       {/* Glows */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
@@ -235,7 +235,7 @@ export default function OnboardingPage() {
                               : "border-ink-900/10 bg-ink-900/[0.03] hover:bg-ink-900/[0.05] hover:border-ink-900/15"
                           }`}
                         >
-                          <div className={`p-2.5 rounded-xl ${selected ? "bg-white/80 shadow-soft" : "bg-ink-900/[0.04]"}`}>
+                          <div className={`p-2.5 rounded-xl ${selected ? "bg-white/10 shadow-soft" : "bg-ink-900/[0.04]"}`}>
                             <Icon className={`w-5 h-5 ${selected ? "" : "text-slate-400"}`} />
                           </div>
                           <div className="flex-1 min-w-0">
@@ -243,8 +243,8 @@ export default function OnboardingPage() {
                             <p className="text-xs text-slate-500 mt-0.5">{opt.sub}</p>
                           </div>
                           {selected && (
-                            <div className="w-5 h-5 rounded-full bg-ink-900 flex items-center justify-center shrink-0">
-                              <Check className="w-3 h-3 text-white" />
+                            <div className="w-5 h-5 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
+                              <Check className="w-3 h-3 text-[#0b1437]" />
                             </div>
                           )}
                         </motion.button>
@@ -275,7 +275,7 @@ export default function OnboardingPage() {
                               : "border-ink-900/10 bg-ink-900/[0.03] hover:bg-ink-900/[0.05] hover:border-ink-900/15"
                           }`}
                         >
-                          <div className={`p-2.5 rounded-xl ${selected ? "bg-white/80 shadow-soft" : "bg-ink-900/[0.04]"}`}>
+                          <div className={`p-2.5 rounded-xl ${selected ? "bg-white/10 shadow-soft" : "bg-ink-900/[0.04]"}`}>
                             <Icon className={`w-5 h-5 ${selected ? "" : "text-slate-400"}`} />
                           </div>
                           <div className="flex-1 min-w-0">
@@ -283,8 +283,8 @@ export default function OnboardingPage() {
                             <p className="text-xs text-slate-500 mt-0.5">{opt.sub}</p>
                           </div>
                           {selected && (
-                            <div className="w-5 h-5 rounded-full bg-ink-900 flex items-center justify-center shrink-0">
-                              <Check className="w-3 h-3 text-white" />
+                            <div className="w-5 h-5 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
+                              <Check className="w-3 h-3 text-[#0b1437]" />
                             </div>
                           )}
                         </motion.button>
@@ -385,7 +385,7 @@ export default function OnboardingPage() {
                 disabled={!canContinue}
                 whileHover={canContinue ? { scale: 1.02 } : {}}
                 whileTap={canContinue ? { scale: 0.97 } : {}}
-                className="flex items-center gap-2 bg-electric-gradient text-white text-sm font-semibold px-5 py-2.5 rounded-xl shadow-electric disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                className="flex items-center gap-2 bg-electric-gradient text-[#0b1437] text-sm font-semibold px-5 py-2.5 rounded-xl shadow-electric disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
               >
                 Continue
                 <ArrowRight className="w-4 h-4" />
@@ -396,7 +396,7 @@ export default function OnboardingPage() {
                 disabled={saving}
                 whileHover={!saving ? { scale: 1.02 } : {}}
                 whileTap={!saving ? { scale: 0.97 } : {}}
-                className="flex items-center gap-2 bg-electric-gradient text-white text-sm font-semibold px-5 py-2.5 rounded-xl shadow-electric disabled:opacity-60 transition-opacity"
+                className="flex items-center gap-2 bg-electric-gradient text-[#0b1437] text-sm font-semibold px-5 py-2.5 rounded-xl shadow-electric disabled:opacity-60 transition-opacity"
               >
                 {saving ? (
                   <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
@@ -416,7 +416,7 @@ export default function OnboardingPage() {
               animate={{
                 width: i === step ? 20 : 6,
                 backgroundColor:
-                  i === step ? "#ff6b5c" : i < step ? "#ffb38a" : "rgba(20,34,61,0.15)",
+                  i === step ? "#fbbf24" : i < step ? "#f59e0b" : "rgba(231,238,255,0.2)",
               }}
               transition={{ duration: 0.3 }}
               className="h-1.5 rounded-full"

@@ -83,7 +83,7 @@ function TripCard({ trip, index, onDelete }: { trip: TripOut; index: number; onD
                 <span className="w-1.5 h-1.5 rounded-full bg-white" />
               </div>
             )}
-            {trip.cover_image_url && <div className="absolute inset-0 bg-ink-900/35" />}
+            {trip.cover_image_url && <div className="absolute inset-0 bg-black/45" />}
             <div className="relative z-10 flex items-end justify-between w-full">
               <div>
                 <p className="text-white/80 text-xs font-medium uppercase tracking-widest mb-0.5">
@@ -142,7 +142,7 @@ function TripCard({ trip, index, onDelete }: { trip: TripOut; index: number; onD
       <button
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(trip.id); }}
         title="Delete trip"
-        className="absolute top-2 right-2 z-10 p-1.5 rounded-lg bg-white/85 backdrop-blur-sm text-slate-500 opacity-0 group-hover/card:opacity-100 hover:text-coral-600 hover:bg-coral-500/15 transition-all duration-200 shadow-soft"
+        className="absolute top-2 right-2 z-10 p-1.5 rounded-lg bg-space-950/90 backdrop-blur-sm text-slate-300 opacity-0 group-hover/card:opacity-100 hover:text-coral-400 hover:bg-coral-500/20 transition-all duration-200 shadow-soft border border-ink-900/10"
       >
         <Trash2 className="w-3.5 h-3.5" />
       </button>
@@ -161,7 +161,7 @@ function EmptyState() {
       className="text-center py-20"
     >
       <div className="inline-flex w-20 h-20 rounded-3xl bg-electric-gradient items-center justify-center shadow-electric mb-6 animate-float-slow">
-        <Globe2 className="w-10 h-10 text-white" />
+        <Globe2 className="w-10 h-10 text-[#0b1437]" />
       </div>
       <h3 className="font-display text-3xl font-semibold text-slate-100 mb-2">Where to next?</h3>
       <p className="text-slate-400 mb-8 max-w-xs mx-auto leading-relaxed">
@@ -348,7 +348,7 @@ export default function TripsPage() {
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-4">Your Travel DNA</p>
                   <div className="grid grid-cols-2 gap-3">
                     {[
-                      { label: "Trips planned", value: trips.length, color: "text-coral-600" },
+                      { label: "Trips planned", value: trips.length, color: "text-coral-400" },
                       { label: "Nights away", value: trips.reduce((acc, t) => acc + Math.max(1, Math.ceil((new Date(t.end_date).getTime() - new Date(t.start_date).getTime()) / 86400000)), 0), color: "text-gold-500" },
                     ].map(({ label, value, color }) => (
                       <div key={label} className="glass-light rounded-xl p-3 text-center">
@@ -376,7 +376,7 @@ export default function TripsPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink-900/40 backdrop-blur-sm"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
             onClick={() => setDeleteConfirmId(null)}
           >
             <motion.div

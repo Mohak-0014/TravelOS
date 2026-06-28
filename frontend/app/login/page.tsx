@@ -7,7 +7,7 @@ import { Plane, Mail, Lock, User, ArrowRight, Loader2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { Token, UserOut } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
-import SkyScene from "@/components/travel/SkyScene";
+import DaySky from "@/components/travel/DaySky";
 
 const TAGLINES = [
   "Gets smarter every trip.",
@@ -54,8 +54,8 @@ export default function LoginPage() {
 
   return (
     <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-space-900">
-      {/* Golden Hour sky background */}
-      <SkyScene />
+      {/* Daytime sky background */}
+      <DaySky showHorizon={false} />
 
       {/* Center card */}
       <motion.div
@@ -71,7 +71,7 @@ export default function LoginPage() {
             transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
             className="inline-flex w-14 h-14 rounded-2xl bg-electric-gradient items-center justify-center shadow-electric mb-4"
           >
-            <Plane className="w-7 h-7 text-white" />
+            <Plane className="w-7 h-7 text-[#0b1437]" />
           </motion.div>
           <h1 className="font-display text-3xl font-semibold gradient-text mb-1">TravelOS</h1>
           <p className="text-sm text-slate-500" suppressHydrationWarning>{tagline}</p>
