@@ -1,15 +1,19 @@
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 # ── Auth ────────────────────────────────────────────────────────────────────
 
 
 class UserCreate(BaseModel):
-    email: str
-    password: str
-    full_name: str | None = None
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+    full_name: str | None = Field(default=None, max_length=255)
+
+
+class UserUpdate(BaseModel):
+    full_name: str | None = Field(default=None, max_length=255)
 
 
 class UserOut(BaseModel):
@@ -29,7 +33,7 @@ class Token(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: str
+    email: EmailStr
     password: str
 
 
@@ -63,25 +67,25 @@ class PreferenceOut(BaseModel):
 
 
 class TripCreate(BaseModel):
-    title: str
-    destination_city: str
-    destination_country: str | None = None
+    title: str = Field(min_length=1, max_length=255)
+    destination_city: str = Field(min_length=1, max_length=255)
+    destination_country: str | None = Field(default=None, max_length=100)
     start_date: date
     end_date: date
-    num_travelers: int = 1
-    budget_total: float | None = None
-    budget_currency: str = "USD"
+    num_travelers: int = Field(default=1, ge=1, le=20)
+    budget_total: float | None = Field(default=None, ge=0)
+    budget_currency: str = Field(default="USD", min_length=3, max_length=3)
 
 
 class TripUpdate(BaseModel):
-    title: str | None = None
-    destination_city: str | None = None
-    destination_country: str | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    destination_city: str | None = Field(default=None, min_length=1, max_length=255)
+    destination_country: str | None = Field(default=None, max_length=100)
     start_date: date | None = None
     end_date: date | None = None
-    num_travelers: int | None = None
-    budget_total: float | None = None
-    budget_currency: str | None = None
+    num_travelers: int | None = Field(default=None, ge=1, le=20)
+    budget_total: float | None = Field(default=None, ge=0)
+    budget_currency: str | None = Field(default=None, min_length=3, max_length=3)
 
 
 class TripOut(BaseModel):
@@ -237,7 +241,7 @@ class HotelCandidateOut(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    question: str
+    question: str = Field(min_length=1, max_length=2000)
 
 
 class ChatResponse(BaseModel):

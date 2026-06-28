@@ -26,7 +26,11 @@ _VECTOR_SIZE = settings.EMBEDDING_DIM  # 384
 
 
 def get_qdrant_client() -> AsyncQdrantClient:
-    return AsyncQdrantClient(host=settings.QDRANT_HOST, port=settings.QDRANT_PORT)
+    return AsyncQdrantClient(
+        host=settings.QDRANT_HOST,
+        port=settings.QDRANT_PORT,
+        api_key=settings.QDRANT_API_KEY,
+    )
 
 
 def _point_id(namespace: str, name: str) -> str:
