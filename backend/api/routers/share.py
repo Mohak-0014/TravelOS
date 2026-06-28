@@ -2,10 +2,11 @@
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.api.rate_limit import limiter
 from backend.db.base import get_db
 from backend.db.models import ItineraryItem, Trip
 from backend.db.schemas import ItineraryItemOut, ShareTripOut
@@ -14,7 +15,10 @@ router = APIRouter(prefix="/api/v1/share", tags=["share"])
 
 
 @router.get("/{token}", response_model=ShareTripOut)
-async def get_shared_trip(token: str, db: AsyncSession = Depends(get_db)) -> ShareTripOut:
+@limiter.limit("30/minute")  # public + unauthenticated — cap scraping/replay
+async def get_shared_trip(
+    request: Request, token: str, db: AsyncSession = Depends(get_db)
+) -> ShareTripOut:
     result = await db.execute(select(Trip).where(Trip.share_token == token))
     trip = result.scalar_one_or_none()
 

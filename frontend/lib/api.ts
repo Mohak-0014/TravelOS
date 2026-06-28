@@ -101,6 +101,12 @@ export const api = {
   selectHotel: (tripId: string, hotelId: string) =>
     request<HotelCandidateOut[]>("POST", `/api/v1/trips/${tripId}/hotels/${hotelId}/select`),
 
+  getTripEvents: (tripId: string) =>
+    request<TripEventOut[]>("GET", `/api/v1/trips/${tripId}/events`),
+
+  getTripFlights: (tripId: string, origin: string) =>
+    request<FlightOfferOut[]>("GET", `/api/v1/trips/${tripId}/flights`, { params: { origin } }),
+
   /** Fetches the .ics blob with auth and triggers a browser download. */
   downloadCalendarIcs: async (tripId: string, cityName: string): Promise<void> => {
     let token: string | null = null;
@@ -249,6 +255,42 @@ export interface HotelCandidateOut {
   match_score: number | null;
   is_selected: boolean;
   created_at: string;
+}
+
+export interface FlightOfferOut {
+  origin: string;
+  destination: string;
+  departure_date: string;
+  return_date: string | null;
+  airline: string;
+  price_total: number;
+  price_currency: string;
+  cabin: string;
+  duration_outbound: string;
+  duration_return: string | null;
+  stops_outbound: number;
+  stops_return: number | null;
+  source: string;
+}
+
+export interface TripEventOut {
+  id: string;
+  approval_status: "pending" | "approved" | "rejected";
+  event_name: string;
+  event_date: string | null;
+  start_time: string | null;
+  venue_name: string;
+  category: string;
+  source: string;
+  url: string | null;
+  image_url: string | null;
+  price_min: number | null;
+  price_max: number | null;
+  price_currency: string | null;
+  lat: number | null;
+  lng: number | null;
+  day_number: number | null;
+  summary: string;
 }
 
 export interface WeatherDay {

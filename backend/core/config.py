@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Resolve .env relative to this file so it loads correctly regardless of CWD
@@ -23,6 +24,7 @@ class Settings(BaseSettings):
     # Qdrant
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
+    QDRANT_API_KEY: str | None = None  # required when Qdrant is network-exposed in prod
 
     # LLM
     GROQ_API_KEY: str = ""
@@ -34,6 +36,7 @@ class Settings(BaseSettings):
     TICKETMASTER_API_KEY: str = ""
     EVENTBRITE_TOKEN: str = ""
     UNSPLASH_ACCESS_KEY: str = ""
+    DUFFEL_API_KEY: str = ""
     # Overpass API (OpenStreetMap) — no key required
 
     # Auth
@@ -45,6 +48,9 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     LOG_LEVEL: str = "INFO"
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
+    RATE_LIMIT_ENABLED: bool = True
+    # Retry + circuit breaker on outbound provider calls (Nominatim, Duffel, LiteAPI, …)
+    RESILIENCE_ENABLED: bool = True
 
     # Embeddings
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
@@ -52,6 +58,20 @@ class Settings(BaseSettings):
 
     # Optional
     SENTRY_DSN: str | None = None
+
+    @model_validator(mode="after")
+    def _enforce_production_secrets(self) -> "Settings":
+        """Fail closed: never boot production with the insecure default JWT secret."""
+        if self.ENVIRONMENT == "production":
+            if (
+                self.JWT_SECRET_KEY in ("", "change-me-in-production")
+                or len(self.JWT_SECRET_KEY) < 32
+            ):
+                raise ValueError(
+                    "JWT_SECRET_KEY must be a strong value (>=32 chars) in production. "
+                    "Generate one with: openssl rand -hex 32"
+                )
+        return self
 
 
 settings = Settings()

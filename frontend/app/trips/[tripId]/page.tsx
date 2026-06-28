@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useScroll, useTransform } from "framer-motion";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
@@ -17,7 +17,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import type {
   TripOut, ItineraryItemOut, ApprovalOut, ChatResponse, ChatSource,
-  WeatherDay, HotelCandidateOut, TripUpdate,
+  WeatherDay, HotelCandidateOut, TripUpdate, TripEventOut, FlightOfferOut,
 } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 import NavBar from "@/components/ui/NavBar";
@@ -344,7 +344,7 @@ function DayNav({
   onSelect: (d: number) => void;
 }) {
   return (
-    <nav className="flex flex-col gap-1">
+    <nav className="flex flex-col gap-0.5">
       <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-2 px-2">
         Days
       </p>
@@ -352,13 +352,18 @@ function DayNav({
         <button
           key={d}
           onClick={() => onSelect(d)}
-          className={`w-full text-left px-3 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
-            d === activeDay
-              ? "bg-electric-500/15 border border-electric-500/30 text-electric-400"
-              : "text-slate-500 hover:text-slate-300 hover:bg-ink-900/[0.04]"
+          className={`relative w-full text-left px-3 py-2 rounded-xl text-sm font-medium transition-colors duration-150 ${
+            d === activeDay ? "text-electric-400" : "text-slate-500 hover:text-slate-300"
           }`}
         >
-          Day {d}
+          {d === activeDay && (
+            <motion.div
+              layoutId="day-active-bg"
+              className="absolute inset-0 bg-electric-500/15 border border-electric-500/30 rounded-xl"
+              transition={{ type: "spring", damping: 30, stiffness: 340 }}
+            />
+          )}
+          <span className="relative z-10">Day {d}</span>
         </button>
       ))}
     </nav>
@@ -1010,6 +1015,22 @@ export default function TripDetailPage() {
     staleTime: 60_000,
   });
 
+  const { data: tripEvents = [] } = useQuery<TripEventOut[]>({
+    queryKey: ["events", tripId],
+    queryFn: () => api.getTripEvents(tripId as string),
+    enabled: !!token && !!tripId && !!trip && trip.status !== "planning",
+    staleTime: 120_000,
+  });
+
+  const [flightOrigin, setFlightOrigin] = useState("");
+  const [flightSearch, setFlightSearch] = useState("");
+  const { data: flights = [], isFetching: flightsFetching } = useQuery<FlightOfferOut[]>({
+    queryKey: ["flights", tripId, flightSearch],
+    queryFn: () => api.getTripFlights(tripId as string, flightSearch),
+    enabled: !!token && !!tripId && flightSearch.length === 3,
+    staleTime: 3600_000,
+  });
+
   const { data: pendingApprovals = [] } = useQuery<ApprovalOut[]>({
     queryKey: ["approvals", tripId, "pending"],
     queryFn: () =>
@@ -1192,11 +1213,13 @@ export default function TripDetailPage() {
 
   // ── Chat ──────────────────────────────────────────────────────────────────────
 
-  const [chatOpen, setChatOpen] = useState(false);
+  const [panelMode, setPanelMode] = useState<"none" | "map" | "concierge">("concierge");
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const { scrollY } = useScroll();
+  const heroBgY = useTransform(scrollY, [0, 300], [0, 90]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1447,14 +1470,19 @@ export default function TripDetailPage() {
       </div>
 
       {/* ── Hero Banner ────────────────────────────────────────────────────── */}
-      <div
-        className={`relative h-48 bg-gradient-to-br ${gradient} overflow-hidden`}
-        style={trip.cover_image_url ? {
-          backgroundImage: `url(${trip.cover_image_url})`,
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-        } : undefined}
-      >
+      <div className="relative h-56 overflow-hidden">
+        {/* Parallax background layer */}
+        <motion.div
+          style={{
+            y: heroBgY,
+            ...(trip.cover_image_url ? {
+              backgroundImage: `url(${trip.cover_image_url})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+            } : {}),
+          }}
+          className={`absolute -top-24 inset-x-0 bottom-0 ${!trip.cover_image_url ? `bg-gradient-to-br ${gradient}` : ""}`}
+        />
         {/* Overlay — heavier when photo is present for text legibility */}
         {trip.cover_image_url
           ? <div className="absolute inset-0 bg-gradient-to-t from-ink-900/90 via-ink-900/45 to-ink-900/10" />
@@ -1650,7 +1678,7 @@ export default function TripDetailPage() {
         </div>
       )}
 
-      {/* ── Main 3-column layout ───────────────────────────────────────────── */}
+      {/* ── Main layout (3-col at xl, 4-col at 2xl with concierge) ──────── */}
       <div className="max-w-7xl mx-auto px-4 pt-8 pb-32">
         <div className="flex gap-6 lg:gap-8 relative">
 
@@ -1831,7 +1859,11 @@ export default function TripDetailPage() {
                             const isLast = itemIdx === dayItems.length - 1;
 
                             return (
-                              <div key={item.id}>
+                              <motion.div
+                                key={item.id}
+                                whileHover={{ x: 3 }}
+                                transition={{ duration: 0.15 }}
+                              >
                                 <div className="flex gap-4 py-3">
                                   {/* Timeline line + icon */}
                                   <div className="flex flex-col items-center shrink-0">
@@ -1942,20 +1974,22 @@ export default function TripDetailPage() {
                                     )}
                                   </div>
                                 </div>
-                              </div>
+                              </motion.div>
                             );
                           })}
                         </div>
 
                         {/* Ask concierge chip */}
                         <div className="px-5 pb-4">
-                          <button
-                            onClick={() => setChatOpen(true)}
+                          <motion.button
+                            whileHover={{ scale: 1.02, x: 2 }}
+                            whileTap={{ scale: 0.97 }}
+                            onClick={() => setPanelMode("concierge")}
                             className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-electric-400 transition-colors py-1.5 px-3 rounded-full border border-ink-900/10 hover:border-electric-500/30 hover:bg-electric-500/8"
                           >
                             <Compass className="w-3 h-3" />
                             Ask Concierge about Day {day} →
-                          </button>
+                          </motion.button>
                         </div>
                       </motion.div>
                     );
@@ -2070,8 +2104,16 @@ export default function TripDetailPage() {
                   )}
 
                   {/* Other hotel candidates */}
-                  {otherHotels.map((hotel) => (
-                    <div key={hotel.id} className="glass-card p-4 opacity-80 hover:opacity-100 transition-opacity">
+                  {otherHotels.map((hotel, hidx) => (
+                    <motion.div
+                      key={hotel.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      whileInView={{ opacity: 1, y: 0 }}
+                      viewport={{ once: true }}
+                      transition={{ delay: hidx * 0.07, duration: 0.35 }}
+                      whileHover={{ y: -2 }}
+                      className="glass-card p-4"
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-0.5">
@@ -2139,6 +2181,159 @@ export default function TripDetailPage() {
                           </motion.button>
                         </div>
                       </div>
+                    </motion.div>
+                  ))}
+                </div>
+              </motion.section>
+            )}
+
+            {/* ── Flights ──────────────────────────────────────────────── */}
+            {trip.status !== "planning" && (
+              <motion.section
+                id="flights-section"
+                initial={{ opacity: 0, y: 24 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4 }}
+                className="glass-card p-5"
+              >
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center shadow-sm">
+                    <ArrowRight className="w-3.5 h-3.5 text-white" />
+                  </div>
+                  <h2 className="text-sm font-semibold text-slate-200">Flight Prices</h2>
+                </div>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (flightOrigin.trim().length === 3) setFlightSearch(flightOrigin.trim().toUpperCase());
+                  }}
+                  className="flex gap-2 mb-4"
+                >
+                  <input
+                    type="text"
+                    value={flightOrigin}
+                    onChange={(e) => setFlightOrigin(e.target.value.toUpperCase().slice(0, 3))}
+                    placeholder="Your airport (e.g. DEL)"
+                    maxLength={3}
+                    className="input-dark text-xs py-2 flex-1 uppercase tracking-widest font-mono"
+                  />
+                  <button
+                    type="submit"
+                    disabled={flightOrigin.length !== 3 || flightsFetching}
+                    className="px-4 py-2 rounded-xl bg-electric-gradient text-white text-xs font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity shadow-electric-sm shrink-0"
+                  >
+                    {flightsFetching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Search"}
+                  </button>
+                </form>
+
+                {flightSearch && !flightsFetching && flights.length === 0 && (
+                  <p className="text-xs text-slate-500 text-center py-4">
+                    No flights found from {flightSearch} — check your airport code or try again later.
+                  </p>
+                )}
+
+                {flights.length > 0 && (
+                  <div className="space-y-2">
+                    {flights.map((f, i) => (
+                      <div key={i} className="glass-light rounded-xl p-3 border border-ink-900/10 hover:border-sky-500/20 transition-all">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <span className="font-mono text-xs font-bold text-slate-200">{f.origin}</span>
+                              <ArrowRight className="w-3 h-3 text-slate-500 shrink-0" />
+                              <span className="font-mono text-xs font-bold text-slate-200">{f.destination}</span>
+                              <span className="text-[9px] text-slate-500 bg-ink-900/[0.06] px-1.5 py-0.5 rounded-full">{f.airline}</span>
+                            </div>
+                            <div className="text-[10px] text-slate-500">
+                              {f.duration_outbound}
+                              {f.stops_outbound === 0 ? " · nonstop" : ` · ${f.stops_outbound} stop`}
+                              {f.duration_return && (
+                                <span> · return {f.duration_return}{f.stops_return === 0 ? " nonstop" : ""}</span>
+                              )}
+                              <span className="ml-2 text-electric-400/60">{f.cabin.toLowerCase()}</span>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-sm font-bold text-slate-100">
+                              {f.price_currency} {f.price_total.toLocaleString()}
+                            </p>
+                            <p className="text-[9px] text-slate-500">per person</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </motion.section>
+            )}
+
+            {/* Local Events */}
+            {tripEvents.length > 0 && (
+              <motion.section
+                id="events-section"
+                initial={{ opacity: 0, y: 24 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: 0.1 }}
+                className="glass-card p-5"
+              >
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shadow-sm">
+                    <CalendarDays className="w-3.5 h-3.5 text-white" />
+                  </div>
+                  <h2 className="text-sm font-semibold text-slate-200">Local Events</h2>
+                  <span className="ml-auto text-[10px] text-slate-500 font-medium">{tripEvents.length} found</span>
+                </div>
+                <div className="space-y-3">
+                  {tripEvents.map((ev) => (
+                    <div key={ev.id} className="glass-light rounded-xl p-3 border border-ink-900/10 hover:border-electric-500/20 transition-all">
+                      <div className="flex items-start gap-3">
+                        {ev.image_url && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={ev.image_url} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                            <p className="text-xs font-semibold text-slate-200 truncate">{ev.event_name}</p>
+                            <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ${
+                              ev.source === "ticketmaster"
+                                ? "bg-blue-500/15 text-blue-400 border border-blue-500/20"
+                                : "bg-orange-500/15 text-orange-400 border border-orange-500/20"
+                            }`}>
+                              {ev.source === "ticketmaster" ? "Ticketmaster" : "Eventbrite"}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 mb-1">
+                            {ev.venue_name}
+                            {ev.event_date && ` · ${new Date(ev.event_date).toLocaleDateString("en", { month: "short", day: "numeric" })}`}
+                            {ev.start_time && ` · ${ev.start_time.slice(0, 5)}`}
+                          </p>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {ev.category && (
+                              <span className="text-[9px] text-electric-400 bg-electric-500/10 px-1.5 py-0.5 rounded-full border border-electric-500/15">
+                                {ev.category}
+                              </span>
+                            )}
+                            {ev.price_min != null && (
+                              <span className="text-[9px] text-slate-400">
+                                {ev.price_currency ?? ""} {ev.price_min === 0 ? "Free" : `from ${ev.price_min}`}
+                              </span>
+                            )}
+                            {ev.url && (
+                              <a
+                                href={ev.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[9px] text-electric-400 hover:text-electric-300 transition-colors ml-auto"
+                              >
+                                Tickets →
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {ev.summary && (
+                        <p className="text-[10px] text-slate-500 mt-2 leading-relaxed border-t border-ink-900/10 pt-2">{ev.summary}</p>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -2150,184 +2345,287 @@ export default function TripDetailPage() {
 
           </div>
 
-          {/* ── RIGHT SIDEBAR ─────────────────────────────────────────────── */}
-          <div className="hidden xl:block w-[280px] shrink-0">
-            <div className="sticky top-24 space-y-4">
-
-              {/* Map */}
-              {trip.latitude != null && trip.longitude != null && pinnedItems.length > 0 && (
-                <div className="glass-card overflow-hidden">
-                  <div className="flex items-center gap-2 px-4 pt-4 pb-2">
-                    <MapPin className="w-3.5 h-3.5 text-electric-400" />
-                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
-                      Map
-                    </p>
-                  </div>
-                  <TripMap
-                    items={pinnedItems}
-                    centerLat={trip.latitude}
-                    centerLng={trip.longitude}
-                  />
-                </div>
-              )}
-
-              {/* Agent Activity collapsible */}
-              {trip.agent_messages && trip.agent_messages.length > 0 && (
-                <AgentActivityPanel messages={trip.agent_messages} />
-              )}
-            </div>
-          </div>
         </div>
       </div>
 
-      {/* ── Floating Concierge Button ──────────────────────────────────────── */}
+      {/* ── Floating Panel — Map / AI Concierge ──────────────────────────── */}
       <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
-        {/* Chat panel */}
         <AnimatePresence>
-          {chatOpen && (
+          {panelMode !== "none" && (
             <motion.div
               initial={{ opacity: 0, y: 20, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 20, scale: 0.95 }}
               transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-              className="w-[360px] max-w-[calc(100vw-2rem)] glass-card overflow-hidden flex flex-col"
-              style={{ height: "50vh", maxHeight: "480px" }}
+              className="w-[400px] max-w-[calc(100vw-2rem)] rounded-2xl border border-white/[0.07] overflow-hidden flex flex-col bg-space-800 shadow-2xl"
+              style={{ maxHeight: "min(580px, calc(100vh - 7rem))" }}
             >
-              {/* Chat header */}
-              <div className="flex items-center gap-3 px-4 py-3 border-b border-ink-900/10 shrink-0">
-                <div className="w-7 h-7 rounded-xl bg-electric-gradient flex items-center justify-center shadow-electric-sm">
-                  <Compass className="w-3.5 h-3.5 text-white" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-slate-200">AI Concierge</p>
-                  <p className="text-[10px] text-slate-500">Powered by TravelOS agents</p>
-                </div>
+              {/* Shared header with tab switcher */}
+              <div className="flex items-center gap-1.5 px-3 py-2.5 border-b border-white/[0.06] shrink-0 bg-gradient-to-r from-electric-500/5 to-transparent">
+                {/* Map tab */}
+                {trip.latitude != null && (pinnedItems.length > 0 || selectedHotel?.latitude != null) && (
+                  <button
+                    onClick={() => setPanelMode("map")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      panelMode === "map"
+                        ? "bg-electric-500/15 border border-electric-500/30 text-electric-400"
+                        : "text-slate-500 hover:text-slate-300 hover:bg-white/[0.04]"
+                    }`}
+                  >
+                    <MapPin className="w-3 h-3" />
+                    Map
+                    {panelMode === "map" && <span className="text-[9px] text-slate-500 font-normal">{pinnedItems.length}</span>}
+                  </button>
+                )}
+                {/* Concierge tab */}
                 <button
-                  onClick={() => setChatOpen(false)}
-                  className="text-slate-500 hover:text-slate-300 transition-colors"
+                  onClick={() => setPanelMode("concierge")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    panelMode === "concierge"
+                      ? "bg-electric-gradient text-white shadow-electric-sm"
+                      : "text-slate-500 hover:text-slate-300 hover:bg-white/[0.04]"
+                  }`}
                 >
-                  <X className="w-4 h-4" />
+                  <Compass className="w-3 h-3" />
+                  AI Concierge
+                  {panelMode === "concierge" && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 ml-0.5" />
+                  )}
+                </button>
+                <button
+                  onClick={() => setPanelMode("none")}
+                  className="ml-auto p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/[0.04] transition-all"
+                >
+                  <X className="w-3.5 h-3.5" />
                 </button>
               </div>
 
-              {/* Messages */}
-              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-                {chatMessages.length === 0 && (
-                  <div className="text-center py-8">
-                    <p className="text-xs text-slate-600 leading-relaxed">
-                      Ask me anything about your trip — restaurants, packing tips, local advice…
-                    </p>
-                    <div className="flex flex-wrap gap-1.5 justify-center mt-3">
-                      {[
-                        "Best restaurants nearby?",
-                        "What should I pack?",
-                        "Local transport tips",
-                      ].map((q) => (
-                        <button
-                          key={q}
-                          onClick={() => {
-                            setChatMessages((prev) => [
-                              ...prev,
-                              { role: "user", text: q },
-                            ]);
-                            setChatLoading(true);
-                            sendMessage(q).finally(() => setChatLoading(false));
-                          }}
-                          className="text-[10px] text-electric-400 bg-electric-500/10 border border-electric-500/20 px-2.5 py-1 rounded-full hover:bg-electric-500/20 transition-colors"
-                        >
-                          {q}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+              {/* Panel content — animated switch */}
+              <AnimatePresence mode="wait">
 
-                {chatMessages.map((msg, i) => (
-                  <div key={i}>
-                    <div
-                      className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                    >
-                      <div
-                        className={`max-w-[85%] text-xs px-3.5 py-2.5 rounded-2xl leading-relaxed ${
-                          msg.role === "user"
-                            ? "bg-electric-gradient text-white rounded-br-sm shadow-electric-sm"
-                            : "glass-light text-slate-300 rounded-bl-sm border border-ink-900/10"
-                        }`}
-                      >
-                        {msg.text}
-                      </div>
-                    </div>
-                    {msg.sources && msg.sources.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1.5 ml-1">
-                        {msg.sources.slice(0, 4).map((s, j) => (
-                          <span
-                            key={j}
-                            className="text-[10px] bg-ink-900/[0.04] text-slate-500 px-2 py-0.5 rounded-full border border-ink-900/10"
-                          >
-                            {s.name}
-                          </span>
-                        ))}
+                {/* ── Map view ── */}
+                {panelMode === "map" && (
+                  <motion.div
+                    key="map-panel"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="flex-1 flex flex-col overflow-hidden"
+                  >
+                    {trip.latitude != null && trip.longitude != null ? (
+                      <>
+                        <TripMap
+                          items={pinnedItems}
+                          centerLat={trip.latitude}
+                          centerLng={trip.longitude}
+                          hotel={
+                            selectedHotel?.latitude != null && selectedHotel?.longitude != null
+                              ? { lat: selectedHotel.latitude, lng: selectedHotel.longitude, name: selectedHotel.name }
+                              : null
+                          }
+                          height="460px"
+                        />
+                        <div className="flex items-center gap-3 px-4 py-2.5 border-t border-white/[0.05] shrink-0">
+                          <p className="text-[10px] text-slate-500 mr-1">{trip.destination_city}</p>
+                          {[
+                            { color: "#f87171", label: "Activity" },
+                            { color: "#fbbf24", label: "Meal" },
+                            { color: "#34d399", label: "Transport" },
+                            { color: "#f59e0b", label: "Hotel" },
+                          ].map(({ color, label }) => (
+                            <div key={label} className="flex items-center gap-1">
+                              <div className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
+                              <span className="text-[9px] text-slate-600">{label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">
+                        No location data
                       </div>
                     )}
-                  </div>
-                ))}
-
-                {chatLoading && (
-                  <div className="flex gap-1.5 items-center px-3 py-2">
-                    {[0, 1, 2].map((i) => (
-                      <div
-                        key={i}
-                        className="w-1.5 h-1.5 bg-electric-400 rounded-full animate-bounce"
-                        style={{ animationDelay: `${i * 0.15}s` }}
-                      />
-                    ))}
-                  </div>
+                  </motion.div>
                 )}
-                <div ref={chatEndRef} />
-              </div>
 
-              {/* Input */}
-              <form
-                onSubmit={handleChatSubmit}
-                className="flex gap-2 px-3 py-3 border-t border-ink-900/10 shrink-0"
-              >
-                <input
-                  type="text"
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  disabled={chatLoading}
-                  placeholder="Ask anything…"
-                  className="input-dark text-xs py-2 flex-1"
-                />
-                <button
-                  type="submit"
-                  disabled={chatLoading || !chatInput.trim()}
-                  className="w-9 h-9 rounded-xl bg-electric-gradient text-white flex items-center justify-center hover:opacity-90 disabled:opacity-40 transition-opacity shadow-electric-sm shrink-0"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </button>
-              </form>
+                {/* ── Concierge view ── */}
+                {panelMode === "concierge" && (
+                  <motion.div
+                    key="concierge-panel"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="flex-1 flex flex-col overflow-hidden"
+                  >
+                    {/* Messages */}
+                    <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 scrollbar-hide">
+                      {chatMessages.length === 0 && (
+                        <div className="flex flex-col items-center py-6">
+                          <div className="relative w-14 h-14 mb-3 shrink-0">
+                            <div className="absolute inset-0 rounded-full bg-electric-gradient opacity-15 blur-xl animate-pulse" />
+                            <div className="absolute inset-0 rounded-full border border-electric-500/20 animate-ping" style={{ animationDuration: "3s" }} />
+                            <div className="absolute inset-3 rounded-full bg-electric-gradient/20 flex items-center justify-center border border-electric-500/30">
+                              <Compass className="w-6 h-6 text-electric-400" />
+                            </div>
+                          </div>
+                          <p className="text-sm font-bold text-slate-100 mb-1 text-center">Your {trip.destination_city} Guide</p>
+                          <p className="text-[11px] text-slate-500 text-center mb-5 leading-relaxed">
+                            Real-time advice on restaurants, hidden spots, logistics and more
+                          </p>
+                          <div className="w-full space-y-2">
+                            {[
+                              { q: `Best restaurants in ${trip.destination_city}?`, icon: "🍽" },
+                              { q: "What should I pack?", icon: "🧳" },
+                              { q: "Local transport tips", icon: "🚇" },
+                            ].map(({ q, icon }) => (
+                              <motion.button
+                                key={q}
+                                whileHover={{ x: 2 }}
+                                whileTap={{ scale: 0.98 }}
+                                onClick={() => {
+                                  setChatMessages((prev) => [...prev, { role: "user", text: q }]);
+                                  setChatLoading(true);
+                                  sendMessage(q).finally(() => setChatLoading(false));
+                                }}
+                                className="w-full flex items-center gap-3 text-left px-3.5 py-2.5 rounded-xl text-xs bg-electric-500/8 border border-electric-500/15 text-slate-300 hover:bg-electric-500/15 hover:border-electric-500/30 hover:text-slate-100 transition-all group"
+                              >
+                                <span className="text-base leading-none">{icon}</span>
+                                <span className="flex-1">{q}</span>
+                                <ChevronRight className="w-3 h-3 text-slate-600 group-hover:text-electric-400 transition-colors shrink-0" />
+                              </motion.button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {chatMessages.map((msg, i) => (
+                        <motion.div
+                          key={i}
+                          initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          transition={{ type: "spring", damping: 28, stiffness: 380 }}
+                        >
+                          {msg.role === "assistant" ? (
+                            <div className="flex items-start gap-2.5">
+                              <div className="w-7 h-7 rounded-xl bg-electric-gradient flex items-center justify-center shrink-0 mt-0.5 shadow-electric-sm">
+                                <Compass className="w-3 h-3 text-white" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="bg-space-700/80 border border-electric-500/10 text-slate-200 text-xs px-3.5 py-2.5 rounded-2xl rounded-tl-sm leading-relaxed">
+                                  {msg.text}
+                                </div>
+                                {msg.sources && msg.sources.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-1.5">
+                                    {msg.sources.slice(0, 4).map((s, j) => (
+                                      <span key={j} className="text-[10px] bg-ink-900/[0.04] text-slate-500 px-2 py-0.5 rounded-full border border-ink-900/10">
+                                        {s.name}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex justify-end">
+                              <div className="bg-electric-gradient text-white text-xs px-3.5 py-2.5 rounded-2xl rounded-br-sm shadow-electric-sm max-w-[85%] leading-relaxed">
+                                {msg.text}
+                              </div>
+                            </div>
+                          )}
+                        </motion.div>
+                      ))}
+
+                      {chatLoading && (
+                        <div className="flex items-start gap-2.5">
+                          <div className="w-7 h-7 rounded-xl bg-electric-gradient flex items-center justify-center shrink-0 shadow-electric-sm">
+                            <Compass className="w-3 h-3 text-white" />
+                          </div>
+                          <div className="bg-space-700/80 border border-electric-500/10 px-4 py-3 rounded-2xl rounded-tl-sm">
+                            <div className="flex gap-1.5 items-center h-3">
+                              {[0, 1, 2].map((i) => (
+                                <motion.div
+                                  key={i}
+                                  className="w-1.5 h-1.5 bg-electric-400 rounded-full"
+                                  animate={{ y: [-3, 0, -3] }}
+                                  transition={{ repeat: Infinity, duration: 0.9, delay: i * 0.18, ease: "easeInOut" }}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      <div ref={chatEndRef} />
+                    </div>
+
+                    {/* Input */}
+                    <div className="px-4 py-3 border-t border-white/[0.06] shrink-0">
+                      <form onSubmit={handleChatSubmit} className="flex gap-2 items-center">
+                        <input
+                          type="text"
+                          value={chatInput}
+                          onChange={(e) => setChatInput(e.target.value)}
+                          disabled={chatLoading}
+                          placeholder={`Ask about ${trip.destination_city}…`}
+                          className="flex-1 bg-space-700 border border-white/[0.07] focus:border-electric-500/50 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 outline-none transition-all"
+                        />
+                        <motion.button
+                          type="submit"
+                          disabled={chatLoading || !chatInput.trim()}
+                          whileHover={{ scale: 1.06 }}
+                          whileTap={{ scale: 0.94 }}
+                          className="w-9 h-9 rounded-xl bg-electric-gradient text-white flex items-center justify-center disabled:opacity-40 shadow-electric-sm shrink-0"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                        </motion.button>
+                      </form>
+                    </div>
+                  </motion.div>
+                )}
+
+              </AnimatePresence>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* FAB button */}
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={() => setChatOpen((v) => !v)}
-          className={`flex items-center gap-2 px-5 py-3 rounded-2xl font-semibold text-sm text-white shadow-lg transition-all ${
-            chatOpen
-              ? "bg-space-700 border border-ink-900/15"
-              : "bg-electric-gradient shadow-electric"
-          } ${pendingApprovals.length > 0 ? "animate-pulse-glow" : ""}`}
-        >
-          <Compass className="w-4 h-4" />
-          {chatOpen ? "Close" : "Ask AI"}
-          {!chatOpen && pendingApprovals.length > 0 && (
-            <span className="w-2 h-2 rounded-full bg-coral-400" />
+        {/* FAB buttons */}
+        <div className="flex items-center gap-2">
+          {/* Map FAB — only shown when map data exists */}
+          {trip.latitude != null && (pinnedItems.length > 0 || selectedHotel?.latitude != null) && (
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setPanelMode((v) => v === "map" ? "none" : "map")}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl font-semibold text-sm shadow-lg transition-all border ${
+                panelMode === "map"
+                  ? "bg-space-700 border-electric-500/30 text-electric-400"
+                  : "bg-space-700/80 border-white/[0.08] text-slate-400 hover:text-slate-200 hover:border-white/[0.15]"
+              }`}
+            >
+              <MapPin className="w-4 h-4" />
+              Map
+            </motion.button>
           )}
-        </motion.button>
+
+          {/* AI Concierge FAB */}
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setPanelMode((v) => v === "concierge" ? "none" : "concierge")}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-semibold text-sm shadow-lg transition-all ${
+              panelMode === "concierge"
+                ? "bg-space-700 border border-white/[0.1] text-slate-200"
+                : `bg-electric-gradient text-white shadow-electric ${pendingApprovals.length > 0 ? "animate-pulse-glow" : ""}`
+            }`}
+          >
+            <Compass className="w-4 h-4" />
+            {panelMode === "concierge" ? "Close" : "Ask AI"}
+            {panelMode !== "concierge" && pendingApprovals.length > 0 && (
+              <span className="w-2 h-2 rounded-full bg-coral-400" />
+            )}
+          </motion.button>
+        </div>
       </div>
 
       {/* ── Edit Trip Modal ──────────────────────────────────────────────── */}
@@ -2396,182 +2694,4 @@ export default function TripDetailPage() {
   );
 }
 
-// ── Agent name formatter ──────────────────────────────────────────────────────
 
-const AGENT_DISPLAY: Record<string, { label: string; color: string; emoji: string }> = {
-  travel_style:     { label: "Travel Style",     color: "text-electric-400",  emoji: "🧬" },
-  itinerary_planner:{ label: "Itinerary Planner",color: "text-gold-400",      emoji: "🗺" },
-  hotel_agent:      { label: "Hotel Agent",       color: "text-coral-400",     emoji: "🏨" },
-  budget_optimizer: { label: "Budget Optimizer",  color: "text-emerald-400",   emoji: "💰" },
-  events_agent:     { label: "Events Agent",      color: "text-purple-400",    emoji: "🎟" },
-  packing_list:     { label: "Packing List",      color: "text-teal-400",      emoji: "🧳" },
-  supervisor:       { label: "Supervisor",        color: "text-slate-400",     emoji: "🤖" },
-  validation:       { label: "Validation",        color: "text-slate-400",     emoji: "✅" },
-  conflict_detection:{ label: "Conflict Check",  color: "text-orange-400",    emoji: "⚠️" },
-  human:            { label: "Human",             color: "text-slate-300",     emoji: "👤" },
-  ai:               { label: "AI",                color: "text-electric-400",  emoji: "⚡" },
-};
-
-function agentMeta(role: string) {
-  return AGENT_DISPLAY[role] ?? { label: role, color: "text-slate-400", emoji: "🔷" };
-}
-
-// ── Agent Activity drawer ──────────────────────────────────────────────────────
-
-function AgentActivityPanel({
-  messages,
-}: {
-  messages: { role: string; content: string }[];
-}) {
-  const [drawerOpen, setDrawerOpen] = useState(false);
-
-  // Group consecutive messages by agent
-  type Group = { role: string; msgs: string[] };
-  const groups: Group[] = [];
-  for (const msg of messages) {
-    if (groups.length > 0 && groups[groups.length - 1].role === msg.role) {
-      groups[groups.length - 1].msgs.push(msg.content);
-    } else {
-      groups.push({ role: msg.role, msgs: [msg.content] });
-    }
-  }
-
-  return (
-    <>
-      {/* Sidebar teaser card */}
-      <div className="glass-card overflow-hidden">
-        <button
-          onClick={() => setDrawerOpen(true)}
-          className="w-full flex items-center justify-between px-4 py-3 hover:bg-ink-900/[0.03] transition-colors"
-        >
-          <div className="flex items-center gap-2">
-            <ZapIcon className="w-3.5 h-3.5 text-electric-400" />
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
-              Agent Log
-            </p>
-          </div>
-          <span className="text-[10px] text-slate-600 bg-ink-900/[0.04] px-2 py-0.5 rounded-full">
-            {messages.length} events
-          </span>
-        </button>
-
-        {/* Last 3 messages preview */}
-        <div className="px-4 pb-3 space-y-1 border-t border-ink-900/8 pt-2">
-          {messages.slice(-3).map((msg, i) => {
-            const meta = agentMeta(msg.role);
-            return (
-              <p key={i} className="text-[10px] text-slate-600 leading-relaxed truncate">
-                <span className={`${meta.color} font-medium`}>{meta.emoji} {meta.label}:</span>{" "}
-                {msg.content.slice(0, 60)}{msg.content.length > 60 ? "…" : ""}
-              </p>
-            );
-          })}
-          {messages.length > 3 && (
-            <button
-              onClick={() => setDrawerOpen(true)}
-              className="text-[10px] text-electric-400 hover:underline mt-1"
-            >
-              View all {messages.length} events →
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Full-height right drawer */}
-      <AnimatePresence>
-        {drawerOpen && (
-          <>
-            {/* Backdrop */}
-            <motion.div
-              key="backdrop"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-ink-900/40 backdrop-blur-sm z-40"
-              onClick={() => setDrawerOpen(false)}
-            />
-
-            {/* Drawer */}
-            <motion.div
-              key="drawer"
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed top-0 right-0 h-full w-full max-w-[420px] bg-space-900 border-l border-ink-900/10 z-50 flex flex-col shadow-2xl"
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between px-5 py-4 border-b border-ink-900/10 shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-electric-500/15 border border-electric-500/30 flex items-center justify-center">
-                    <ZapIcon className="w-4 h-4 text-electric-400" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-200">Agent Activity Log</p>
-                    <p className="text-[10px] text-slate-500">{messages.length} events recorded</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setDrawerOpen(false)}
-                  className="text-slate-500 hover:text-slate-300 transition-colors p-1"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Scroll body */}
-              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-                {groups.length === 0 && (
-                  <p className="text-xs text-slate-600 text-center py-12">No activity recorded yet.</p>
-                )}
-                {groups.map((group, gi) => {
-                  const meta = agentMeta(group.role);
-                  return (
-                    <motion.div
-                      key={gi}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: gi * 0.03 }}
-                      className="flex gap-3"
-                    >
-                      {/* Timeline dot */}
-                      <div className="flex flex-col items-center gap-0 mt-0.5 shrink-0">
-                        <div
-                          className={`w-6 h-6 rounded-lg border flex items-center justify-center text-[11px] shrink-0 ${meta.color} border-current bg-current/10`}
-                        >
-                          {meta.emoji}
-                        </div>
-                        {gi < groups.length - 1 && (
-                          <div className="w-px flex-1 bg-ink-900/[0.05] mt-1" />
-                        )}
-                      </div>
-
-                      {/* Content */}
-                      <div className="flex-1 min-w-0 pb-4">
-                        <p className={`text-xs font-semibold mb-1.5 ${meta.color}`}>{meta.label}</p>
-                        <div className="space-y-1">
-                          {group.msgs.map((text, mi) => (
-                            <p key={mi} className="text-[11px] text-slate-400 leading-relaxed">
-                              {text}
-                            </p>
-                          ))}
-                        </div>
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-
-              {/* Footer */}
-              <div className="px-5 py-3 border-t border-ink-900/10 shrink-0">
-                <p className="text-[10px] text-slate-600 text-center">
-                  Powered by TravelOS multi-agent system
-                </p>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-    </>
-  );
-}

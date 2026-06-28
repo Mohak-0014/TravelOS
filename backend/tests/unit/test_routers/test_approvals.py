@@ -322,6 +322,35 @@ async def test_approve_updates_item_title(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_resolve_writes_outbox_embed_event(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Resolving an approval stages the feedback-embedding task in the outbox (atomically),
+    instead of calling .delay() after commit."""
+    from sqlalchemy import select
+
+    from backend.db.models import OutboxEvent
+
+    token = await _auth(client, "outbox_appr@test.com")
+    trip = await _create_trip(client, token)
+    item = await _add_item(client, token, trip["id"])
+    approval = await _create_approval(client, token, trip["id"], item["id"])
+
+    resp = await client.post(
+        f"/api/v1/approvals/{approval['id']}",
+        json={"decision": "approved"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+
+    rows = list((await db_session.execute(select(OutboxEvent))).scalars().all())
+    assert len(rows) == 1
+    assert rows[0].task_name == "backend.workflows.celery_tasks.embed_feedback_async"
+    assert rows[0].status == "pending"
+    assert "feedback_id" in rows[0].payload
+
+
+@pytest.mark.asyncio
 async def test_approve_restores_trip_status_to_planned(client: AsyncClient) -> None:
     token = await _auth(client, "approve_status@test.com")
     trip = await _create_trip(client, token)
@@ -463,6 +492,74 @@ async def test_approve_two_pending_trip_stays_awaiting(client: AsyncClient) -> N
         f"/api/v1/trips/{trip['id']}", headers={"Authorization": f"Bearer {token}"}
     )
     assert trip_resp.json()["status"] == "awaiting_approval"
+
+
+@pytest.mark.asyncio
+async def test_approve_budget_upgrade_selects_candidate(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Approving a budget_upgrade approval sets is_selected on the named candidate."""
+    from sqlalchemy import select
+
+    from backend.db.models import Approval, HotelCandidate, Trip
+
+    token = await _auth(client, "budget_upgrade@test.com")
+    trip = await _create_trip(client, token)
+
+    # Insert two hotel candidates: current selected (3★) and upgrade (5★)
+    current = HotelCandidate(
+        trip_id=trip["id"],
+        provider="liteapi",
+        provider_hotel_id="h-current",
+        name="Budget Inn",
+        star_rating=3.0,
+        is_selected=True,
+    )
+    upgrade = HotelCandidate(
+        trip_id=trip["id"],
+        provider="liteapi",
+        provider_hotel_id="h-upgrade",
+        name="Grand Palace Hotel",
+        star_rating=5.0,
+        is_selected=False,
+    )
+    db_session.add_all([current, upgrade])
+
+    # Create a budget_upgrade approval pointing at the upgrade candidate
+    approval = Approval(
+        trip_id=trip["id"],
+        proposed_by="budget_optimizer",
+        change_type="budget_upgrade",
+        summary="Switch to Grand Palace Hotel — 40% under budget",
+        payload={"candidate_id": None, "title": "Grand Palace Hotel"},  # filled below
+        status="pending",
+    )
+    db_session.add(approval)
+    trip_result = await db_session.execute(select(Trip).where(Trip.id == trip["id"]))
+    db_trip = trip_result.scalar_one()
+    db_trip.status = "awaiting_approval"
+    await db_session.commit()
+    await db_session.refresh(upgrade)
+    await db_session.refresh(approval)
+
+    # Patch the candidate_id now that we have the real UUID
+    approval.payload = {"candidate_id": str(upgrade.id), "title": "Grand Palace Hotel"}
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/v1/approvals/{approval.id}",
+        json={"decision": "approved"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # Upgrade candidate must now be selected; current must be deselected
+    result = await db_session.execute(
+        select(HotelCandidate).where(HotelCandidate.trip_id == trip["id"])
+    )
+    candidates = {c.name: c for c in result.scalars().all()}
+    assert candidates["Grand Palace Hotel"].is_selected is True
+    assert candidates["Budget Inn"].is_selected is False
 
 
 @pytest.mark.asyncio

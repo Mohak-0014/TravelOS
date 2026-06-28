@@ -1,11 +1,11 @@
 import hashlib
 
-import httpx
 from pydantic import BaseModel
 from redis.asyncio import Redis
 
 from backend.core.logging import get_logger
 from backend.tools import redis_get_cached, redis_set_cached
+from backend.tools.resilience import resilient_request
 
 logger = get_logger(__name__)
 
@@ -38,14 +38,16 @@ async def geocode(query: str, cache: Redis | None = None) -> GeoPoint | None:  #
         return GeoPoint(**cached)
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                _NOMINATIM_URL,
-                params={"q": query, "format": "json", "limit": 1},
-                headers={"User-Agent": _USER_AGENT},
-            )
-            resp.raise_for_status()
-            results = resp.json()
+        resp = await resilient_request(
+            "nominatim",
+            "GET",
+            _NOMINATIM_URL,
+            params={"q": query, "format": "json", "limit": 1},
+            headers={"User-Agent": _USER_AGENT},
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        results = resp.json()
     except Exception as exc:
         logger.warning("geocode_failed", query=query, error=str(exc))
         return None

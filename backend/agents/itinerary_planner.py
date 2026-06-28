@@ -40,6 +40,9 @@ _DEFAULT_ITEMS_PER_DAY = 4
 _MUST_SEE_MIN_SITELINKS = 10
 _MUST_SEE_CAP = 12
 
+# Kinds that imply an indoor venue (used when creating enforced must-see slots)
+_INDOOR_KINDS = frozenset({"museum", "gallery", "aquarium", "theatre", "cinema"})
+
 # Walking tolerance → max metres between consecutive same-day venues (task #4)
 _WALKING_TOLERANCE_M: dict[str, int] = {"low": 500, "medium": 2000, "high": 5000}
 
@@ -315,7 +318,8 @@ async def _generate_itinerary(
         raw = str(response.content) if hasattr(response, "content") else str(response)
         items = _parse_items(raw, trip)
         if items:
-            return _assign_real_restaurants(items, restaurants)
+            items = _assign_real_restaurants(items, restaurants)
+            return _enforce_must_see(items, attractions, trip)
         logger.warning("itinerary_planner_empty_parse", trip_id=str(trip.id))
     except Exception as exc:
         logger.error("itinerary_planner_llm_error", error=str(exc))
@@ -472,6 +476,91 @@ def _build_prompt(
     ]
 
     return "\n".join(parts)
+
+
+# ── Must-see enforcement ──────────────────────────────────────────────────────
+
+
+def _enforce_must_see(
+    items: list[_ItemDraft],
+    attractions: list[Attraction],
+    trip: Trip,
+) -> list[_ItemDraft]:
+    """Swap top must-see attractions into the plan if the LLM missed any.
+
+    Leaves at least 2 non-forced activity slots per day so variety is preserved.
+    """
+    must_see = [a for a in attractions if a.prominence >= _MUST_SEE_MIN_SITELINKS or a.is_heritage][
+        :_MUST_SEE_CAP
+    ]
+    if not must_see:
+        return items
+
+    scheduled_refs: set[str] = {i.source_ref for i in items if i.source_ref}
+    scheduled_names_lower: set[str] = {i.title.lower() for i in items}
+    must_see_refs: set[str] = {a.source_ref for a in must_see}
+    must_see_names_lower: set[str] = {a.name.lower() for a in must_see}
+
+    missing = [
+        a
+        for a in must_see
+        if a.source_ref not in scheduled_refs and a.name.lower() not in scheduled_names_lower
+    ]
+    if not missing:
+        return items
+
+    # Activity slots eligible for replacement: not a meal/transport, not already a must-see
+    replaceable = [
+        i
+        for i in items
+        if i.item_type == "activity"
+        and (i.source_ref or "") not in must_see_refs
+        and i.title.lower() not in must_see_names_lower
+    ]
+    # LLM-invented items (no coordinates) have lower value and are replaced first
+    replaceable.sort(key=lambda i: (i.latitude is not None, i.day_number, i.sort_order))
+
+    # Cap swaps so at least 2 non-forced activity slots remain per day for variety
+    trip_days = (trip.end_date - trip.start_date).days + 1
+    activity_count = sum(1 for i in items if i.item_type == "activity")
+    max_swaps = max(0, activity_count - trip_days * 2)
+    if max_swaps == 0:
+        return items
+
+    result = list(items)
+    swaps = 0
+    for attraction in missing:
+        if swaps >= max_swaps or not replaceable:
+            break
+        slot = replaceable.pop(0)
+        idx = result.index(slot)
+        is_outdoor = not any(k in attraction.kinds for k in _INDOOR_KINDS)
+        result[idx] = _ItemDraft(
+            day_number=slot.day_number,
+            item_date=slot.item_date,
+            start_time=slot.start_time,
+            end_time=slot.end_time,
+            item_type="activity",
+            title=attraction.name,
+            description=attraction.kinds,
+            latitude=attraction.lat,
+            longitude=attraction.lng,
+            source_provider="overpass",
+            source_ref=attraction.source_ref,
+            is_outdoor=is_outdoor,
+            sort_order=slot.sort_order,
+        )
+        swaps += 1
+        logger.info(
+            "must_see_enforced",
+            attraction=attraction.name,
+            replaced=slot.title,
+            day=slot.day_number,
+        )
+
+    if swaps:
+        logger.info("must_see_swaps_applied", count=swaps, trip_id=str(trip.id))
+    return result
 
 
 # ── Restaurant assignment ─────────────────────────────────────────────────────

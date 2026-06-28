@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.dependencies import get_current_active_user
+from backend.api.rate_limit import limiter
 from backend.core.config import settings
 from backend.core.security import create_access_token, hash_password, verify_password
 from backend.db.base import get_db
@@ -14,13 +15,19 @@ from backend.db.schemas import (
     Token,
     UserCreate,
     UserOut,
+    UserUpdate,
 )
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
+# Precomputed bcrypt hash used to equalize login timing when the email is unknown,
+# so an attacker can't distinguish "no such user" from "wrong password" by latency.
+_DUMMY_PASSWORD_HASH = hash_password("timing-equalization-decoy")
+
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-async def register(body: UserCreate, db: AsyncSession = Depends(get_db)) -> User:
+@limiter.limit("5/minute")
+async def register(request: Request, body: UserCreate, db: AsyncSession = Depends(get_db)) -> User:
     existing = await db.execute(select(User).where(User.email == body.email))
     if existing.scalar_one_or_none():
         raise HTTPException(
@@ -46,11 +53,17 @@ async def register(body: UserCreate, db: AsyncSession = Depends(get_db)) -> User
 
 
 @router.post("/login", response_model=Token)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> dict:
+@limiter.limit("10/minute")
+async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)) -> dict:
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
 
-    if user is None or not verify_password(body.password, user.hashed_password):
+    # Always run one bcrypt verify (even for unknown emails) to keep response time
+    # constant and avoid a user-enumeration timing oracle.
+    hashed = user.hashed_password if user is not None else _DUMMY_PASSWORD_HASH
+    password_ok = verify_password(body.password, hashed)
+
+    if user is None or not password_ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "NOT_AUTHENTICATED", "message": "Invalid email or password."},
@@ -72,12 +85,12 @@ async def get_me(current_user: User = Depends(get_current_active_user)) -> User:
 
 @router.put("/me", response_model=UserOut)
 async def update_me(
-    body: dict,
+    body: UserUpdate,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    if "full_name" in body:
-        current_user.full_name = body["full_name"]
+    if body.full_name is not None:
+        current_user.full_name = body.full_name
     await db.commit()
     await db.refresh(current_user)
     return current_user

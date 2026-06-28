@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, datetime, time
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -338,3 +339,29 @@ class EventLog(Base):
 
     trip: Mapped["Trip | None"] = relationship(back_populates="event_logs")
     user: Mapped["User | None"] = relationship(back_populates="event_logs")
+
+
+class OutboxEvent(Base):
+    """Transactional outbox: a Celery task staged for dispatch.
+
+    Written in the same transaction as the business data that triggers it, instead of
+    calling ``.delay()`` after commit. The ``drain_outbox`` relay polls pending rows and
+    forwards them to the broker — so a crash between commit and dispatch cannot lose the
+    job, and a rolled-back transaction never dispatches one.
+    """
+
+    __tablename__ = "outbox_events"
+    __table_args__ = (Index("idx_outbox_status_created", "status", "created_at"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    task_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending"
+    )  # pending | dispatched | failed
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

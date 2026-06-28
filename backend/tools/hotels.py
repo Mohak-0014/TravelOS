@@ -1,13 +1,13 @@
 import hashlib
 from datetime import date
 
-import httpx
 from pydantic import BaseModel
 from redis.asyncio import Redis
 
 from backend.core.config import settings
 from backend.core.logging import get_logger
 from backend.tools import redis_get_cached, redis_set_cached
+from backend.tools.resilience import resilient_request
 
 logger = get_logger(__name__)
 
@@ -207,24 +207,26 @@ async def _fetch_rates(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                _LITEAPI_RATES_URL,
-                json=payload,
-                headers={
-                    "X-API-Key": settings.LITEAPI_KEY,
-                    "Content-Type": "application/json",
-                    "accept": "application/json",
-                },
+        resp = await resilient_request(
+            "liteapi-rates",
+            "POST",
+            _LITEAPI_RATES_URL,
+            json=payload,
+            headers={
+                "X-API-Key": settings.LITEAPI_KEY,
+                "Content-Type": "application/json",
+                "accept": "application/json",
+            },
+            timeout=30.0,
+        )
+        if resp.status_code != 200:
+            logger.warning(
+                "liteapi_rates_non200",
+                status=resp.status_code,
+                body=resp.text[:200],
             )
-            if resp.status_code != 200:
-                logger.warning(
-                    "liteapi_rates_non200",
-                    status=resp.status_code,
-                    body=resp.text[:200],
-                )
-                return {}
-            data = resp.json()
+            return {}
+        data = resp.json()
     except Exception as exc:
         logger.warning("liteapi_rates_failed", error=str(exc))
         return {}
@@ -285,14 +287,16 @@ async def _search_liteapi(
         params["countryCode"] = country_code
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                _LITEAPI_HOTELS_URL,
-                params=params,
-                headers={"X-API-Key": settings.LITEAPI_KEY},
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        resp = await resilient_request(
+            "liteapi-hotels",
+            "GET",
+            _LITEAPI_HOTELS_URL,
+            params=params,
+            headers={"X-API-Key": settings.LITEAPI_KEY},
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
     except Exception as exc:
         logger.warning("liteapi_search_failed", destination=destination, error=str(exc))
         return []

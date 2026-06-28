@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from celery import Celery
 from celery.schedules import crontab
@@ -11,7 +11,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from backend.core.config import settings
 from backend.core.logging import get_logger
 from backend.db.base import AsyncSessionLocal
-from backend.db.models import Approval, ItineraryItem, Preference, Trip, UserFeedback
+from backend.db.models import (
+    Approval,
+    ItineraryItem,
+    OutboxEvent,
+    Preference,
+    Trip,
+    UserFeedback,
+)
 from backend.graphs.replan_graph import build_replan_graph
 from backend.graphs.state import TravelOSState
 from backend.graphs.trip_graph import build_trip_graph
@@ -46,6 +53,11 @@ celery_app.conf.update(
         "check-weather-every-6h": {
             "task": "backend.workflows.celery_tasks.check_weather_and_replan_all",
             "schedule": crontab(minute=0, hour="*/6"),
+        },
+        # Transactional-outbox relay: forward staged tasks to the broker.
+        "drain-outbox-every-10s": {
+            "task": "backend.workflows.celery_tasks.drain_outbox",
+            "schedule": 10.0,
         },
     },
 )
@@ -481,3 +493,44 @@ async def _run_embed_feedback(feedback_id: str) -> dict:  # type: ignore[return]
 
     logger.info("embed_feedback_complete", feedback_id=feedback_id)
     return {"status": "ok", "feedback_id": feedback_id}
+
+
+# ── Transactional outbox relay ─────────────────────────────────────────────────
+
+
+@celery_app.task(name="backend.workflows.celery_tasks.drain_outbox")
+def drain_outbox() -> dict:  # type: ignore[no-untyped-def]
+    """Forward staged outbox rows to the broker. Scheduled by Celery Beat every 10s."""
+    from backend.db.base import engine
+
+    engine.sync_engine.dispose()
+    return asyncio.run(_drain_outbox())
+
+
+async def _drain_outbox(batch_size: int = 100) -> dict[str, int]:
+    """Dispatch pending OutboxEvent rows to Celery, marking each dispatched or failed."""
+    dispatched = 0
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(OutboxEvent)
+            .where(OutboxEvent.status == "pending")
+            .order_by(OutboxEvent.created_at)
+            .limit(batch_size)
+        )
+        events = list(result.scalars().all())
+        for event in events:
+            try:
+                celery_app.send_task(event.task_name, kwargs=event.payload or {})
+                event.status = "dispatched"
+                event.dispatched_at = datetime.now(UTC)
+                dispatched += 1
+            except Exception as exc:
+                event.attempts += 1
+                event.last_error = str(exc)[:500]
+                if event.attempts >= 5:
+                    event.status = "failed"
+                logger.error("outbox_dispatch_failed", event_id=str(event.id), error=str(exc))
+        await session.commit()
+
+    logger.info("outbox_drained", dispatched=dispatched, scanned=len(events))
+    return {"dispatched": dispatched, "scanned": len(events)}

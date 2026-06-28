@@ -2,8 +2,11 @@ import time
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 
+from backend.api.rate_limit import limiter
 from backend.core.config import settings
 from backend.core.logging import configure_logging, get_logger
 from backend.db.base import AsyncSessionLocal
@@ -11,18 +14,27 @@ from backend.db.base import AsyncSessionLocal
 configure_logging()
 logger = get_logger(__name__)
 
+# API schema/docs are disabled in production to reduce attack surface.
+_docs_enabled = settings.ENVIRONMENT != "production"
 app = FastAPI(
     title="TravelOS API",
     version="0.1.0",
     description="AI-native multi-agent travel operating system",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
 )
 
+# Per-IP rate limiting (Redis-backed) — see backend/api/rate_limit.py
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+
+# Auth uses Authorization: Bearer (not cookies), so credentials aren't needed.
+# allow_credentials=False also avoids the wildcard-origin + credentials footgun.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

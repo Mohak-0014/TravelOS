@@ -1,30 +1,26 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Depends, Request
 
 from backend.agents import concierge as concierge_agent
-from backend.api.dependencies import get_current_active_user
-from backend.db.base import get_db
-from backend.db.models import Trip, User
+from backend.api.dependencies import get_current_active_user, get_owned_trip
+from backend.api.rate_limit import limiter
+from backend.db.models import User
 from backend.db.schemas import ChatRequest, ChatResponse
 
 router = APIRouter(tags=["concierge"])
 
 
-@router.post("/api/v1/trips/{trip_id}/chat", response_model=ChatResponse)
+@router.post(
+    "/api/v1/trips/{trip_id}/chat",
+    response_model=ChatResponse,
+    dependencies=[Depends(get_owned_trip)],  # 404s unless the caller owns the trip
+)
+@limiter.limit("20/minute")  # full LLM agent call — cap per-IP token spend
 async def chat(
+    request: Request,
     trip_id: str,
     body: ChatRequest,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db),
 ) -> ChatResponse:
-    result = await db.execute(select(Trip).where(Trip.id == trip_id))
-    trip = result.scalar_one_or_none()
-    if trip is None or trip.user_id != current_user.id:
-        raise HTTPException(
-            status_code=404, detail={"code": "NOT_FOUND", "message": "Trip not found."}
-        )
-
     response = await concierge_agent.ask(
         trip_id=trip_id,
         user_id=current_user.id,

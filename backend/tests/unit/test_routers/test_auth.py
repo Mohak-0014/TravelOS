@@ -39,7 +39,7 @@ async def _auth(client: AsyncClient, email: str = "user@example.com") -> str:
 async def test_register_201_with_correct_fields(client: AsyncClient) -> None:
     resp = await client.post(
         "/api/v1/auth/register",
-        json={"email": "reg@test.com", "password": "Abc123!", "full_name": "Reg User"},
+        json={"email": "reg@test.com", "password": "Abc1234!", "full_name": "Reg User"},
     )
     assert resp.status_code == 201
     body = resp.json()
@@ -55,7 +55,7 @@ async def test_register_duplicate_email_422(client: AsyncClient) -> None:
     for _ in range(2):
         resp = await client.post(
             "/api/v1/auth/register",
-            json={"email": "dup@test.com", "password": "Pass1!", "full_name": "Dup"},
+            json={"email": "dup@test.com", "password": "Pass1234!", "full_name": "Dup"},
         )
     assert resp.status_code == 422
     assert resp.json()["detail"]["code"] == "VALIDATION_ERROR"

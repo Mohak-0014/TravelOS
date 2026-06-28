@@ -1,9 +1,9 @@
 from datetime import date, timedelta
 
-import httpx
 from pydantic import BaseModel
 
 from backend.core.logging import get_logger
+from backend.tools.resilience import resilient_request
 
 logger = get_logger(__name__)
 
@@ -105,20 +105,22 @@ async def _fetch_from_url(
 ) -> list[WeatherDay]:
     """Shared fetch + parse logic for both forecast and archive endpoints."""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                url,
-                params={
-                    "latitude": lat,
-                    "longitude": lng,
-                    "daily": ",".join(_DAILY_FIELDS),
-                    "start_date": start_date.isoformat(),
-                    "end_date": end_date.isoformat(),
-                    "timezone": "auto",
-                },
-            )
-            resp.raise_for_status()
-            payload = resp.json()
+        resp = await resilient_request(
+            "open-meteo",
+            "GET",
+            url,
+            params={
+                "latitude": lat,
+                "longitude": lng,
+                "daily": ",".join(_DAILY_FIELDS),
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "timezone": "auto",
+            },
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
     except Exception as exc:
         logger.warning("weather_fetch_failed", url=url, lat=lat, lng=lng, error=str(exc))
         return []
