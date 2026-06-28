@@ -6,11 +6,11 @@ import re
 from datetime import date
 from typing import Any
 
-import httpx
 from pydantic import BaseModel
 
 from backend.core.logging import get_logger
 from backend.tools import redis_get_cached, redis_set_cached
+from backend.tools.resilience import resilient_request
 
 logger = get_logger(__name__)
 
@@ -79,30 +79,32 @@ async def resolve_iata(
             val = cached.get("iata")
             return str(val) if val else None
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get(
-                _PLACES_URL,
-                params={"query": city, "limit": 10},
-                headers=_headers(api_key),
-            )
-            r.raise_for_status()
-            items = r.json().get("data", [])
-            # Prefer city-level IATA (e.g. LON, PAR, NYC) — covers all metro airports
-            for item in items:
-                if item.get("type") == "city":
-                    iata = item.get("iata_code")
-                    if iata:
-                        if cache:
-                            await redis_set_cached(cache, key, {"iata": iata}, ttl=_IATA_TTL)
-                        return str(iata)
-            # Fall back to first airport result
-            for item in items:
-                if item.get("type") == "airport":
-                    iata = item.get("iata_code")
-                    if iata:
-                        if cache:
-                            await redis_set_cached(cache, key, {"iata": iata}, ttl=_IATA_TTL)
-                        return str(iata)
+        r = await resilient_request(
+            "duffel-places",
+            "GET",
+            _PLACES_URL,
+            params={"query": city, "limit": 10},
+            headers=_headers(api_key),
+            timeout=10.0,
+        )
+        r.raise_for_status()
+        items = r.json().get("data", [])
+        # Prefer city-level IATA (e.g. LON, PAR, NYC) — covers all metro airports
+        for item in items:
+            if item.get("type") == "city":
+                iata = item.get("iata_code")
+                if iata:
+                    if cache:
+                        await redis_set_cached(cache, key, {"iata": iata}, ttl=_IATA_TTL)
+                    return str(iata)
+        # Fall back to first airport result
+        for item in items:
+            if item.get("type") == "airport":
+                iata = item.get("iata_code")
+                if iata:
+                    if cache:
+                        await redis_set_cached(cache, key, {"iata": iata}, ttl=_IATA_TTL)
+                    return str(iata)
     except Exception as exc:
         logger.warning("duffel_iata_resolve_error", city=city, error=str(exc))
     return None
@@ -216,17 +218,17 @@ async def search_flights(
     passengers = [{"type": "adult"} for _ in range(max(1, num_travelers))]
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            r = await client.post(
-                _OFFER_REQUESTS_URL,
-                params={"return_offers": "true"},
-                json={
-                    "data": {"slices": slices, "passengers": passengers, "cabin_class": "economy"}
-                },
-                headers=_headers(api_key),
-            )
-            r.raise_for_status()
-            raw_offers: list[dict[str, Any]] = r.json().get("data", {}).get("offers", [])
+        r = await resilient_request(
+            "duffel-offers",
+            "POST",
+            _OFFER_REQUESTS_URL,
+            params={"return_offers": "true"},
+            json={"data": {"slices": slices, "passengers": passengers, "cabin_class": "economy"}},
+            headers=_headers(api_key),
+            timeout=20.0,
+        )
+        r.raise_for_status()
+        raw_offers: list[dict[str, Any]] = r.json().get("data", {}).get("offers", [])
     except Exception as exc:
         logger.warning("duffel_search_error", error=str(exc))
         return []
