@@ -7,7 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.api.dependencies import get_current_active_user
 from backend.core.logging import get_logger
 from backend.db.base import get_db
-from backend.db.models import Approval, HotelCandidate, ItineraryItem, Trip, User, UserFeedback
+from backend.db.models import (
+    Approval,
+    HotelCandidate,
+    ItineraryItem,
+    OutboxEvent,
+    Trip,
+    User,
+    UserFeedback,
+)
 from backend.db.schemas import ApprovalCreate, ApprovalDecision, ApprovalOut
 
 logger = get_logger(__name__)
@@ -317,10 +325,13 @@ async def resolve_approval(
         await db.commit()
         await db.refresh(feedback)
 
-        # Embed the feedback vector in Celery (CPU-heavy — never in request path)
-        from backend.workflows.celery_tasks import embed_feedback_async  # noqa: PLC0415
-
-        embed_feedback_async.delay(str(feedback.id))
+        # Write to outbox so beat can dispatch embed_feedback_async reliably
+        outbox = OutboxEvent(
+            event_type="embed_feedback",
+            payload={"id": str(feedback.id)},
+        )
+        db.add(outbox)
+        await db.commit()
     except Exception as exc:
         logger.warning("feedback_write_failed", approval_id=approval_id, error=str(exc))
 

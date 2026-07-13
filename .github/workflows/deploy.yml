@@ -1,0 +1,179 @@
+name: TravelOS CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+
+jobs:
+  # ── Backend: lint, type-check, test ────────────────────────────────────────
+  backend-checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Ruff format check
+        run: ruff format --check .
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Mypy type check
+        run: mypy .
+
+      - name: Run tests
+        run: pytest backend/tests/ -v --cov=backend --cov-report=xml
+        env:
+          ENVIRONMENT: test
+          DATABASE_URL: "sqlite+aiosqlite://"
+          JWT_SECRET_KEY: "ci-test-key-not-for-production-use-only"
+
+      - name: Upload coverage
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: coverage.xml
+
+  # ── Frontend: lint, type-check, build ──────────────────────────────────────
+  frontend-checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: TypeScript type check
+        run: npm run type-check
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: https://api.example.com
+
+  # ── Migration: verify Alembic chain is clean ───────────────────────────────
+  migration-check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci_test_password
+          POSTGRES_DB: travelos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e "."
+
+      - name: Run migrations
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:ci_test_password@localhost:5432/travelos
+
+      - name: Verify single migration head
+        run: |
+          HEAD_COUNT=$(alembic heads | wc -l)
+          if [ "$HEAD_COUNT" -ne 1 ]; then
+            echo "ERROR: Multiple migration heads detected!"
+            alembic heads
+            exit 1
+          fi
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:ci_test_password@localhost:5432/travelos
+
+  # ── Deploy to EC2 (main branch only) ───────────────────────────────────────
+  deploy:
+    needs: [backend-checks, frontend-checks, migration-check]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd /opt/TravelOS
+
+            echo "▸ Pulling latest code..."
+            git pull origin main
+
+            echo "▸ Fetching secrets..."
+            ./infra/fetch_secrets.sh
+
+            echo "▸ Building images..."
+            docker compose \
+              -f infra/docker-compose.prod.yml \
+              -f infra/docker-compose.aws-freetier.yml \
+              build
+
+            echo "▸ Starting services..."
+            docker compose \
+              -f infra/docker-compose.prod.yml \
+              -f infra/docker-compose.aws-freetier.yml \
+              up -d
+
+            echo "▸ Cleaning up old images..."
+            docker system prune -f
+
+            echo "▸ Waiting for health check..."
+            sleep 15
+            curl -sf http://localhost:8000/health || {
+              echo "ERROR: Health check failed!"
+              docker compose \
+                -f infra/docker-compose.prod.yml \
+                -f infra/docker-compose.aws-freetier.yml \
+                logs --tail=50
+              exit 1
+            }
+            echo "✔ Deploy complete — health check passed"

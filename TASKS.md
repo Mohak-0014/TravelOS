@@ -22,7 +22,7 @@ Last updated: 2026-06-21
 | 2 | **Initialize Qdrant collections on startup** | `backend/api/main.py` | Call `ensure_collections()` in a FastAPI startup event. Without this, `trip_memories` and `user_preferences` don't exist for fresh installs — Travel Style and Concierge degrade silently. |
 | 7 | **Inject travel_style_profile into weather adaptation** | `backend/agents/weather.py` lines 318-324 | Read `activity_preference`, `dining_preference`, `budget_priority` from state and inject into the weather adaptation LLM prompt so replacements match user taste (e.g. art gallery not bowling alley). |
 | 8 | **Enforce pace item count in validation** | `backend/graphs/validation.py` | Post-parse check: if any day has fewer than `pace_target - 1` items, flag for replan. Conflict detection already checks >8 items; mirror for under-count. Add unit test. |
-| 30 | **Replace decommissioned Groq tool-use model** | `backend/agents/_llm.py` (`_TOOL_USE_MODEL`, line 12) | `size="tools"` maps to `llama3-groq-70b-8192-tool-use-preview`, which Groq has **decommissioned** — it is no longer in the live `/v1/models` list (verified 2026-06-21). Currently a latent bug: nothing calls `build_llm("tools")` (Concierge uses `"large"`), but any future use will 400. Fix: drop the `"tools"` branch or point it at a supported model — `llama-3.3-70b-versatile` already does reliable tool-calling for the Concierge. |
+| ~~30~~ ✅ | **Replace decommissioned Groq tool-use model** — DONE 2026-06-27 (repointed to `llama-3.3-70b-versatile`) | `backend/agents/_llm.py` (`_TOOL_USE_MODEL`, line 12) | `size="tools"` maps to `llama3-groq-70b-8192-tool-use-preview`, which Groq has **decommissioned** — it is no longer in the live `/v1/models` list (verified 2026-06-21). Currently a latent bug: nothing calls `build_llm("tools")` (Concierge uses `"large"`), but any future use will 400. Fix: drop the `"tools"` branch or point it at a supported model — `llama-3.3-70b-versatile` already does reliable tool-calling for the Concierge. |
 
 ### Agent Prompt Quality (2026-06-20)
 
@@ -88,6 +88,12 @@ Tune the LLM prompts so agents produce more useful, higher-quality results. High
 | 22 | **Quick-wins: tasks #2, #7, #8** | `backend/api/main.py`, `backend/agents/weather.py`, `backend/graphs/validation.py` | #2: Qdrant collections init on startup. #7: weather agent uses travel_style_profile for activity replacements. #8: validation flags under-count days. All small. |
 
 ---
+
+## Done (2026-06-27 session)
+
+- [x] **UI redesign → "Daylight Voyage"** — dark Twilight theme → bright light theme app-wide via Tailwind token flip (`frontend/tailwind.config.ts`, `frontend/app/globals.css`); new `DaySky` hero replaces `NightSky`; `DestinationsScroll` (popular cities) replaces `WondersScroll` (7 Wonders); `WorldGlobe` → blue-marble day earth + cities. Deleted `NightSky`/`WondersScroll`/`SkyScene`. `tsc` + ESLint clean; pages render 200.
+- [x] **Security hardening for deployment** — full source audit; fixed 7 findings + Qdrant auth: JWT fail-closed in prod (`core/config.py`); python-jose → **PyJWT 2.9** (`core/security.py`); input validation incl. `EmailStr`, password 8–128, numeric/string bounds (`db/schemas.py`); typed `PUT /me` + constant-time login verify (`api/routers/auth.py`); **auth rate limiting** via slowapi, Redis-backed (`api/rate_limit.py`, `api/main.py`); CORS `allow_credentials=False` + docs hidden in prod (`api/main.py`); ICS/`Content-Disposition` injection escaped (`api/routers/trips.py`); optional `QDRANT_API_KEY` (`memory/semantic.py`). `.env.example` + `pyproject.toml` updated. Gate green — ruff/mypy clean, **593 tests pass** (2 short-password fixtures updated).
+- [x] **#30 — Groq tool-use model** — repointed `_TOOL_USE_MODEL` from the decommissioned `llama3-groq-70b-8192-tool-use-preview` to `llama-3.3-70b-versatile` (`backend/agents/_llm.py`).
 
 ## Done (2026-06-21 session)
 

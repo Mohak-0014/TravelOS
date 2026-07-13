@@ -1,0 +1,75 @@
+# AWS free-tier overlay — merge with docker-compose.prod.yml:
+#
+#   docker compose \
+#     -f infra/docker-compose.prod.yml \
+#     -f infra/docker-compose.aws-freetier.yml \
+#     up -d
+#
+# Key differences from the prod default:
+#   - postgres service disabled (RDS replaces it — never start the container)
+#   - migrate depends_on pruned to redis + qdrant only (postgres is RDS, always reachable)
+#   - gunicorn reduced to 1 worker (t2.micro = 1 vCPU)
+#   - Celery concurrency=1 + max-tasks-per-child=5 (embedding model peaks ~1.5 GB; 4 GB swap absorbs it)
+#   - gunicorn timeout raised to 180 s for LLM calls on burstable CPU
+#   - --proxy-headers on gunicorn so slowapi rate-limits by real client IP through nginx
+
+services:
+  postgres:
+    # Disabled — using RDS instead. Docker Compose ignores services with no matching profile.
+    profiles:
+      - disabled
+
+  migrate:
+    # Override depends_on entirely: drop postgres (it's RDS, always up), keep redis + qdrant
+    depends_on:
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+
+  backend:
+    command:
+      - gunicorn
+      - backend.api.main:app
+      - --worker-class=uvicorn.workers.UvicornWorker
+      - --bind=0.0.0.0:8000
+      - --workers=1
+      - --timeout=180
+      - --proxy-headers
+      - --forwarded-allow-ips=*
+    depends_on:
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  celery_worker:
+    command:
+      - celery
+      - -A
+      - backend.workflows.celery_tasks
+      - worker
+      - --loglevel=info
+      - --concurrency=1
+      - --max-tasks-per-child=5
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          memory: 1500m
+
+  celery_beat:
+    deploy:
+      resources:
+        limits:
+          memory: 128m

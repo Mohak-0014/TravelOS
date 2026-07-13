@@ -1,13 +1,29 @@
+from unittest.mock import AsyncMock, patch
+
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from backend.api.main import app
 from backend.db.base import Base, get_db
+from backend.tools.geocode import GeoPoint
 
 # Use an in-memory SQLite database for unit/integration tests that don't need Postgres features.
 # For tests that need Postgres-specific features (UUID, JSONB), point at a real test DB.
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+
+_MOCK_GEOPOINT = GeoPoint(lat=48.8566, lng=2.3522, display_name="Paris, France")
+
+
+@pytest.fixture(autouse=True)
+def mock_geocode():
+    """Prevent tests from hitting real Nominatim — avoids 18-20 min suite runtimes."""
+    with patch(
+        "backend.tools.geocode.geocode",
+        new=AsyncMock(return_value=_MOCK_GEOPOINT),
+    ):
+        yield
 
 
 @pytest_asyncio.fixture(scope="function")
