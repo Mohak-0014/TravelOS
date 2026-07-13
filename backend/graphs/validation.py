@@ -7,7 +7,10 @@ from datetime import time as dt_time
 from langchain_core.messages import SystemMessage
 
 from backend.core.logging import get_logger
+from backend.db.base import AsyncSessionLocal
+from backend.db.models import Trip
 from backend.graphs.state import TravelOSState
+from backend.tools.currency import convert as convert_currency
 
 logger = get_logger(__name__)
 
@@ -60,11 +63,20 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
                 f" for '{pace}' pace"
             )
 
-    # Compute total planned cost and write it into budget_state for conflict detection
-    estimated_total = sum(float(it.get("est_cost") or 0) for it in cleaned)
+    # Compute total planned cost in trip's budget currency for conflict detection
     budget_state: dict = dict(state.get("budget_state") or {})  # type: ignore[type-arg]
+    budget_currency = await _get_budget_currency(state)
+    estimated_total = sum(
+        convert_currency(
+            float(it.get("est_cost") or 0),
+            str(it.get("est_cost_currency") or budget_currency),
+            budget_currency,
+        )
+        for it in cleaned
+    )
     if estimated_total > 0:
         budget_state["estimated_planned"] = round(estimated_total, 2)
+        budget_state["currency"] = budget_currency
 
     summary = (
         f"{len(cleaned)} items valid"
@@ -123,6 +135,22 @@ def _validate_and_fix(raw: dict) -> tuple[dict | None, list[str]]:  # type: igno
     item["is_outdoor"] = bool(item.get("is_outdoor", False))
 
     return item, issues
+
+
+async def _get_budget_currency(state: TravelOSState) -> str:
+    """Load budget_currency from the trip row, fallback to INR."""
+    trip_id = state.get("trip_id")
+    if not trip_id:
+        return "INR"
+    try:
+        from sqlalchemy import select  # noqa: PLC0415
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Trip).where(Trip.id == trip_id))
+            trip = result.scalar_one_or_none()
+            return trip.budget_currency if trip and trip.budget_currency else "INR"
+    except Exception:
+        return "INR"
 
 
 def _parse_time(t: object) -> dt_time | None:

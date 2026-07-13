@@ -1,3 +1,5 @@
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from langchain_core.messages import SystemMessage
 
@@ -126,7 +128,11 @@ async def test_run_nullifies_negative_est_cost() -> None:
 @pytest.mark.asyncio
 async def test_run_calculates_estimated_planned_in_budget_state() -> None:
     items = [_item(est_cost=100.0), _item(est_cost=50.0, title="Dinner")]
-    result = await run(_base_state(itinerary=items))
+    # Pin the budget currency to the items' EUR so the total is a pure sum
+    with patch(
+        "backend.graphs.validation._get_budget_currency", new=AsyncMock(return_value="EUR")
+    ):
+        result = await run(_base_state(itinerary=items))
     assert result["budget_state"]["estimated_planned"] == pytest.approx(150.0)
 
 

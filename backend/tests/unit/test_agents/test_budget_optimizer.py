@@ -335,7 +335,8 @@ async def test_run_on_track_returns_budget_summary() -> None:
     state = _state(itinerary=items, hotel_state=hotel_state)
 
     with patch("backend.agents.budget_optimizer._load_trip") as mock_load:
-        mock_load.return_value = _mock_trip(budget_total=700.0)
+        # Unmapped city -> local currency USD == budget currency -> costs pass through
+        mock_load.return_value = _mock_trip(budget_total=700.0, destination_city="Springfield")
         result = await run(state)
 
     bs = result["budget_state"]
@@ -379,7 +380,7 @@ async def test_run_over_budget_creates_swap_proposals() -> None:
         patch("backend.agents.budget_optimizer._persist_approvals") as mock_persist,
         patch("backend.agents.budget_optimizer._set_trip_awaiting_approval") as mock_status,
     ):
-        mock_load.return_value = _mock_trip(budget_total=1500.0)
+        mock_load.return_value = _mock_trip(budget_total=1500.0, destination_city="Springfield")
         mock_items.return_value = fake_db_items  # auto-AsyncMock wraps this
         mock_swap.return_value = fake_proposal  # auto-AsyncMock wraps this
         mock_persist.return_value = None
