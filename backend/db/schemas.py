@@ -70,7 +70,7 @@ class TripCreate(BaseModel):
     end_date: date
     num_travelers: int = 1
     budget_total: float | None = None
-    budget_currency: str = "USD"
+    budget_currency: str = "INR"
 
 
 class TripUpdate(BaseModel):

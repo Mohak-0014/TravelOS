@@ -95,7 +95,7 @@ class Trip(Base):
     end_date: Mapped[date] = mapped_column(Date, nullable=False)
     num_travelers: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     budget_total: Mapped[float | None] = mapped_column(Numeric(12, 2))
-    budget_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    budget_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="planning")
     packing_list: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     cover_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -313,6 +313,23 @@ class UserFeedback(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class OutboxEvent(Base):
+    """Transactional outbox for reliable Celery task dispatch after DB commits."""
+
+    __tablename__ = "outbox_events"
+    __table_args__ = (Index("idx_outbox_status_created", "status", "created_at"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class EventLog(Base):

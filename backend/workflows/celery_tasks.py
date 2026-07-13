@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from celery import Celery
 from celery.schedules import crontab
@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from backend.core.config import settings
 from backend.core.logging import get_logger
 from backend.db.base import AsyncSessionLocal
-from backend.db.models import Approval, ItineraryItem, Preference, Trip, UserFeedback
+from backend.db.models import Approval, ItineraryItem, OutboxEvent, Preference, Trip, UserFeedback
 from backend.graphs.replan_graph import build_replan_graph
 from backend.graphs.state import TravelOSState
 from backend.graphs.trip_graph import build_trip_graph
@@ -46,6 +46,10 @@ celery_app.conf.update(
         "check-weather-every-6h": {
             "task": "backend.workflows.celery_tasks.check_weather_and_replan_all",
             "schedule": crontab(minute=0, hour="*/6"),
+        },
+        "drain-outbox-every-10s": {
+            "task": "backend.workflows.celery_tasks.drain_outbox",
+            "schedule": 10.0,
         },
     },
 )
@@ -112,8 +116,10 @@ async def _run_trip_graph(trip_id: str, user_id: str) -> dict:  # type: ignore[r
         "replan_iterations": 0,
     }
 
-    # Mark trip as generating and record the thread_id before any work starts
+    # Mark trip as generating and clear any stale pending approvals from previous
+    # generations — they reference old itinerary item IDs and wrong cost data.
     await _set_trip_status(trip_id, "generating", thread_id=thread_id)
+    await _clear_pending_approvals(trip_id)
 
     try:
         # Phase 1: run until interrupt_before=["approval_gate"]
@@ -153,6 +159,23 @@ async def _run_trip_graph(trip_id: str, user_id: str) -> dict:  # type: ignore[r
     except Exception:
         await _set_trip_status(trip_id, "failed")
         raise
+
+
+async def _clear_pending_approvals(trip_id: str) -> None:
+    """Delete all pending approvals for a trip before a new generation run."""
+    from sqlalchemy import delete as sa_delete  # noqa: PLC0415
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                sa_delete(Approval).where(
+                    Approval.trip_id == trip_id,
+                    Approval.status == "pending",
+                )
+            )
+            await session.commit()
+    except SQLAlchemyError as exc:
+        logger.warning("clear_pending_approvals_error", trip_id=trip_id, error=str(exc))
 
 
 async def _set_trip_status(
@@ -481,3 +504,80 @@ async def _run_embed_feedback(feedback_id: str) -> dict:  # type: ignore[return]
 
     logger.info("embed_feedback_complete", feedback_id=feedback_id)
     return {"status": "ok", "feedback_id": feedback_id}
+
+
+# ── Outbox relay (dispatches DB-staged events to Celery) ──────────────────────
+
+_OUTBOX_MAX_ATTEMPTS = 5
+
+_OUTBOX_DISPATCH: dict[str, str] = {
+    "embed_feedback": "backend.workflows.celery_tasks.embed_feedback_async",
+    "embed_preferences": "backend.workflows.celery_tasks.embed_preferences_async",
+    "embed_trip_summary": "backend.workflows.celery_tasks.embed_trip_summary_async",
+}
+
+
+@celery_app.task(name="backend.workflows.celery_tasks.drain_outbox")
+def drain_outbox() -> dict:  # type: ignore[no-untyped-def]
+    """
+    Scheduled every 10 s by Celery Beat.
+    Picks up pending outbox_events rows and dispatches the corresponding Celery task,
+    then marks them dispatched. Rows that fail 5 times are marked 'failed'.
+    """
+    from backend.db.base import engine  # noqa: PLC0415
+
+    engine.sync_engine.dispose()
+    try:
+        result = asyncio.run(_drain_outbox_async())
+        logger.info("drain_outbox_complete", **result)
+        return result
+    except Exception as exc:
+        logger.error("drain_outbox_error", error=str(exc))
+        return {"status": "error", "error": str(exc)}
+
+
+async def _drain_outbox_async() -> dict:  # type: ignore[return]
+    dispatched = 0
+    failed = 0
+
+    async with AsyncSessionLocal() as session:
+        rows_result = await session.execute(
+            select(OutboxEvent)
+            .where(
+                OutboxEvent.status == "pending",
+                OutboxEvent.attempts < _OUTBOX_MAX_ATTEMPTS,
+            )
+            .order_by(OutboxEvent.created_at)
+            .limit(100)
+        )
+        rows = list(rows_result.scalars().all())
+
+    for row in rows:
+        task_name = _OUTBOX_DISPATCH.get(row.event_type)
+        if not task_name:
+            logger.warning("drain_outbox_unknown_event_type", event_type=row.event_type, id=row.id)
+            continue
+
+        try:
+            task_arg = row.payload.get("id") or row.payload.get("feedback_id")
+            celery_app.send_task(task_name, args=[task_arg])
+
+            async with AsyncSessionLocal() as session:
+                ev = await session.get(OutboxEvent, row.id)
+                if ev is not None:
+                    ev.status = "dispatched"
+                    ev.dispatched_at = datetime.now(UTC)
+                    await session.commit()
+            dispatched += 1
+        except Exception as exc:
+            logger.error("drain_outbox_dispatch_error", id=row.id, error=str(exc))
+            async with AsyncSessionLocal() as session:
+                ev = await session.get(OutboxEvent, row.id)
+                if ev is not None:
+                    ev.attempts += 1
+                    if ev.attempts >= _OUTBOX_MAX_ATTEMPTS:
+                        ev.status = "failed"
+                    await session.commit()
+            failed += 1
+
+    return {"status": "ok", "dispatched": dispatched, "failed": failed}

@@ -1,10 +1,13 @@
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Resolve .env relative to this file so it loads correctly regardless of CWD
 # (uvicorn --reload worker processes may inherit a different working directory)
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
+_WEAK_SECRETS = {"change-me-in-production", "secret", "dev", "test", ""}
 
 
 class Settings(BaseSettings):
@@ -13,7 +16,7 @@ class Settings(BaseSettings):
     )
 
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/travelos"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5433/travelos"
 
     # Redis / Celery
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -23,6 +26,7 @@ class Settings(BaseSettings):
     # Qdrant
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
+    QDRANT_API_KEY: str | None = None
 
     # LLM
     GROQ_API_KEY: str = ""
@@ -47,12 +51,26 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
+    # Feature flags
+    RATE_LIMIT_ENABLED: bool = True
+    RESILIENCE_ENABLED: bool = True
+
     # Embeddings
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
     EMBEDDING_DIM: int = 384
 
     # Optional
     SENTRY_DSN: str | None = None
+
+    @model_validator(mode="after")
+    def _enforce_prod_secrets(self) -> "Settings":
+        if self.ENVIRONMENT == "production":
+            if self.JWT_SECRET_KEY in _WEAK_SECRETS or len(self.JWT_SECRET_KEY) < 32:
+                raise ValueError(
+                    "JWT_SECRET_KEY must be ≥32 chars when ENVIRONMENT=production. "
+                    "Generate with: openssl rand -hex 32"
+                )
+        return self
 
 
 settings = Settings()
