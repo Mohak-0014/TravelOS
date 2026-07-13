@@ -1,40 +1,30 @@
-"""Weather Adaptation agent — detects adverse weather and proposes itinerary replanning."""
+"""Weather Adaptation agent — detects adverse weather and proposes itinerary replanning.
+
+Replacement activities are drawn from the real OSM attraction pool (grounding guardrail:
+never fabricate a venue). If no indoor venue is available, no proposal is made.
+"""
 
 from __future__ import annotations
 
-import json
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import SystemMessage
 from sqlalchemy import select
 
-from backend.agents._llm import build_llm
+from backend.agents.itinerary_planner import _attraction_is_outdoor
 from backend.core.logging import get_logger
 from backend.db.base import AsyncSessionLocal
 from backend.db.models import Approval, ItineraryItem, Trip, WeatherSnapshot
 from backend.graphs.state import TravelOSState
 from backend.tools.geocode import geocode
+from backend.tools.places import Attraction, search_attractions
 from backend.tools.weather import WeatherDay, fetch_weather
 
 logger = get_logger(__name__)
 
-_ADAPTATION_SYSTEM = """You are the Weather Adaptation Agent for TravelOS.
-An outdoor activity has been scheduled on a day with adverse weather.
-Suggest a single indoor alternative activity in the same city.
-
-Respond ONLY with valid JSON (no other text):
-{
-  "title": "Indoor alternative activity title",
-  "description": "Brief description of the indoor activity",
-  "item_type": "activity",
-  "is_outdoor": false
-}"""
-
-
-def _build_llm() -> BaseChatModel:
-    return build_llm("small", temperature=0.3)
+_POOL_RADIUS_M = 12000
+_POOL_LIMIT = 30
 
 
 # ── Node 1: weather_check ─────────────────────────────────────────────────────
@@ -88,7 +78,7 @@ async def weather_check(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     return {
         "weather_state": {
             "risk_flags": risk_flags,
-            "last_checked": datetime.utcnow().isoformat(),
+            "last_checked": datetime.now(UTC).isoformat(),
             "forecast": forecast,
             "affected_items": [],
         },
@@ -157,16 +147,18 @@ async def weather_adaptation(state: TravelOSState) -> dict:  # type: ignore[type
         }
 
     trip = await _load_trip(trip_id)
-    city = trip.destination_city if trip else "the destination"
 
-    memory_context = state.get("memory_context") or {}
-    style_profile: dict = memory_context.get("travel_style_profile") or {}  # type: ignore[type-arg]
+    # Real indoor venues near the destination, best-scored first. Grounding: a
+    # replacement the user approves must exist — never let the LLM invent one.
+    candidates = await _indoor_candidates(trip, trip_id)
 
     new_approvals: list[dict] = []  # type: ignore[type-arg]
     for item in affected_items:
-        alternative = await _generate_alternative(item, city, style_profile)
+        alternative = _next_alternative(candidates)
         if alternative:
             new_approvals.append(_build_approval(trip_id, item, alternative, weather_state))
+        else:
+            logger.warning("weather_no_indoor_alternative", trip_id=trip_id, item=item.get("title"))
 
     existing_queue: list[dict] = list(state.get("approval_queue") or [])  # type: ignore[type-arg]
 
@@ -314,61 +306,68 @@ async def _set_trip_awaiting_approval(trip_id: str) -> None:
         logger.error("weather_set_status_error", trip_id=trip_id, error=str(exc))
 
 
-# ── LLM helpers ───────────────────────────────────────────────────────────────
+# ── Alternative selection (grounded) ──────────────────────────────────────────
 
 
-async def _generate_alternative(
-    item: dict,  # type: ignore[type-arg]
-    city: str,
-    style_profile: dict | None = None,  # type: ignore[type-arg]
-) -> dict | None:  # type: ignore[type-arg]
-    profile = style_profile or {}
-    pref_lines = ""
-    for label, key in (
-        ("Activity preference", "activity_preference"),
-        ("Dining preference", "dining_preference"),
-        ("Budget priority", "budget_priority"),
-    ):
-        val = profile.get(key, "")
-        if val:
-            pref_lines += f"{label}: {val}\n"
-
-    prompt = (
-        f"City: {city}\n"
-        f"Scheduled outdoor activity: {item.get('title')}\n"
-        f"Description: {item.get('description', '')}\n"
-        f"Day: {item.get('item_date')}\n"
-        + (f"\nTraveler preferences:\n{pref_lines}" if pref_lines else "")
-        + "\nSuggest a single indoor alternative for adverse weather on this day."
-    )
+async def _indoor_candidates(trip: Trip | None, trip_id: str) -> list[Attraction]:
+    """Real indoor venues near the destination, best-scored first, minus venues
+    already scheduled on this trip. Degrades to [] — then no proposal is made."""
+    if trip is None:
+        return []
+    coords = await _resolve_coords(trip)
+    if not coords:
+        return []
+    lat, lng = coords
     try:
-        llm = _build_llm()
-        response = await llm.ainvoke(
-            [SystemMessage(content=_ADAPTATION_SYSTEM), HumanMessage(content=prompt)]
-        )
-        raw = str(response.content) if hasattr(response, "content") else str(response)
-        return _parse_alternative(raw)
+        pool = await search_attractions(lat, lng, radius_m=_POOL_RADIUS_M, limit=_POOL_LIMIT)
     except Exception as exc:
-        logger.error("weather_adaptation_llm_error", item=item.get("title"), error=str(exc))
-        return None
+        logger.warning("weather_pool_fetch_failed", trip_id=trip_id, error=str(exc))
+        return []
+    scheduled = await _scheduled_refs_and_names(trip_id)
+    return [
+        a
+        for a in pool
+        if not _attraction_is_outdoor(a)
+        and a.source_ref not in scheduled
+        and a.name.lower() not in scheduled
+    ]
 
 
-def _parse_alternative(raw: str) -> dict | None:  # type: ignore[type-arg]
+async def _scheduled_refs_and_names(trip_id: str) -> set[str]:
     try:
-        start = raw.find("{")
-        end = raw.rfind("}") + 1
-        if start >= 0 and end > start:
-            data = json.loads(raw[start:end])
-            if data.get("title"):
-                return {
-                    "title": str(data["title"]),
-                    "description": str(data.get("description", "")),
-                    "item_type": str(data.get("item_type", "activity")),
-                    "is_outdoor": bool(data.get("is_outdoor", False)),
-                }
-    except (json.JSONDecodeError, ValueError, TypeError):
-        pass
-    return None
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ItineraryItem.source_ref, ItineraryItem.title).where(
+                    ItineraryItem.trip_id == trip_id
+                )
+            )
+            out: set[str] = set()
+            for ref, title in result.all():
+                if ref:
+                    out.add(ref)
+                if title:
+                    out.add(title.lower())
+            return out
+    except Exception as exc:
+        logger.error("weather_scheduled_refs_error", trip_id=trip_id, error=str(exc))
+        return set()
+
+
+def _next_alternative(candidates: list[Attraction]) -> dict | None:  # type: ignore[type-arg]
+    """Pop the best unused indoor venue as a grounded replacement draft."""
+    if not candidates:
+        return None
+    attraction = candidates.pop(0)
+    return {
+        "title": attraction.name,
+        "description": attraction.kinds,
+        "item_type": "activity",
+        "is_outdoor": False,
+        "latitude": attraction.lat,
+        "longitude": attraction.lng,
+        "source_provider": "overpass",
+        "source_ref": attraction.source_ref,
+    }
 
 
 def _build_approval(
@@ -417,7 +416,7 @@ def _condition_for_date(item_date: str, forecast: list[dict]) -> str:  # type: i
 def _empty_weather_state() -> dict:  # type: ignore[type-arg]
     return {
         "risk_flags": [],
-        "last_checked": datetime.utcnow().isoformat(),
+        "last_checked": datetime.now(UTC).isoformat(),
         "forecast": [],
         "affected_items": [],
     }
