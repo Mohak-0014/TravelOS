@@ -111,3 +111,12 @@ async def test_replan_graph_stub_run_completes() -> None:
     }
     result = await graph.ainvoke(initial_state)
     assert result is not None
+
+
+def test_route_after_planner_short_circuits_on_replan() -> None:
+    from backend.graphs.trip_graph import route_after_planner
+
+    # Initial run joins the hotel branch at budget_optimizer
+    assert route_after_planner({"replan_iterations": 0}) == "budget_optimizer"  # type: ignore[typeddict-item]
+    # A replan takes the short path — hotel/budget/events/packing must not re-run
+    assert route_after_planner({"replan_iterations": 1}) == "validation"  # type: ignore[typeddict-item]

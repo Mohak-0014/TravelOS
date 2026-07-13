@@ -50,6 +50,12 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     if not cleaned:
         issues.append("Itinerary is empty after validation")
 
+    # Repair same-day time overlaps deterministically — an overlap is a scheduling
+    # arithmetic problem, not something worth a full LLM replan round-trip.
+    repaired_days = _repair_time_overlaps(cleaned)
+    if repaired_days:
+        issues.append(f"Repaired overlapping times on day(s): {repaired_days}")
+
     # Pace-based under-count check: flag days below pace_target - 1
     min_items = _PACE_MIN_ITEMS.get(pace, 3)
     day_counts: dict[int, int] = {}
@@ -135,6 +141,51 @@ def _validate_and_fix(raw: dict) -> tuple[dict | None, list[str]]:  # type: igno
     item["is_outdoor"] = bool(item.get("is_outdoor", False))
 
     return item, issues
+
+
+_OVERLAP_GAP_MIN = 30  # minutes inserted between rescheduled consecutive items
+
+
+def _repair_time_overlaps(items: list[dict]) -> list[int]:  # type: ignore[type-arg]
+    """Shift overlapping same-day items later, preserving order and duration.
+
+    Mutates ``items`` in place. Returns the day numbers that needed repair.
+    Items pushed past midnight lose their times (null) rather than wrapping.
+    """
+    by_day: dict[int, list[dict]] = {}  # type: ignore[type-arg]
+    for it in items:
+        by_day.setdefault(int(it.get("day_number", 1)), []).append(it)
+
+    repaired: list[int] = []
+    for day, day_items in sorted(by_day.items()):
+        timed = [
+            (it, _parse_time(it.get("start_time")), _parse_time(it.get("end_time")))
+            for it in sorted(day_items, key=lambda x: x.get("sort_order", 0))
+        ]
+        prev_end_min: int | None = None
+        day_repaired = False
+        for it, start, end in timed:
+            if start is None:
+                continue
+            start_min = start.hour * 60 + start.minute
+            duration = (
+                (end.hour * 60 + end.minute) - start_min if end is not None and end > start else 90
+            )
+            if prev_end_min is not None and start_min < prev_end_min:
+                start_min = prev_end_min + _OVERLAP_GAP_MIN
+                end_min = start_min + duration
+                if end_min >= 24 * 60:
+                    it["start_time"] = None
+                    it["end_time"] = None
+                    day_repaired = True
+                    continue
+                it["start_time"] = f"{start_min // 60:02d}:{start_min % 60:02d}"
+                it["end_time"] = f"{end_min // 60:02d}:{end_min % 60:02d}"
+                day_repaired = True
+            prev_end_min = start_min + duration
+        if day_repaired:
+            repaired.append(day)
+    return repaired
 
 
 async def _get_budget_currency(state: TravelOSState) -> str:

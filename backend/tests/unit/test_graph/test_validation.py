@@ -129,9 +129,7 @@ async def test_run_nullifies_negative_est_cost() -> None:
 async def test_run_calculates_estimated_planned_in_budget_state() -> None:
     items = [_item(est_cost=100.0), _item(est_cost=50.0, title="Dinner")]
     # Pin the budget currency to the items' EUR so the total is a pure sum
-    with patch(
-        "backend.graphs.validation._get_budget_currency", new=AsyncMock(return_value="EUR")
-    ):
+    with patch("backend.graphs.validation._get_budget_currency", new=AsyncMock(return_value="EUR")):
         result = await run(_base_state(itinerary=items))
     assert result["budget_state"]["estimated_planned"] == pytest.approx(150.0)
 
@@ -312,3 +310,43 @@ def test_parse_time_non_string() -> None:
 def test_parse_time_invalid_format() -> None:
     assert _parse_time("not-a-time") is None
     assert _parse_time("25:00") is None
+
+
+# ── time-overlap repair ───────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_run_repairs_time_overlaps_deterministically() -> None:
+    items = [
+        _item(est_cost=None, start_time="09:00", end_time="13:00"),
+        _item(est_cost=None, start_time="11:00", end_time="15:00", title="Overlap"),
+    ]
+    result = await run(_base_state(itinerary=items))
+    fixed = result["itinerary"]
+    # Second item shifted after the first (13:00 end + 30 min gap), duration kept
+    assert fixed[1]["start_time"] == "13:30"
+    assert fixed[1]["end_time"] == "17:30"
+    assert "Repaired overlapping times" in result["agent_messages"][0].content
+
+
+@pytest.mark.asyncio
+async def test_run_overlap_repair_nulls_times_past_midnight() -> None:
+    items = [
+        _item(est_cost=None, start_time="20:00", end_time="23:00"),
+        _item(est_cost=None, start_time="21:00", end_time="23:30", title="Late Overlap"),
+    ]
+    result = await run(_base_state(itinerary=items))
+    fixed = result["itinerary"]
+    assert fixed[1]["start_time"] is None
+    assert fixed[1]["end_time"] is None
+
+
+@pytest.mark.asyncio
+async def test_run_no_repair_when_times_do_not_overlap() -> None:
+    items = [
+        _item(est_cost=None, start_time="09:00", end_time="11:00"),
+        _item(est_cost=None, start_time="12:00", end_time="14:00", title="Later"),
+    ]
+    result = await run(_base_state(itinerary=items))
+    assert result["itinerary"][1]["start_time"] == "12:00"
+    assert "Repaired" not in result["agent_messages"][0].content

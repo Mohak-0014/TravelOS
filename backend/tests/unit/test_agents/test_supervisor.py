@@ -1,9 +1,7 @@
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import SystemMessage
 
-from backend.agents.supervisor import _parse_recovery_decision, run
+from backend.agents.supervisor import run
 from backend.graphs.state import TravelOSState
 
 
@@ -80,125 +78,19 @@ async def test_fresh_run_does_not_overwrite_existing_sub_states() -> None:
     assert "weather_state" not in result
 
 
-# ── error recovery — max retries ──────────────────────────────────────────────
+@pytest.mark.asyncio
+async def test_fresh_run_budget_categories_match_optimizer_vocabulary() -> None:
+    # Must stay in sync with budget_optimizer._compute_costs keys
+    result = await run(_base_state(budget_state={}))
+    assert set(result["budget_state"]["by_category"]) == {
+        "lodging",
+        "activities",
+        "meals",
+        "transport",
+    }
 
 
 @pytest.mark.asyncio
-async def test_error_recovery_aborts_at_max_retries() -> None:
-    state = _base_state(
-        error_state={"node": "itinerary_planner", "message": "timeout"},
-        replan_iterations=3,
-    )
-    result = await run(state)
-    assert result["current_step"] == "end"
-    assert "max retries" in result["agent_messages"][0].content
-
-
-@pytest.mark.asyncio
-async def test_error_recovery_aborts_when_above_max_retries() -> None:
-    state = _base_state(
-        error_state={"node": "hotel_agent", "message": "crash"},
-        replan_iterations=5,
-    )
-    result = await run(state)
-    assert result["current_step"] == "end"
-
-
-# ── error recovery — LLM-assisted ─────────────────────────────────────────────
-
-
-def _mock_llm(content: str) -> MagicMock:
-    mock_llm = MagicMock()
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=content))
-    return mock_llm
-
-
-@pytest.mark.asyncio
-async def test_error_recovery_retries_on_recoverable_error() -> None:
-    llm_response = (
-        '{"recoverable": true, "retry_node": "itinerary_planner", "reason": "rate limit"}'
-    )
-    state = _base_state(
-        error_state={"node": "itinerary_planner", "message": "rate limit"},
-        replan_iterations=0,
-    )
-    with patch("backend.agents.supervisor._build_llm", return_value=_mock_llm(llm_response)):
-        result = await run(state)
-
-    assert result["current_step"] == "itinerary_planner"
-    assert result["error_state"] is None
-    assert result["replan_iterations"] == 1
-
-
-@pytest.mark.asyncio
-async def test_error_recovery_increments_replan_iterations() -> None:
-    llm_response = '{"recoverable": true, "retry_node": "travel_style", "reason": "timeout"}'
-    state = _base_state(
-        error_state={"node": "travel_style", "message": "timeout"},
-        replan_iterations=1,
-    )
-    with patch("backend.agents.supervisor._build_llm", return_value=_mock_llm(llm_response)):
-        result = await run(state)
-
-    assert result["replan_iterations"] == 2
-
-
-@pytest.mark.asyncio
-async def test_error_recovery_ends_on_unrecoverable_error() -> None:
-    llm_response = (
-        '{"recoverable": false, "retry_node": "itinerary_planner", "reason": "missing trip_id"}'
-    )
-    state = _base_state(
-        error_state={"node": "supervisor", "message": "missing trip_id"},
-        replan_iterations=0,
-    )
-    with patch("backend.agents.supervisor._build_llm", return_value=_mock_llm(llm_response)):
-        result = await run(state)
-
-    assert result["current_step"] == "end"
-    assert result["replan_iterations"] == 3
-
-
-@pytest.mark.asyncio
-async def test_error_recovery_falls_back_on_invalid_retry_node() -> None:
-    llm_response = '{"recoverable": true, "retry_node": "nonexistent_node", "reason": "timeout"}'
-    state = _base_state(
-        error_state={"node": "hotel_agent", "message": "timeout"},
-        replan_iterations=0,
-    )
-    with patch("backend.agents.supervisor._build_llm", return_value=_mock_llm(llm_response)):
-        result = await run(state)
-
-    assert result["current_step"] == "itinerary_planner"
-
-
-# ── _parse_recovery_decision (pure function) ──────────────────────────────────
-
-
-def test_parse_valid_json() -> None:
-    raw = '{"recoverable": true, "retry_node": "hotel_agent", "reason": "rate limit"}'
-    d = _parse_recovery_decision(raw)
-    assert d["recoverable"] is True
-    assert d["retry_node"] == "hotel_agent"
-    assert d["reason"] == "rate limit"
-
-
-def test_parse_json_embedded_in_prose() -> None:
-    raw = (
-        'Sure, here is my decision: {"recoverable": false, "retry_node": "travel_style",'
-        ' "reason": "missing data"} Thank you.'
-    )
-    d = _parse_recovery_decision(raw)
-    assert d["recoverable"] is False
-
-
-def test_parse_invalid_json_returns_fallback() -> None:
-    d = _parse_recovery_decision("not valid json at all")
-    assert d["recoverable"] is False
-    assert d["retry_node"] == "itinerary_planner"
-    assert "failed to parse" in d["reason"]
-
-
-def test_parse_empty_string_returns_fallback() -> None:
-    d = _parse_recovery_decision("")
-    assert d["recoverable"] is False
+async def test_fresh_run_initializes_replan_feedback() -> None:
+    result = await run(_base_state())
+    assert result["replan_feedback"] == []

@@ -7,7 +7,7 @@ import json
 import math
 import re
 from collections import Counter
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from datetime import time as dt_time
 
 from langchain_core.language_models import BaseChatModel
@@ -378,6 +378,7 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
         local_currency,
         profile=dest_profile,
         dna_categories=dna_categories,
+        replan_feedback=list(state.get("replan_feedback") or []),
     )
 
     if items:
@@ -393,6 +394,7 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     return {
         "itinerary": itinerary_dicts,
         "weather_state": weather_state,
+        "replan_feedback": [],  # consumed — don't re-inject on a later pass
         "agent_messages": [
             SystemMessage(
                 content=(
@@ -493,6 +495,7 @@ async def _generate_itinerary(
     local_currency: str = "USD",
     profile: DestinationProfile | None = None,
     dna_categories: set[str] | None = None,
+    replan_feedback: list[str] | None = None,
 ) -> list[_ItemDraft]:
     items_per_day = _PACE_ITEMS_PER_DAY.get(pace, _DEFAULT_ITEMS_PER_DAY)
     prompt = _build_prompt(
@@ -507,6 +510,7 @@ async def _generate_itinerary(
         local_currency,
         profile=profile,
         dna_categories=dna_categories,
+        replan_feedback=replan_feedback,
     )
     try:
         llm = _build_llm()
@@ -556,6 +560,7 @@ def _build_prompt(
     local_currency: str = "USD",
     profile: DestinationProfile | None = None,
     dna_categories: set[str] | None = None,
+    replan_feedback: list[str] | None = None,
 ) -> str:
     trip_days = (trip.end_date - trip.start_date).days + 1
     budget_str = (
@@ -565,7 +570,14 @@ def _build_prompt(
     )
     country_part = f", {trip.destination_country}" if trip.destination_country else ""
 
-    parts = [
+    parts = []
+    if replan_feedback:
+        parts += [
+            "**PREVIOUS ATTEMPT REJECTED — fix these problems in this version:**",
+            *(f"  • {issue}" for issue in replan_feedback),
+            "",
+        ]
+    parts += [
         f"**Trip**: {trip.destination_city}{country_part}",
         f"**Dates**: {trip.start_date} to {trip.end_date} ({trip_days} days)",
         f"**Travelers**: {trip.num_travelers}",
@@ -1330,7 +1342,7 @@ def _build_weather_state(weather_days: list[WeatherDay]) -> dict:  # type: ignor
     risk_flags = [w.date.isoformat() for w in weather_days if w.is_adverse]
     return {
         "risk_flags": risk_flags,
-        "last_checked": datetime.utcnow().isoformat(),
+        "last_checked": datetime.now(UTC).isoformat(),
         "forecast": [
             {
                 "date": w.date.isoformat(),
