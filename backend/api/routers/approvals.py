@@ -202,6 +202,28 @@ async def resolve_approval(
                     if current.get("item_type"):
                         item.item_type = current["item_type"]
 
+    elif body.decision == "approved" and approval.change_type == "weather_replan":
+        # Swap the rained-out outdoor item for the grounded indoor alternative.
+        payload = approval.payload
+        original = payload.get("original_item") or {}
+        alternative = payload.get("alternative_item") or {}
+        item_id = original.get("id")
+        if item_id and alternative.get("title"):
+            item_result = await db.execute(select(ItineraryItem).where(ItineraryItem.id == item_id))
+            item = item_result.scalar_one_or_none()
+            if item is not None:
+                item.title = alternative["title"]
+                item.description = alternative.get("description") or item.description
+                item.is_outdoor = bool(alternative.get("is_outdoor", False))
+                # Grounded venue fields — present since the weather agent started
+                # drawing alternatives from the real OSM pool
+                if alternative.get("latitude") is not None:
+                    item.latitude = alternative["latitude"]
+                    item.longitude = alternative.get("longitude")
+                if alternative.get("source_ref"):
+                    item.source_provider = alternative.get("source_provider") or "overpass"
+                    item.source_ref = alternative["source_ref"]
+
     elif body.decision == "approved" and approval.change_type == "concierge_add":
         payload = approval.payload
         day_number = int(payload.get("day", 1))

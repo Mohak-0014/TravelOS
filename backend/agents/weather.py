@@ -17,6 +17,7 @@ from backend.core.logging import get_logger
 from backend.db.base import AsyncSessionLocal
 from backend.db.models import Approval, ItineraryItem, Trip, WeatherSnapshot
 from backend.graphs.state import TravelOSState
+from backend.tools import get_redis_client
 from backend.tools.geocode import geocode
 from backend.tools.places import Attraction, search_attractions
 from backend.tools.weather import WeatherDay, fetch_weather
@@ -318,11 +319,19 @@ async def _indoor_candidates(trip: Trip | None, trip_id: str) -> list[Attraction
     if not coords:
         return []
     lat, lng = coords
+    # Use the Redis cache — the planner warmed it during generation, and the public
+    # Overpass instance 504s routinely; an uncached miss here silently kills every
+    # weather proposal for the trip.
+    redis = get_redis_client()
     try:
-        pool = await search_attractions(lat, lng, radius_m=_POOL_RADIUS_M, limit=_POOL_LIMIT)
+        pool = await search_attractions(
+            lat, lng, radius_m=_POOL_RADIUS_M, limit=_POOL_LIMIT, cache=redis
+        )
     except Exception as exc:
         logger.warning("weather_pool_fetch_failed", trip_id=trip_id, error=str(exc))
         return []
+    finally:
+        await redis.aclose()
     scheduled = await _scheduled_refs_and_names(trip_id)
     return [
         a
