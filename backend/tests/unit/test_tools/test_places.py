@@ -189,6 +189,7 @@ async def test_search_writes_results_to_cache() -> None:
 async def test_search_returns_empty_on_http_error() -> None:
     with (
         patch("backend.tools.places.redis_get_cached", return_value=None),
+        patch("backend.tools.places.asyncio.sleep", new=AsyncMock()),
         patch("httpx.AsyncClient") as mock_cls,
     ):
         mock_client = AsyncMock()
@@ -200,6 +201,31 @@ async def test_search_returns_empty_on_http_error() -> None:
         results = await search_attractions(0.0, 0.0, cache=None)
 
     assert results == []
+
+
+@pytest.mark.asyncio
+async def test_search_retries_once_after_transient_overpass_failure() -> None:
+    # Public Overpass 504s routinely; a single transient failure must not degrade the
+    # trip — the second attempt's payload is used.
+    ok_resp = MagicMock()
+    ok_resp.raise_for_status = MagicMock()
+    ok_resp.json = MagicMock(return_value=_overpass_payload([_node()]))
+
+    mock_client = AsyncMock()
+    mock_client.post = AsyncMock(side_effect=[httpx.ConnectError("504-ish flake"), ok_resp])
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("backend.tools.places.redis_get_cached", return_value=None),
+        patch("backend.tools.places.redis_set_cached", new_callable=AsyncMock),
+        patch("backend.tools.places.asyncio.sleep", new=AsyncMock()),
+        patch("httpx.AsyncClient", return_value=mock_client),
+    ):
+        results = await search_attractions(48.85, 2.35, cache=None)
+
+    assert len(results) == 1
+    assert mock_client.post.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -381,6 +407,100 @@ def test_tourism_and_heritage_tags_parsed() -> None:
     assert b.is_tourism is True
 
 
+# ── experience categories ─────────────────────────────────────────────────────
+
+
+def _tagged(osm_id: int, name: str, tags: dict) -> dict:
+    return {
+        "type": "node",
+        "id": osm_id,
+        "lat": 15.55,
+        "lon": 73.75,
+        "tags": {"name": name, **tags},
+    }
+
+
+def test_beach_categorized_and_kinds_from_natural_tag() -> None:
+    a = _element_to_attraction(_tagged(1, "Baga Beach", {"natural": "beach"}))
+    assert a is not None
+    assert a.category == "beach"
+    assert a.kinds == "beach"
+
+
+def test_surf_school_and_dive_centre_are_water_sport() -> None:
+    surf = _element_to_attraction(_tagged(1, "Surf School", {"amenity": "surf_school"}))
+    dive = _element_to_attraction(_tagged(2, "Dive Centre", {"amenity": "dive_centre"}))
+    scuba = _element_to_attraction(_tagged(3, "Scuba Point", {"sport": "scuba_diving"}))
+    assert surf is not None and surf.category == "water_sport"
+    assert dive is not None and dive.category == "water_sport"
+    assert scuba is not None and scuba.category == "water_sport"
+
+
+def test_peak_waterfall_and_reserve_are_nature() -> None:
+    peak = _element_to_attraction(_tagged(1, "Hilltop", {"natural": "peak"}))
+    falls = _element_to_attraction(_tagged(2, "Dudhsagar Falls", {"waterway": "waterfall"}))
+    reserve = _element_to_attraction(_tagged(3, "Reserve", {"leisure": "nature_reserve"}))
+    assert peak is not None and peak.category == "nature"
+    assert falls is not None and falls.category == "nature"
+    assert reserve is not None and reserve.category == "nature"
+
+
+def test_monument_with_tourism_tag_is_heritage_not_other() -> None:
+    # India Gate pattern: historic=memorial + tourism=attraction
+    a = _element_to_attraction(
+        _tagged(1, "India Gate", {"historic": "memorial", "tourism": "attraction"})
+    )
+    assert a is not None
+    assert a.category == "heritage_monument"
+
+
+def test_worship_museum_viewpoint_categories() -> None:
+    temple = _element_to_attraction(_tagged(1, "Temple", {"amenity": "place_of_worship"}))
+    museum = _element_to_attraction(_tagged(2, "Museum", {"tourism": "museum"}))
+    view = _element_to_attraction(_tagged(3, "Viewpoint", {"tourism": "viewpoint"}))
+    assert temple is not None and temple.category == "religious"
+    assert museum is not None and museum.category == "museum_gallery"
+    assert view is not None and view.category == "viewpoint"
+
+
+def test_overpass_query_fetches_natural_features() -> None:
+    from backend.tools.places import _OVERPASS_QUERY
+
+    assert '"natural"' in _OVERPASS_QUERY
+    assert "nature_reserve" in _OVERPASS_QUERY
+    assert "national_park" in _OVERPASS_QUERY
+
+
+@pytest.mark.asyncio
+async def test_search_diversifies_beach_town_results() -> None:
+    # Beach-town trap: 40 Wikidata-tagged museums vs 6 beaches + 4 surf schools with no
+    # Wikidata tags. Pure fame ranking would return 30 museums; the diverse selection
+    # must keep the coast represented.
+    museums = [
+        _tagged(i, f"Museum {i}", {"tourism": "museum", "wikidata": f"Q{i}"}) for i in range(40)
+    ]
+    beaches = [_tagged(100 + i, f"Beach {i}", {"natural": "beach"}) for i in range(6)]
+    surf = [_tagged(200 + i, f"Surf {i}", {"amenity": "surf_school"}) for i in range(4)]
+    payload = _overpass_payload(museums + beaches + surf)
+    fame = {f"Q{i}": (50 + i, False) for i in range(40)}
+
+    with (
+        patch("backend.tools.places.redis_get_cached", return_value=None),
+        patch("backend.tools.places.redis_set_cached", new_callable=AsyncMock),
+        patch("backend.tools.places._fetch_prominence", new=AsyncMock(return_value=fame)),
+        patch("httpx.AsyncClient") as mock_cls,
+    ):
+        mock_cls.return_value = _mock_client(payload)
+        results = await search_attractions(15.55, 73.75, limit=30, cache=None)
+
+    assert len(results) == 30
+    categories = [r.category for r in results]
+    assert categories.count("beach") >= 4
+    assert categories.count("water_sport") >= 2
+    # The most famous museum still leads — diversity must not bury true icons.
+    assert results[0].name == "Museum 39"
+
+
 @pytest.mark.asyncio
 async def test_search_tourism_tag_beats_higher_sitelinks_without_tourism() -> None:
     # The memorial case, generalised: a non-tourism site with MORE sitelinks (borrowed
@@ -435,3 +555,48 @@ async def test_search_tourism_tag_beats_higher_sitelinks_without_tourism() -> No
         results = await search_attractions(48.85, 2.35, cache=None)
 
     assert results[0].name == "Iconic Landmark"
+
+
+# ── Category-mapping fixes + low-quality gate ─────────────────────────────────
+
+
+def test_sports_centre_is_not_adventure() -> None:
+    # leisure=sports_centre matches every gym and football club — it must not become
+    # an "adventure" venue (SC Neuhaus, a football club, made an alpine itinerary).
+    a = _element_to_attraction(_tagged(1, "SC Neuhaus", {"leisure": "sports_centre"}))
+    assert a is not None
+    assert a.category == "other"
+
+
+def test_heritage_tag_categorizes_as_heritage_monument() -> None:
+    # Stone Town is a UNESCO district: heritage=1 on a relation, often no historic tag.
+    a = _element_to_attraction(_tagged(2, "Stone Town", {"heritage": "1", "wikidata": "Q212423"}))
+    assert a is not None
+    assert a.category == "heritage_monument"
+    assert a.kinds == "heritage_site"
+    assert a.is_heritage is True
+
+
+def test_low_quality_gate_drops_unsignalled_resort_keeps_real_beach() -> None:
+    from backend.tools.places import _is_low_quality
+
+    resort = _element_to_attraction(_tagged(3, "Manolo Beach Resort", {"leisure": "beach_resort"}))
+    beach = _element_to_attraction(_tagged(4, "Sunny beach", {"natural": "beach"}))
+    assert resort is not None and _is_low_quality(resort) is True
+    assert beach is not None and _is_low_quality(beach) is False
+    # A resort WITH a quality signal (website) survives — it is at least a real venue
+    with_site = _element_to_attraction(
+        _tagged(5, "Zuri Zanzibar", {"leisure": "beach_resort", "website": "https://zuri.example"})
+    )
+    assert with_site is not None and _is_low_quality(with_site) is False
+
+
+def test_low_quality_gate_drops_generic_activity_markers() -> None:
+    from backend.tools.places import _is_low_quality
+
+    spot = _element_to_attraction(_tagged(6, "Paragliding Spot", {"sport": "paragliding"}))
+    named = _element_to_attraction(_tagged(7, "Coronet Peak Launch", {"sport": "paragliding"}))
+    school = _element_to_attraction(_tagged(8, "Surf Betty's", {"amenity": "surf_school"}))
+    assert spot is not None and _is_low_quality(spot) is True
+    assert named is not None and _is_low_quality(named) is False  # real proper-noun name
+    assert school is not None and _is_low_quality(school) is False  # activity venue, ungated

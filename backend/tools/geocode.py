@@ -1,4 +1,5 @@
 import hashlib
+import math
 
 import httpx
 from pydantic import BaseModel
@@ -18,6 +19,21 @@ class GeoPoint(BaseModel):
     lat: float
     lng: float
     display_name: str
+    # Half-diagonal of the Nominatim bounding box in metres — the place's own extent.
+    # A city gives a few km; a state like Goa ~60 km. None for cached pre-bbox entries.
+    bbox_radius_m: float | None = None
+
+
+def _bbox_radius_m(bbox: list) -> float | None:  # type: ignore[type-arg]
+    """Half-diagonal of a Nominatim boundingbox [south, north, west, east] in metres."""
+    try:
+        south, north, west, east = (float(v) for v in bbox)
+    except (TypeError, ValueError):
+        return None
+    mid_lat = math.radians((south + north) / 2)
+    lat_m = (north - south) * 111_320
+    lng_m = (east - west) * 111_320 * math.cos(mid_lat)
+    return math.hypot(lat_m, lng_m) / 2
 
 
 def _cache_key(query: str) -> str:
@@ -59,6 +75,7 @@ async def geocode(query: str, cache: Redis | None = None) -> GeoPoint | None:  #
         lat=float(first["lat"]),
         lng=float(first["lon"]),
         display_name=first.get("display_name", ""),
+        bbox_radius_m=_bbox_radius_m(first.get("boundingbox") or []),
     )
 
     await redis_set_cached(cache, key, point.model_dump(), _CACHE_TTL)
