@@ -425,8 +425,6 @@ function StepTravelersBudget({
   setTravelers,
   budget,
   setBudget,
-  currency,
-  setCurrency,
   flightOrigin,
   setFlightOrigin,
   startDate,
