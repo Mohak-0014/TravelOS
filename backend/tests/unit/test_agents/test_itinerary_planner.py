@@ -6,19 +6,28 @@ from langchain_core.messages import AIMessage, SystemMessage
 
 from backend.agents.itinerary_planner import (
     _MUST_SEE_MIN_SITELINKS,
+    _boost_attractions,
     _build_prompt,
     _build_weather_state,
     _cluster_attractions,
     _compass_direction,
     _default_itinerary,
+    _diverse_by_kind,
+    _dna_categories,
+    _enforce_composition,
     _enforce_must_see,
+    _enforce_variety,
     _item_to_dict,
     _ItemDraft,
+    _normalize_outdoor,
     _parse_items,
     _parse_time,
+    _select_must_see,
     run,
 )
 from backend.graphs.state import TravelOSState
+from backend.tools.destination_profile import DestinationProfile
+from backend.tools.geocode import GeoPoint
 from backend.tools.places import Attraction
 from backend.tools.weather import WeatherDay
 
@@ -822,14 +831,320 @@ def test_enforce_must_see_preserves_day_and_sort_order() -> None:
 
 def test_enforce_must_see_respects_max_swaps_cap() -> None:
     trip = _mock_trip(end_date=date(2026, 7, 1))  # 1 day
-    # 2 activity items, trip_days=1 → max_swaps = 2 - 2 = 0 → no swaps
+    # 1 activity item, trip_days=1 → max_swaps = 1 - 1 = 0 → no swaps
+    icon_a = _famous("Icon A", ref="way/a")
+    icon_b = _famous("Icon B", ref="way/b")
+    items = [_item("Slot 1")]
+    result = _enforce_must_see(items, [icon_a, icon_b], trip)
+    titles = [i.title for i in result]
+    assert "Icon A" not in titles
+    assert "Icon B" not in titles
+
+
+def test_enforce_must_see_leaves_one_organic_slot_per_day() -> None:
+    trip = _mock_trip(end_date=date(2026, 7, 1))  # 1 day
+    # 2 activity items → max_swaps = 2 - 1 = 1 → exactly one icon forced in
     icon_a = _famous("Icon A", ref="way/a")
     icon_b = _famous("Icon B", ref="way/b")
     items = [_item("Slot 1"), _item("Slot 2")]
     result = _enforce_must_see(items, [icon_a, icon_b], trip)
     titles = [i.title for i in result]
-    assert "Icon A" not in titles
+    assert "Icon A" in titles
     assert "Icon B" not in titles
+
+
+def _cat_attr(
+    name: str,
+    ref: str,
+    category: str,
+    kinds: str | None = None,
+    prominence: int = 0,
+    is_heritage: bool = False,
+    score: float = 0.0,
+) -> Attraction:
+    return Attraction(
+        osm_id=ref,
+        name=name,
+        lat=15.55,
+        lng=73.75,
+        kinds=kinds or category,
+        category=category,
+        source_ref=ref,
+        prominence=prominence,
+        is_heritage=is_heritage,
+        is_major=prominence > 0,
+        score=score,
+    )
+
+
+# ── Destination fit: famous monuments per city archetype (Delhi) ──────────────
+
+
+def _delhi_attractions() -> list[Attraction]:
+    """Delhi archetype, fame-ordered — the sights a tourist actually travels for."""
+    return [
+        _cat_attr("Red Fort", "way/rf", "heritage_monument", "castle", 120, is_heritage=True),
+        _cat_attr("Qutub Minar", "way/qm", "heritage_monument", "monument", 90, is_heritage=True),
+        _cat_attr("India Gate", "way/ig", "heritage_monument", "memorial", 80),
+        _cat_attr("Humayun's Tomb", "way/ht", "heritage_monument", "monument", 70),
+        _cat_attr("Jama Masjid", "way/jm", "religious", "place_of_worship", 60),
+        _cat_attr("Obscure City Museum", "way/mu", "museum_gallery", "museum", 12),
+    ]
+
+
+def test_delhi_famous_monuments_forced_into_plan() -> None:
+    # LLM produced 9 generic filler activities — India Gate, Red Fort and Qutub Minar
+    # must still end up in the plan (max_swaps = 9 - 3×2 = 3, spent on the most famous).
+    trip = _mock_trip(destination_city="Delhi", end_date=date(2026, 7, 3))
+    items = [_item(f"Filler {i}", day=(i % 3) + 1) for i in range(9)]
+    result = _enforce_must_see(
+        items,
+        _delhi_attractions(),
+        trip,
+        signature_cats={"heritage_monument", "religious"},
+    )
+    titles = {i.title for i in result}
+    assert {"Red Fort", "Qutub Minar", "India Gate"} <= titles
+
+
+def test_delhi_prompt_lists_monuments_as_must_see() -> None:
+    trip = _mock_trip(destination_city="Delhi")
+    profile = DestinationProfile(
+        type="heritage", signature_categories=["heritage_monument", "religious"]
+    )
+    prompt = _build_prompt(trip, {}, [], _delhi_attractions(), [], {}, profile=profile)
+    assert "MUST-SEE" in prompt
+    for name in ("India Gate", "Red Fort", "Qutub Minar", "Jama Masjid"):
+        assert name in prompt
+    # Heritage city: no museum hard limit
+    assert "HARD LIMIT" not in prompt
+
+
+# ── Destination fit: beach archetype (Goa) ────────────────────────────────────
+
+
+def _goa_attractions() -> list[Attraction]:
+    return [
+        _cat_attr("Baga Beach", "way/baga", "beach", "beach", 8),
+        _cat_attr("Palolem Beach", "way/palolem", "beach", "beach", 6),
+        _cat_attr("Goa Surf School", "node/surf", "water_sport", "surfing"),
+        _cat_attr("Museum of Goa", "way/mog", "museum_gallery", "museum", 4),
+        _cat_attr("Naval Aviation Museum", "way/nav", "museum_gallery", "museum", 3),
+        _cat_attr("Goa State Museum", "way/gsm", "museum_gallery", "museum", 2),
+    ]
+
+
+def _goa_profile() -> DestinationProfile:
+    return DestinationProfile(type="beach", signature_categories=["beach", "water_sport"])
+
+
+def test_goa_composition_swaps_excess_museums_for_beaches() -> None:
+    # 6 activity slots, 4 museums → cap is int(6 × 0.34) = 2 → the 2 least famous
+    # museum slots become the top signature venues (beaches).
+    items = [
+        _item("Museum of Goa", day=1, ref="way/mog", lat=15.55),
+        _item("Naval Aviation Museum", day=1, ref="way/nav", lat=15.55),
+        _item("Goa State Museum", day=2, ref="way/gsm", lat=15.55),
+        _item("City Gallery Walk", day=2),  # LLM-invented museum-ish item
+        _item("Fort Aguada", day=3, ref="way/fa", lat=15.55),
+        _item("Spice Market", day=3),
+    ]
+    result = _enforce_composition(items, _goa_attractions(), _goa_profile(), set())
+    titles = {i.title for i in result}
+    assert "Baga Beach" in titles
+    assert "Palolem Beach" in titles
+    # The most famous museum survives; the invented + least famous ones were replaced
+    assert "Museum of Goa" in titles
+    assert "City Gallery Walk" not in titles
+    assert "Goa State Museum" not in titles
+
+
+def test_goa_composition_noop_when_museums_within_cap() -> None:
+    items = [
+        _item("Baga Beach", day=1, ref="way/baga", lat=15.55),
+        _item("Museum of Goa", day=1, ref="way/mog", lat=15.55),
+        _item("Spice Market", day=2),
+    ]
+    result = _enforce_composition(items, _goa_attractions(), _goa_profile(), set())
+    assert result == items
+
+
+def test_composition_skipped_for_heritage_destination() -> None:
+    profile = DestinationProfile(type="heritage", signature_categories=["heritage_monument"])
+    items = [_item(f"Museum {i}", day=1, ref=f"way/m{i}", lat=15.55) for i in range(4)]
+    assert _enforce_composition(items, _goa_attractions(), profile, set()) == items
+
+
+def test_composition_applies_even_when_dna_favours_museums() -> None:
+    # The style agent tags almost everyone "culture" → museum DNA must NOT disable the
+    # backstop; a museum lover in Goa still keeps ~a third of slots as museums.
+    items = [
+        _item("Museum of Goa", day=1, ref="way/mog", lat=15.55),
+        _item("Naval Aviation Museum", day=1, ref="way/nav", lat=15.55),
+        _item("Goa State Museum", day=2, ref="way/gsm", lat=15.55),
+    ]
+    result = _enforce_composition(items, _goa_attractions(), _goa_profile(), {"museum_gallery"})
+    titles = {i.title for i in result}
+    # 3 activities → cap max(1, int(3×0.34)) = 1 → two least famous museums replaced
+    assert "Museum of Goa" in titles
+    assert "Baga Beach" in titles
+    assert "Palolem Beach" in titles
+
+
+def test_goa_prompt_has_beach_character_and_museum_limit() -> None:
+    trip = _mock_trip(destination_city="Goa")
+    prompt = _build_prompt(trip, {}, [], [], [], {}, profile=_goa_profile())
+    assert "Destination Character" in prompt
+    assert "beach destination" in prompt
+    assert "at most 2 museum/gallery" in prompt
+
+
+def test_enforce_must_see_never_replaces_signature_slot_with_museum() -> None:
+    # All activity slots are real water-sport venues; a famous museum must-see may NOT
+    # displace them (like-for-like only).
+    trip = _mock_trip(end_date=date(2026, 7, 1))  # 1 day
+    surf_attrs = [
+        _cat_attr(f"Surf Spot {i}", f"node/s{i}", "water_sport", "surfing") for i in range(3)
+    ]
+    famous_museum = _cat_attr("Grand Museum", "way/grand", "museum_gallery", "museum", 50)
+    items = [_item(f"Surf Spot {i}", day=1, ref=f"node/s{i}", lat=15.55) for i in range(3)]
+    result = _enforce_must_see(
+        items,
+        surf_attrs + [famous_museum],
+        trip,
+        signature_cats={"water_sport", "beach"},
+    )
+    assert "Grand Museum" not in {i.title for i in result}
+
+
+@pytest.mark.asyncio
+async def test_run_widens_radius_when_pool_sparse() -> None:
+    # "Goa" geocodes to the state's inland centroid; a sparse metro-radius pool must
+    # trigger one region-radius refetch so coastal signature sights enter the pool.
+    trip = _mock_trip(destination_city="Goa")
+    sparse = [
+        _cat_attr(f"Inland Site {i}", f"way/i{i}", "heritage_monument", "monument")
+        for i in range(3)
+    ]
+    wide = sparse + [_cat_attr("Baga Beach", "way/baga2", "beach", "beach", 6)]
+    search_mock = AsyncMock(side_effect=[sparse, wide])
+    # Goa-the-state bbox → half-diagonal ~61 km; the wide fetch must use it, not a
+    # fixed 40 km (which misses Baga/Calangute in North Goa).
+    goa_point = GeoPoint(lat=15.30, lng=74.08, display_name="Goa, India", bbox_radius_m=61000.0)
+    with (
+        patch("backend.agents.itinerary_planner._load_trip", new=AsyncMock(return_value=trip)),
+        patch(
+            "backend.agents.itinerary_planner._resolve_coords",
+            new=AsyncMock(return_value=(15.30, 74.08)),
+        ),
+        patch("backend.agents.itinerary_planner.geocode", new=AsyncMock(return_value=goa_point)),
+        patch("backend.agents.itinerary_planner.fetch_weather", new=AsyncMock(return_value=[])),
+        patch("backend.agents.itinerary_planner.search_attractions", new=search_mock),
+        patch(
+            "backend.agents.itinerary_planner.search_restaurants", new=AsyncMock(return_value=[])
+        ),
+        patch(
+            "backend.agents.itinerary_planner._build_llm",
+            return_value=_llm_json([_valid_item_json()]),
+        ),
+        patch("backend.agents.itinerary_planner._persist_itinerary_items", new=AsyncMock()),
+    ):
+        await run(_base_state())
+
+    assert search_mock.await_count == 2
+    assert search_mock.await_args_list[0].kwargs["radius_m"] == 12000
+    assert search_mock.await_args_list[1].kwargs["radius_m"] == 61000
+
+
+@pytest.mark.asyncio
+async def test_region_radius_falls_back_and_clamps() -> None:
+    from backend.agents.itinerary_planner import _region_radius_m
+
+    trip = _mock_trip(destination_city="Goa")
+    # No bbox (old cache entry / degraded geocode) → fixed fallback
+    no_bbox = GeoPoint(lat=15.3, lng=74.08, display_name="Goa")
+    with patch("backend.agents.itinerary_planner.geocode", new=AsyncMock(return_value=no_bbox)):
+        assert await _region_radius_m(trip) == 40000
+    # Geocode failure → fixed fallback
+    with patch("backend.agents.itinerary_planner.geocode", new=AsyncMock(side_effect=RuntimeError)):
+        assert await _region_radius_m(trip) == 40000
+    # Country-scale bbox → clamped to the max
+    huge = GeoPoint(lat=20.0, lng=77.0, display_name="India", bbox_radius_m=1_800_000.0)
+    with patch("backend.agents.itinerary_planner.geocode", new=AsyncMock(return_value=huge)):
+        assert await _region_radius_m(trip) == 75000
+    # Small-town bbox below the floor → floor wins
+    tiny = GeoPoint(lat=15.5, lng=73.8, display_name="Small Town", bbox_radius_m=3000.0)
+    with patch("backend.agents.itinerary_planner.geocode", new=AsyncMock(return_value=tiny)):
+        assert await _region_radius_m(trip) == 40000
+
+
+# ── Must-see selection: category caps ─────────────────────────────────────────
+
+
+def test_select_must_see_caps_offsignature_museums() -> None:
+    museums = [
+        _cat_attr(f"Museum {i}", f"way/m{i}", "museum_gallery", "museum", 50 - i) for i in range(6)
+    ]
+    beaches = [_cat_attr(f"Beach {i}", f"way/b{i}", "beach", "beach", 6) for i in range(3)]
+    out = _select_must_see(museums + beaches, {"beach"})
+    cats = [a.category for a in out]
+    assert cats.count("museum_gallery") == 3  # off-signature cap
+    assert cats.count("beach") == 3  # signature qualifies at the lower fame bar
+
+
+def test_select_must_see_includes_fame_free_core_beaches() -> None:
+    # Real-world Goa: beaches have 0-3 sitelinks — far below every fame bar — yet they
+    # ARE the destination. Core categories qualify without fame (capped at 3 overall,
+    # ≤2 per identical fine kind so the forced list isn't three of the same experience).
+    beaches = [
+        _cat_attr(f"Beach {i}", f"way/b{i}", "beach", "beach", prominence=0) for i in range(5)
+    ]
+    churches = [
+        _cat_attr(f"Church {i}", f"way/c{i}", "religious", "place_of_worship", 20) for i in range(2)
+    ]
+    out = _select_must_see(churches + beaches, {"religious", "beach"}, {"beach"})
+    cats = [a.category for a in out]
+    assert cats.count("beach") == 2  # identical kind "beach" → per-kind cap
+    assert cats.count("religious") == 2
+
+
+def test_select_must_see_core_picks_are_kind_diverse() -> None:
+    # A nature destination's fame-free core list must not be three peaks — mix in the
+    # waterfall even though every peak outscores it in the boost-ordered pool.
+    peaks = [_cat_attr(f"Peak {i}", f"way/p{i}", "nature", "peak", prominence=0) for i in range(4)]
+    falls = [_cat_attr("Big Falls", "way/wf", "nature", "waterfall", prominence=0)]
+    out = _select_must_see(peaks + falls, {"nature"}, {"nature"})
+    kinds = [a.kinds for a in out]
+    assert kinds.count("peak") == 2
+    assert "waterfall" in kinds
+
+
+def test_select_must_see_signature_uncapped_for_heritage_city() -> None:
+    monuments = [
+        _cat_attr(f"Monument {i}", f"way/mo{i}", "heritage_monument", "monument", 100 - i)
+        for i in range(6)
+    ]
+    out = _select_must_see(monuments, {"heritage_monument"})
+    assert len(out) == 6  # no cap on the city's signature category
+
+
+# ── Travel-DNA boosting ───────────────────────────────────────────────────────
+
+
+def test_dna_categories_maps_tags_and_interests() -> None:
+    cats = _dna_categories({"style_tags": ["adventure", "food"]}, {"interests": ["nature"]})
+    assert {"water_sport", "adventure", "nature", "beach"} <= cats
+
+
+def test_dna_categories_empty_inputs() -> None:
+    assert _dna_categories({}, {}) == set()
+
+
+def test_boost_attractions_lifts_signature_and_dna_venues() -> None:
+    beach = _cat_attr("Baga Beach", "way/baga", "beach", "beach", score=0.2)
+    museum = _cat_attr("Museum", "way/mu", "museum_gallery", "museum", score=0.4)
+    result = _boost_attractions([beach, museum], {"beach"}, {"beach"})
+    assert result[0].name == "Baga Beach"  # 0.2 + 0.20 + 0.15 > 0.4
 
 
 def test_enforce_must_see_prefers_invented_slots_over_real_ones() -> None:
@@ -854,3 +1169,128 @@ def test_enforce_must_see_prefers_invented_slots_over_real_ones() -> None:
     assert "LLM Filler" not in titles
     assert "Real Place" in titles
     assert "Icon" in titles
+
+
+# ── Variety backstop ──────────────────────────────────────────────────────────
+
+
+def _zanzibar_pool() -> list[Attraction]:
+    return [
+        _cat_attr("Hakuna Matata Spice Farm", "way/sf1", "other", "attraction", 3),
+        _cat_attr("Jambo Spice Farm", "way/sf2", "other", "attraction", 2),
+        _cat_attr("Uroa Bay", "way/ub", "beach", "beach", 4, score=0.9),
+        _cat_attr("Kendwa Beach", "way/kb", "beach", "beach", 3, score=0.8),
+        _cat_attr("Old Fort", "way/of", "heritage_monument", "fort", 20, score=0.7),
+        _cat_attr("Snorkel Point", "node/sn", "water_sport", "snorkeling", 0, score=0.6),
+    ]
+
+
+def test_enforce_variety_trims_duplicate_spice_farms() -> None:
+    # 3 spice-farm outings across the trip — two share only a title phrase with the
+    # third (an LLM item with no source_ref). Cap for non-signature kinds is 2, and the
+    # least famous / unmatched ones must go first.
+    trip = _mock_trip(destination_city="Zanzibar", end_date=date(2026, 7, 3))
+    items = [
+        _item("Hakuna Matata Spice Farm", day=1, ref="way/sf1", lat=15.55),
+        _item("Jambo Spice Farm", day=2, ref="way/sf2", lat=15.55),
+        _item("Spice farm", day=3),  # LLM-invented, no ref
+        _item("Old Fort", day=3, ref="way/of", lat=15.55),
+    ]
+    result = _enforce_variety(items, _zanzibar_pool(), trip, {"beach"}, {"beach"})
+    titles = [i.title for i in result]
+    assert titles.count("Old Fort") == 1
+    spice = [t for t in titles if "spice" in t.lower()]
+    assert len(spice) == 2
+    assert "Spice farm" not in titles  # the unmatched invented item went first
+    # The freed slot became a real, different-kind venue from the pool
+    assert "Uroa Bay" in titles or "Kendwa Beach" in titles or "Snorkel Point" in titles
+
+
+def test_enforce_variety_keeps_one_per_day_within_group() -> None:
+    # Two identical-kind outings on the SAME day is a repeat even when the trip total
+    # is within cap — one of them must be swapped out.
+    trip = _mock_trip(destination_city="Zanzibar", end_date=date(2026, 7, 3))
+    items = [
+        _item("Hakuna Matata Spice Farm", day=2, ref="way/sf1", lat=15.55),
+        _item("Jambo Spice Farm", day=2, ref="way/sf2", lat=15.55),
+    ]
+    result = _enforce_variety(items, _zanzibar_pool(), trip, set(), set())
+    spice = [i for i in result if "spice" in i.title.lower()]
+    assert len(spice) == 1
+
+
+def test_enforce_variety_caps_summits_at_three_for_nature_core() -> None:
+    # 4 peaks in 4 days — signature/core kinds keep one extra slot (3), the fourth is
+    # a repeat and yields to a different experience.
+    trip = _mock_trip(destination_city="Interlaken", end_date=date(2026, 7, 4))
+    pool = [
+        _cat_attr(f"Peak {i}", f"way/p{i}", "nature", "peak", 10 - i, score=1.0 - i / 10)
+        for i in range(4)
+    ] + [
+        _cat_attr("Big Falls", "way/wf", "nature", "waterfall", 5, score=0.5),
+        _cat_attr("Lake Cruise", "way/lc", "water_sport", "sailing", 4, score=0.4),
+    ]
+    items = [_item(f"Peak {i}", day=i + 1, ref=f"way/p{i}", lat=15.55) for i in range(4)]
+    result = _enforce_variety(items, pool, trip, {"nature"}, {"nature"})
+    peaks = [i for i in result if i.title.startswith("Peak")]
+    assert len(peaks) == 3
+    others = {i.title for i in result} - {i.title for i in peaks}
+    assert others <= {"Big Falls", "Lake Cruise"} and others
+
+
+def test_enforce_variety_noop_when_varied() -> None:
+    trip = _mock_trip(destination_city="Zanzibar", end_date=date(2026, 7, 3))
+    items = [
+        _item("Uroa Bay", day=1, ref="way/ub", lat=15.55),
+        _item("Old Fort", day=2, ref="way/of", lat=15.55),
+        _item("Snorkel Point", day=3, ref="node/sn", lat=15.55),
+    ]
+    assert _enforce_variety(items, _zanzibar_pool(), trip, {"beach"}, {"beach"}) == items
+
+
+def test_enforce_variety_city_name_does_not_group_venues() -> None:
+    # "Queenstown Gardens" and "Queenstown Hill" share only the city name — different
+    # kinds, not a repeat.
+    trip = _mock_trip(destination_city="Queenstown", end_date=date(2026, 7, 2))
+    pool = [
+        _cat_attr("Queenstown Gardens", "way/qg", "nature", "garden", 3),
+        _cat_attr("Queenstown Hill", "way/qh", "viewpoint", "viewpoint", 4),
+    ]
+    items = [
+        _item("Queenstown Gardens", day=1, ref="way/qg", lat=15.55),
+        _item("Queenstown Hill", day=2, ref="way/qh", lat=15.55),
+    ]
+    assert _enforce_variety(items, pool, trip, set(), set()) == items
+
+
+# ── is_outdoor normalization ──────────────────────────────────────────────────
+
+
+def test_normalize_outdoor_grounds_flag_in_osm_tags() -> None:
+    pool = [
+        _cat_attr("Strandbad Neuhaus", "way/sb", "water_sport", "swimming_area"),
+        _cat_attr("City Museum", "way/cm", "museum_gallery", "museum"),
+    ]
+    lido = _item("Strandbad Neuhaus", day=1, ref="way/sb", lat=15.55)
+    lido.is_outdoor = False  # LLM guessed wrong
+    museum = _item("City Museum", day=1, ref="way/cm", lat=15.55)
+    museum.is_outdoor = True  # LLM guessed wrong the other way
+    unmatched = _item("Mystery Walk", day=2)
+    unmatched.is_outdoor = True
+
+    result = _normalize_outdoor([lido, museum, unmatched], pool)
+    assert result[0].is_outdoor is True
+    assert result[1].is_outdoor is False
+    assert result[2].is_outdoor is True  # no pool match → LLM flag kept
+
+
+# ── Kind-diverse prompt menu ──────────────────────────────────────────────────
+
+
+def test_diverse_by_kind_caps_then_backfills() -> None:
+    peaks = [_cat_attr(f"Peak {i}", f"way/pk{i}", "nature", "peak", 10 - i) for i in range(5)]
+    falls = [_cat_attr("Falls", "way/f", "nature", "waterfall", 2)]
+    picked = _diverse_by_kind(peaks + falls, 4)
+    kinds = [a.kinds for a in picked]
+    assert kinds.count("peak") == 3  # 2 by quota + 1 backfill
+    assert "waterfall" in kinds
