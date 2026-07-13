@@ -7,7 +7,7 @@ import {
   MapPin,
   Calendar,
   Users,
-  DollarSign,
+  IndianRupee,
   Sparkles,
   ArrowRight,
   ArrowLeft,
@@ -15,6 +15,7 @@ import {
   Globe2,
   CheckCircle2,
   Zap,
+  PlaneTakeoff,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { TripOut } from "@/lib/api";
@@ -32,13 +33,13 @@ const QUICK_DESTINATIONS = [
   { label: "Barcelona", emoji: "🎨" },
 ];
 
-const CURRENCIES = ["USD", "EUR", "GBP", "JPY", "AUD", "INR"];
+const BUDGET_CURRENCY = "INR";
 
 const PIPELINE_STEPS = [
   { icon: Sparkles,   text: "Travel Style agent reads your preferences" },
   { icon: MapPin,     text: "Itinerary Planner clusters attractions into walking zones" },
   { icon: Globe2,     text: "Hotel Agent finds options matching your budget tier" },
-  { icon: DollarSign, text: "Budget Optimizer checks spend vs. your budget" },
+  { icon: IndianRupee, text: "Budget Optimizer checks spend vs. your budget" },
   { icon: Zap,        text: "Events Agent checks what's on during your trip" },
 ];
 
@@ -60,8 +61,8 @@ function calcBudgetTier(
   const total = parseFloat(budget);
   if (!budget || isNaN(total) || !nights || nights <= 0 || travelers <= 0) return null;
   const perPersonPerDay = total / travelers / nights;
-  if (perPersonPerDay < 50) return "Budget Explorer";
-  if (perPersonPerDay <= 150) return "Balanced Traveler";
+  if (perPersonPerDay < 4000) return "Budget Explorer";
+  if (perPersonPerDay <= 12000) return "Balanced Traveler";
   return "Luxury Seeker";
 }
 
@@ -426,6 +427,8 @@ function StepTravelersBudget({
   setBudget,
   currency,
   setCurrency,
+  flightOrigin,
+  setFlightOrigin,
   startDate,
   endDate,
   onNext,
@@ -437,6 +440,8 @@ function StepTravelersBudget({
   setBudget: (v: string) => void;
   currency: string;
   setCurrency: (v: string) => void;
+  flightOrigin: string;
+  setFlightOrigin: (v: string) => void;
   startDate: string;
   endDate: string;
   onNext: () => void;
@@ -544,27 +549,19 @@ function StepTravelersBudget({
         </p>
         <div className="flex gap-3">
           <div className="relative flex-1">
-            <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+            <IndianRupee className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
             <input
               type="number"
               min="0"
-              placeholder="5000"
+              placeholder="150000"
               value={budget}
               onChange={(e) => setBudget(e.target.value)}
               className="input-dark pl-10 text-slate-100"
             />
           </div>
-          <select
-            value={currency}
-            onChange={(e) => setCurrency(e.target.value)}
-            className="input-dark w-28 shrink-0 bg-space-800 cursor-pointer"
-          >
-            {CURRENCIES.map((c) => (
-              <option key={c} value={c} className="bg-space-800">
-                {c}
-              </option>
-            ))}
-          </select>
+          <div className="input-dark w-20 shrink-0 flex items-center justify-center text-sm font-semibold text-gold-400 tracking-wide select-none">
+            INR
+          </div>
         </div>
 
         {/* Budget tier badge */}
@@ -582,6 +579,34 @@ function StepTravelersBudget({
             </motion.div>
           )}
         </AnimatePresence>
+      </motion.div>
+
+      {/* Departure airport */}
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.25 }}
+        className="glass-light rounded-2xl p-6 mb-8 text-left"
+      >
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-5">
+          Departure Airport{" "}
+          <span className="normal-case text-slate-700 font-normal">(optional — for flight budget)</span>
+        </p>
+        <div className="relative">
+          <PlaneTakeoff className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+          <input
+            type="text"
+            placeholder="IATA code — DEL, JFK, LHR…"
+            value={flightOrigin}
+            onChange={(e) => setFlightOrigin(e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 3))}
+            maxLength={3}
+            className="input-dark pl-10 text-slate-100 uppercase tracking-widest font-mono placeholder:normal-case placeholder:tracking-normal placeholder:font-sans"
+          />
+        </div>
+        <p className="text-xs text-slate-600 mt-3 flex items-start gap-1.5">
+          <Zap className="w-3.5 h-3.5 text-gold-400 shrink-0 mt-0.5" />
+          Flight costs will be fetched and factored into your budget breakdown.
+        </p>
       </motion.div>
 
       {/* Navigation */}
@@ -623,6 +648,7 @@ function StepLaunch({
   travelers,
   budget,
   currency,
+  flightOrigin,
   onBack,
   onSubmit,
   isSubmitting,
@@ -634,6 +660,7 @@ function StepLaunch({
   travelers: number;
   budget: string;
   currency: string;
+  flightOrigin: string;
   onBack: () => void;
   onSubmit: () => void;
   isSubmitting: boolean;
@@ -724,7 +751,7 @@ function StepLaunch({
 
           <div>
             <p className="text-xs text-slate-600 mb-1 flex items-center gap-1">
-              <DollarSign className="w-3 h-3" /> Budget
+              <IndianRupee className="w-3 h-3" /> Budget
             </p>
             {budget ? (
               <>
@@ -739,6 +766,19 @@ function StepLaunch({
                   </p>
                 )}
               </>
+            ) : (
+              <p className="text-sm text-slate-500 italic">Not set</p>
+            )}
+          </div>
+
+          <div>
+            <p className="text-xs text-slate-600 mb-1 flex items-center gap-1">
+              <PlaneTakeoff className="w-3 h-3" /> Flying from
+            </p>
+            {flightOrigin.length === 3 ? (
+              <p className="text-xl font-bold text-slate-100 font-mono tracking-widest">
+                {flightOrigin}
+              </p>
             ) : (
               <p className="text-sm text-slate-500 italic">Not set</p>
             )}
@@ -842,12 +882,13 @@ export default function NewTripPage() {
   const [direction, setDirection] = useState(1);
 
   // Form state
-  const [destination, setDestination] = useState("");
-  const [startDate, setStartDate]     = useState("");
-  const [endDate, setEndDate]         = useState("");
-  const [travelers, setTravelers]     = useState(1);
-  const [budget, setBudget]           = useState("");
-  const [currency, setCurrency]       = useState("USD");
+  const [destination, setDestination]   = useState("");
+  const [startDate, setStartDate]       = useState("");
+  const [endDate, setEndDate]           = useState("");
+  const [travelers, setTravelers]       = useState(1);
+  const [budget, setBudget]             = useState("");
+  const [currency, setCurrency]         = useState(BUDGET_CURRENCY);
+  const [flightOrigin, setFlightOrigin] = useState("");
 
   // Submit state
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -884,6 +925,9 @@ export default function NewTripPage() {
         budget_total: budget ? parseFloat(budget) : null,
         budget_currency: currency,
       });
+      if (flightOrigin.trim().length === 3) {
+        sessionStorage.setItem(`flight_origin_${trip.id}`, flightOrigin.trim().toUpperCase());
+      }
       router.push(`/trips/${trip.id}`);
     } catch (err) {
       if (err instanceof ApiError) {
@@ -975,6 +1019,8 @@ export default function NewTripPage() {
                     setBudget={setBudget}
                     currency={currency}
                     setCurrency={setCurrency}
+                    flightOrigin={flightOrigin}
+                    setFlightOrigin={setFlightOrigin}
                     startDate={startDate}
                     endDate={endDate}
                     onNext={goNext}
@@ -998,6 +1044,7 @@ export default function NewTripPage() {
                     travelers={travelers}
                     budget={budget}
                     currency={currency}
+                    flightOrigin={flightOrigin}
                     onBack={goBack}
                     onSubmit={handleSubmit}
                     isSubmitting={isSubmitting}
