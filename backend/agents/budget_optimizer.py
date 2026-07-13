@@ -12,7 +12,8 @@ from backend.core.logging import get_logger
 from backend.db.base import AsyncSessionLocal
 from backend.db.models import Approval, HotelCandidate, ItineraryItem, Trip
 from backend.graphs.state import TravelOSState
-from backend.tools.currency import convert as convert_currency, destination_currency
+from backend.tools.currency import convert as convert_currency
+from backend.tools.currency import destination_currency
 
 logger = get_logger(__name__)
 
@@ -179,7 +180,9 @@ def _compute_costs(
         hotel_cost = float(selected.get("price_total") or 0)
         hotel_currency = str(selected.get("price_currency") or budget_currency)
         if hotel_cost > 0:
-            costs["lodging"] = round(convert_currency(hotel_cost, hotel_currency, budget_currency), 2)
+            costs["lodging"] = round(
+                convert_currency(hotel_cost, hotel_currency, budget_currency), 2
+            )
 
     for item in itinerary:
         raw_cost = item.get("est_cost")
@@ -189,7 +192,9 @@ def _compute_costs(
         if cost <= 0:
             continue
         stored_currency = str(item.get("est_cost_currency") or budget_currency)
-        effective_currency = _normalise_item_currency(stored_currency, budget_currency, local_currency)
+        effective_currency = _normalise_item_currency(
+            stored_currency, budget_currency, local_currency
+        )
         converted = convert_currency(cost, effective_currency, budget_currency)
         converted = min(converted, per_item_cap)
         itype = str(item.get("item_type") or "")

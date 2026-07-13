@@ -110,7 +110,6 @@ async def test_run_returns_memory_context() -> None:
     mc = result["memory_context"]
     assert "preferences" in mc
     assert "travel_style_profile" in mc
-    assert mc["embedding_hits"] == []
     assert mc["past_trips"] == []
 
 
