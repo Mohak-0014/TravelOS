@@ -50,14 +50,15 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     # ── 3. Budget breach ──────────────────────────────────────────────────────
     estimated = budget_state.get("estimated_planned", 0.0)
     budget_total = budget_state.get("total")
+    currency = str(budget_state.get("currency") or "INR")
     if budget_total and float(estimated) > 0:
         breach_pct = (float(estimated) - float(budget_total)) / float(budget_total) * 100
         if breach_pct > _BUDGET_BREACH_THRESHOLD_PCT:
             conflicts.append(
-                f"Budget breach: estimated ${float(estimated):.0f} vs "
-                f"${float(budget_total):.0f} ({breach_pct:.0f}% over)"
+                f"Budget breach: estimated {currency} {float(estimated):.0f} vs "
+                f"{currency} {float(budget_total):.0f} ({breach_pct:.0f}% over)"
             )
-            approvals.append(_budget_approval(estimated, budget_total, breach_pct))
+            approvals.append(_budget_approval(estimated, budget_total, breach_pct, currency))
             budget_state["breach_pct"] = round(breach_pct, 1)
 
     # ── 4. Over-packed days ───────────────────────────────────────────────────
@@ -153,19 +154,21 @@ def _budget_approval(
     estimated: float,
     budget_total: float,
     breach_pct: float,
+    currency: str = "INR",
 ) -> dict:  # type: ignore[type-arg]
     return {
         "id": str(uuid.uuid4()),
         "proposed_by": "conflict_detection",
         "change_type": "budget_exceed",
         "summary": (
-            f"Estimated itinerary cost ${float(estimated):.0f} exceeds "
-            f"budget ${float(budget_total):.0f} by {breach_pct:.0f}%"
+            f"Estimated itinerary cost {currency} {float(estimated):.0f} exceeds "
+            f"budget {currency} {float(budget_total):.0f} by {breach_pct:.0f}%"
         ),
         "payload": {
             "estimated_total": round(float(estimated), 2),
             "budget_total": round(float(budget_total), 2),
             "breach_pct": round(breach_pct, 1),
+            "currency": currency,
         },
         "status": "pending",
     }

@@ -8,8 +8,7 @@ from backend.core.config import settings
 
 _LARGE_MODEL = "llama-3.3-70b-versatile"
 _SMALL_MODEL = "llama-3.1-8b-instant"
-# Fine-tuned on function-calling datasets — more reliable tool invocation than versatile
-_TOOL_USE_MODEL = "llama3-groq-70b-8192-tool-use-preview"
+_TOOL_USE_MODEL = "llama-3.3-70b-versatile"
 
 
 def build_llm(
