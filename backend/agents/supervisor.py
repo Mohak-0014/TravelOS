@@ -36,7 +36,13 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
             "total": None,
             "spent": 0.0,
             # Same category vocabulary as budget_optimizer._compute_costs — keep in sync
-            "by_category": {"lodging": 0.0, "activities": 0.0, "meals": 0.0, "transport": 0.0},
+            "by_category": {
+                "lodging": 0.0,
+                "activities": 0.0,
+                "meals": 0.0,
+                "transport": 0.0,
+                "flights": 0.0,
+            },
             "breach_pct": 0.0,
         }
     if not state.get("weather_state"):

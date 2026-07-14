@@ -80,6 +80,10 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
         )
         for it in cleaned
     )
+    # Hotel + flights (computed by the budget optimizer, already in budget currency)
+    # belong in the breach check too — itinerary items alone understate the trip.
+    by_category: dict = budget_state.get("by_category") or {}  # type: ignore[type-arg]
+    estimated_total += sum(float(by_category.get(k) or 0) for k in ("lodging", "flights"))
     if estimated_total > 0:
         budget_state["estimated_planned"] = round(estimated_total, 2)
         budget_state["currency"] = budget_currency

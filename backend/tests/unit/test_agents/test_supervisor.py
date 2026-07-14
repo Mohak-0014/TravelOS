@@ -80,13 +80,14 @@ async def test_fresh_run_does_not_overwrite_existing_sub_states() -> None:
 
 @pytest.mark.asyncio
 async def test_fresh_run_budget_categories_match_optimizer_vocabulary() -> None:
-    # Must stay in sync with budget_optimizer._compute_costs keys
+    # Must stay in sync with budget_optimizer._compute_costs / _flight_cost keys
     result = await run(_base_state(budget_state={}))
     assert set(result["budget_state"]["by_category"]) == {
         "lodging",
         "activities",
         "meals",
         "transport",
+        "flights",
     }
 
 

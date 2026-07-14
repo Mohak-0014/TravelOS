@@ -46,15 +46,6 @@ type IconComponent = LucideIcon;
 // Extended TripOut to allow for fields the API may return that aren't in the base type
 type TripOutExtended = TripOut & {
   agent_messages?: { role: string; content: string }[];
-  budget_state?: {
-    lodging?: number;
-    activities?: number;
-    meals?: number;
-    transport?: number;
-    total?: number;
-    currency?: string;
-    deviation_pct?: number;
-  };
 };
 
 // ── Status config ─────────────────────────────────────────────────────────────
@@ -1385,12 +1376,14 @@ export default function TripDetailPage() {
   );
 
   const budgetSlices: { label: string; value: number; color: string }[] = (() => {
-    if (trip?.budget_state) {
+    const byCategory = trip?.budget_state?.by_category;
+    if (byCategory) {
       return [
-        { label: "Lodging",    value: trip.budget_state.lodging    ?? 0, color: "#3b82f6" },
-        { label: "Activities", value: trip.budget_state.activities ?? 0, color: "#a78bfa" },
-        { label: "Meals",      value: trip.budget_state.meals      ?? 0, color: "#fbbf24" },
-        { label: "Transport",  value: trip.budget_state.transport  ?? 0, color: "#34d399" },
+        { label: "Flights",    value: byCategory.flights    ?? 0, color: "#f472b6" },
+        { label: "Lodging",    value: byCategory.lodging    ?? 0, color: "#3b82f6" },
+        { label: "Activities", value: byCategory.activities ?? 0, color: "#a78bfa" },
+        { label: "Meals",      value: byCategory.meals      ?? 0, color: "#fbbf24" },
+        { label: "Transport",  value: byCategory.transport  ?? 0, color: "#34d399" },
       ].filter((s) => s.value > 0);
     }
     // Derive from fetched data — convert all costs to the trip's budget currency
@@ -1425,7 +1418,8 @@ export default function TripDetailPage() {
       ? ((budgetDerivedTotal - trip.budget_total) / trip.budget_total) * 100
       : null);
   const budgetCurrency = trip?.budget_state?.currency ?? trip?.budget_currency ?? "INR";
-  const budgetStateTotal = trip?.budget_state?.total ?? (budgetDerivedTotal > 0 ? budgetDerivedTotal : null);
+  const budgetStateTotal =
+    trip?.budget_state?.total_planned ?? (budgetDerivedTotal > 0 ? budgetDerivedTotal : null);
 
   const displayEvents = tripEvents.filter((ev) => ev.approval_status !== "rejected");
   const eventCategories = [

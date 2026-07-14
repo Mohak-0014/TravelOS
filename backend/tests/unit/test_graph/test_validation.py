@@ -350,3 +350,21 @@ async def test_run_no_repair_when_times_do_not_overlap() -> None:
     result = await run(_base_state(itinerary=items))
     assert result["itinerary"][1]["start_time"] == "12:00"
     assert "Repaired" not in result["agent_messages"][0].content
+
+
+@pytest.mark.asyncio
+async def test_run_estimated_planned_includes_hotel_and_flights() -> None:
+    # Breach detection must see the whole trip cost, not just itinerary items
+    items = [_item(est_cost=100.0)]
+    state = _base_state(itinerary=items)
+    state["budget_state"] = {
+        "total": 1000.0,
+        "spent": 0.0,
+        "by_category": {"lodging": 400.0, "flights": 250.0, "activities": 100.0},
+        "breach_pct": 0.0,
+    }
+    with patch("backend.graphs.validation._get_budget_currency", new=AsyncMock(return_value="EUR")):
+        result = await run(state)
+    # 100 (item) + 400 (lodging) + 250 (flights); activities key must NOT be
+    # double-counted — items are summed directly
+    assert result["budget_state"]["estimated_planned"] == pytest.approx(750.0)
