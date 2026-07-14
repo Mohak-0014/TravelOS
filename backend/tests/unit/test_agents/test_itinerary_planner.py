@@ -1294,3 +1294,21 @@ def test_diverse_by_kind_caps_then_backfills() -> None:
     kinds = [a.kinds for a in picked]
     assert kinds.count("peak") == 3  # 2 by quota + 1 backfill
     assert "waterfall" in kinds
+
+
+# ── Replan feedback injection ─────────────────────────────────────────────────
+
+
+def test_build_prompt_injects_replan_feedback() -> None:
+    trip = _mock_trip()
+    prompt = _build_prompt(trip, {}, [], [], [], {}, replan_feedback=["Day 2 has only free blocks"])
+    assert "PREVIOUS ATTEMPT REJECTED" in prompt
+    assert "Day 2 has only free blocks" in prompt
+    # Feedback leads the prompt so the model sees it before anything else
+    assert prompt.index("PREVIOUS ATTEMPT") < prompt.index("**Trip**")
+
+
+def test_build_prompt_no_feedback_section_on_first_attempt() -> None:
+    trip = _mock_trip()
+    prompt = _build_prompt(trip, {}, [], [], [], {})
+    assert "PREVIOUS ATTEMPT" not in prompt

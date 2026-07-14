@@ -34,11 +34,11 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     conflicts: list[str] = []
     should_replan = False
 
-    # ── 1. Time overlaps ──────────────────────────────────────────────────────
+    # ── 1. Time overlaps (validation repairs these deterministically — anything
+    # still overlapping here is logged as a warning, not worth an LLM replan) ──
     overlap_days = _find_time_overlaps(itinerary)
     if overlap_days:
         conflicts.append(f"Time overlaps on day(s): {overlap_days}")
-        should_replan = True
 
     # ── 2. All-default itinerary (LLM fallback) ───────────────────────────────
     if itinerary and all(it.get("item_type") == "free" for it in itinerary):
@@ -90,10 +90,14 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     # ── Routing decision ──────────────────────────────────────────────────────
     next_step = "approval_gate"
     new_iterations = replan_iterations
+    replan_feedback: list[str] = []
 
     if should_replan and replan_iterations < 3:
         next_step = "itinerary_planner"
         new_iterations = replan_iterations + 1
+        # Tell the planner WHY — injected into the regeneration prompt so the
+        # retry isn't a blind re-roll of the same prompt.
+        replan_feedback = list(conflicts)
         conflicts.append(f"Triggering replan (attempt {new_iterations}/3)")
 
     n = len(conflicts)
@@ -112,6 +116,7 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     return {
         "current_step": next_step,
         "replan_iterations": new_iterations,
+        "replan_feedback": replan_feedback,
         "approval_queue": approvals,
         "budget_state": budget_state,
         "agent_messages": [

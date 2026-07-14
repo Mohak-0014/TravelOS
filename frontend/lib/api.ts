@@ -176,8 +176,19 @@ export interface TripOut {
   num_travelers: number;
   budget_total: number | null;
   budget_currency: string;
+  flight_origin: string | null;
   status: string;
   packing_list: { categories: Record<string, string[]>; destination_specific?: string[] } | null;
+  budget_state: {
+    by_category?: Record<string, number>;
+    total_planned?: number;
+    budget_total?: number;
+    deviation_pct?: number;
+    currency?: string;
+    status?: string;
+    proposals_created?: number;
+    estimated_planned?: number;
+  } | null;
   cover_image_url: string | null;
   share_token: string | null;
   share_expires_at: string | null;
@@ -194,6 +205,7 @@ export interface TripUpdate {
   num_travelers?: number;
   budget_total?: number | null;
   budget_currency?: string;
+  flight_origin?: string | null;
 }
 
 export interface ShareTripOut {

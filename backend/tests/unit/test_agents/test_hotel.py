@@ -439,3 +439,27 @@ def test_offer_to_dict_preserves_public_payload() -> None:
     offer.raw_payload["hotelName"] = "Grand Hotel"
     d = _offer_to_dict(offer)
     assert d["raw_payload"]["hotelName"] == "Grand Hotel"
+
+
+@pytest.mark.asyncio
+async def test_run_drops_offers_with_unknown_pricing() -> None:
+    # A hotel with neither per-night nor total price can't be budgeted — dropped.
+    trip = _mock_trip()
+    offers = [
+        _make_offer("h1", "Priced Hotel"),
+        _make_offer("h2", "Mystery Hotel", price_per_night=None, price_total=None),
+        _make_offer("h3", "Total-Only Hotel", price_per_night=None, price_total=320.0),
+    ]
+    with (
+        patch("backend.agents.hotel._load_trip", new=AsyncMock(return_value=trip)),
+        patch("backend.agents.hotel.search_hotels", new=AsyncMock(return_value=offers)),
+        patch("backend.agents.hotel.get_redis_client", return_value=MagicMock(aclose=AsyncMock())),
+        patch("backend.agents.hotel._build_llm", return_value=_mock_llm(0)),
+        patch("backend.agents.hotel._persist_candidates", new=AsyncMock()),
+    ):
+        result = await run(_base_state())
+
+    names = [c["name"] for c in result["hotel_state"]["candidates"]]
+    assert "Mystery Hotel" not in names
+    assert "Priced Hotel" in names
+    assert "Total-Only Hotel" in names  # total price alone is still budgetable
