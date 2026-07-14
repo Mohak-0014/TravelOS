@@ -3,8 +3,11 @@
 Responsibilities:
   - Update trips.status to "planned" (no pending approvals) or
     "awaiting_approval" (one or more approvals still pending).
-  - Write the LangGraph thread_id into trips.langgraph_thread_id so the
-    Celery task / API can resume the graph later.
+  - Write the LangGraph thread_id into trips.langgraph_thread_id. NOTE: with the
+    per-task MemorySaver the checkpoint dies with the Celery task, so this is an
+    informational/debugging reference — cross-process graph resume would require
+    a persistent checkpointer (AsyncPostgresSaver). Approvals are applied via
+    direct diff application in the approvals router, not by resuming the graph.
   - Write the thread_id into state["run_checkpoint_ref"] for downstream use.
   - Degrades gracefully on DB errors — never crashes the graph.
 """
@@ -34,7 +37,9 @@ async def run(
     configurable: dict = (config or {}).get("configurable") or {}  # type: ignore[assignment]
     thread_id: str | None = configurable.get("thread_id")
 
-    new_status = "planned"  # default if DB query fails
+    # Fail toward the safe status: if the pending-approvals query errors, assume
+    # approvals MAY be pending rather than silently marking the trip planned.
+    new_status = "awaiting_approval"
 
     try:
         async with AsyncSessionLocal() as session:

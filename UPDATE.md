@@ -1,60 +1,60 @@
-# TravelOS — Session Update (2026-06-21)
+# TravelOS — Session Update (2026-06-27)
 
 ## Headline
 
-- **Itinerary recommendations overhauled** with a general, city-agnostic **composite prominence score** so iconic landmarks surface instead of obscure same-type POIs. Verified on Delhi (Red Fort, Qutub, Humayun) and Paris (Eiffel Tower #1, Louvre, Notre-Dame).
-- **Hotel pricing fixed end-to-end** — LiteAPI rates were silently failing on every run; now returns real prices in the **trip's currency**.
-- **"Regenerate" button fixed** (used to 409 on any completed trip) + the hotel/weather UI now refreshes after a regeneration.
-- ⚠️ **A large body of work is uncommitted** (12 files) — needs committing (see "Pending").
+- **Landing/UI redesign → "Daylight Voyage"**: the whole app moved from the dark indigo "Twilight" theme to a **bright, light, airy theme** (soft cloud-white surfaces, sky-blue + amber + coral accents). Token-driven, so every page re-themed at once.
+- **Moved away from the 7-Wonders focus** → **popular travel cities** (Tokyo, Paris, New York, Bali, Cape Town, Lisbon, Reykjavík, Marrakech) across the hero scroll and the 3D globe; day blue-marble earth instead of night earth.
+- **Security hardening pass for deployment** — 7 findings fixed (JWT fail-closed, PyJWT, input validation, login-timing, auth rate limiting, CORS/docs, ICS/header injection) + optional Qdrant auth. Backend gate green (593 tests).
+- ⚠️ Two separate bodies of work are committed this session: `feat(ui)` redesign and `fix(security)` hardening.
 
 ---
 
 ## What was done this session
 
-### 1. Itinerary prominence + variety — TASKS #23 ✅ (uncommitted)
+### 1. Daylight Voyage UI redesign ✅
 
-The planner used to stack obscure same-type POIs (e.g. niche Mughal tombs / 5 museums in a row). Rebuilt the attraction pipeline so it prefers iconic, varied sights:
+Re-skinned the app from dark → light without changing component structure or animations:
 
-- **`backend/agents/itinerary_planner.py` (`_build_prompt`)**: prominence/variety prompt — prefer major sights, **≤2 same-type venues/day**, indoor/outdoor mix, a 1-day few-shot, and a **MUST-SEE landmarks** block listing the top sights by score (cap 12) that the planner is told to schedule.
-- **`backend/tools/places.py`** — the real work:
-  - **Two-block / geometry-aware Overpass query**: landmark **ways/relations** get their own generous block (`_AREA_CAP=1200`) so a flood of Wikidata-tagged **nodes** (statues/plaques/fountains — Paris has 2000+) can't starve them. `nwr` + `place_of_worship` (Wikidata-gated) included. This was the fix that surfaced the Eiffel Tower / Louvre / Notre-Dame for Paris.
-  - **Composite prominence score** (general across cities, no per-city tuning): blends **rank-normalised Wikidata sitelinks** (so one inflated/mistagged value can't dominate) + independent **OSM tag signals** — `tourism=*` (0.35), `heritage`/UNESCO (0.18), Wikivoyage (0.07), sitelinks (0.40). The tag signals are independent of Wikidata, which corrects the "borrowed fame" bias (a famous person's memorial like Raj Ghat — huge sitelinks, no `tourism` tag — no longer outranks India Gate).
-  - `_fetch_prominence` fetches sitelink counts + Wikivoyage presence from the Wikidata `wbgetentities` API.
-  - Wider 12 km radius (planner) so far icons (Qutub ~10 km) are in range.
-- **`backend/agents/itinerary_planner.py` already had** walking-distance clustering (#4) and time-of-day/opening-hours heuristics (#5) — both confirmed in place.
+- **`frontend/tailwind.config.ts`** — flipped the token system: `space-*` surfaces → near-white ramp (950 = white/elevated), `slate-*` text ramp → dark, `ink-*` hairlines → dark low-alpha, `electric-*` accent → **sky-blue**, softened shadows, daytime sky gradients. This single change re-themes every page.
+- **`frontend/app/globals.css`** — light glass cards (white translucent + dark hairlines), light scrollbar/inputs/buttons, new brand gradient (sky → indigo → coral), dark-on-light dashed flight paths.
+- **Hero swap**: `NightSky.tsx` → new **`DaySky.tsx`** (clear blue sky, warm sun, white clouds, drifting birds, light haze ridge). Login + onboarding backgrounds repointed to it.
+- **Destinations**: `WondersScroll.tsx` → **`DestinationsScroll.tsx`** — city posters (brighter daytime gradients) instead of the 7 Wonders.
+- **`frontend/components/travel/WorldGlobe.tsx`** — same 8 cities as arcs/labels; `earth-night.jpg` → `earth-blue-marble.jpg`; sky-blue atmosphere.
+- Deleted `NightSky.tsx`, `WondersScroll.tsx` (and the older `SkyScene.tsx`).
+- **Gate**: `tsc --noEmit` clean, ESLint clean, `/` + `/login` compile and render 200; rendered HTML confirms cities (no Wonders).
 
-### 2. Restaurant food filter ✅ (uncommitted)
+### 2. Security hardening for deployment ✅
 
-`backend/tools/restaurants.py`: Foursquare's newer API was ignoring the category filter and returning **non-food POIs** (meals were landing on "Rashtrapati Bhavan", "Ferrari Showroom"). Added a food-category guard (`_is_food_place`) that drops non-food results; falls back to OSM amenities.
+Full source audit (injection / XSS / IDOR / RLS / secrets / SSRF / CORS / CSRF). Posture was already solid — **no SQLi, no XSS sinks, no SSRF, consistent ownership checks, tenant-isolated vector search**. Fixed the operational gaps:
 
-### 3. "Regenerate" button fix ✅ (uncommitted)
+| Fix | Files |
+|---|---|
+| JWT secret **fails closed** in production (rejects default / <32 chars) | `backend/core/config.py` |
+| Migrated **python-jose → PyJWT 2.9** (drops CVE-2024-33663/33664; same pinned-alg behavior) | `backend/core/security.py`, `pyproject.toml` |
+| Input validation: `EmailStr`, password 8–128, `num_travelers` 1–20, `budget_total ≥0`, currency len 3, chat ≤2000, string max-lengths | `backend/db/schemas.py` |
+| Typed `PUT /me` (`UserUpdate`) + constant-time bcrypt verify on unknown email (kills login timing oracle) | `backend/api/routers/auth.py` |
+| **Auth rate limiting** — slowapi (Redis-backed, fail-open): register 5/min, login 10/min per IP | `backend/api/rate_limit.py` (new), `backend/api/main.py`, `backend/api/routers/auth.py` |
+| CORS `allow_credentials=False`; `/docs` `/redoc` `/openapi.json` disabled when `ENVIRONMENT=production` | `backend/api/main.py` |
+| ICS / `Content-Disposition` injection — RFC-5545 escape of `LOCATION`/`CALNAME`, sanitized download filename | `backend/api/routers/trips.py` |
+| Optional `QDRANT_API_KEY` wired into the client | `backend/core/config.py`, `backend/memory/semantic.py` |
 
-- **`backend/api/routers/trips.py`**: the `/itinerary/generate` guard rejected any status that wasn't `planning`/`failed` → completed trips 409'd. Now only blocks `generating` (a run in flight), so completed trips regenerate.
-- **`frontend/app/trips/[tripId]/page.tsx`**: `handleGenerate` optimistically sets `generating` so polling starts; and the status-transition effect now invalidates **hotels + weather** (not just itinerary) — fixes the "hotel selection doesn't show after a regen" report (the hotels query was caching an empty mid-generation result and never refreshing).
+- **`.env.example`** documents the new prod knobs (`QDRANT_API_KEY`, `RATE_LIMIT_ENABLED`, JWT-required note, CORS warning).
+- **Gate**: ruff format+check clean · mypy no new errors · pytest **593 passed** (2 short-password test fixtures updated to ≥8 chars; `test_auth.py` 19/19 green).
+- New deps installed + pinned: `pyjwt==2.9.*`, `slowapi==0.1.*`.
 
-### 4. LiteAPI hotel rates fix ✅ (uncommitted)
+### 3. Carried fix — Groq tool-use model (TASKS #30) ✅
 
-`backend/tools/hotels.py`: rates were failing with `Expecting value: line 1 column 1` on **every** run (so all hotels had `price=None`).
-
-- Root cause: the code did a **GET with query params**, but `/v3.0/hotels/rates` is a **POST with a JSON body** — a GET returns an empty 200.
-- Second bug: the parser read `data[].rooms[]`, but prices nest under **`data[].roomTypes[].rates[].retailRate.total`**.
-- Fixed: POST with `hotelIds` / `occupancies` / `currency` / `guestNationality` / `checkin` / `checkout`; parse `roomTypes`.
-- **Currency now follows the trip** (`trip.budget_currency`), threaded `search_hotels → _search_liteapi → _fetch_rates` (and into the cache key). Verified: Paris (INR trip) hotels now priced in ₹.
-- **`guestNationality`**: requested as `IND`, but LiteAPI requires **ISO-2** — `IND` returns `400 guestNationality invalid`. Using **`IN`** (verified returns prices).
-- Verified live: `liteapi_rates_ok fetched=19/20`; Paris hotels now show e.g. *Victoria Palace Hotel — ₹21,246/night* (selected).
+`backend/agents/_llm.py`: `_TOOL_USE_MODEL` pointed at the **decommissioned** `llama3-groq-70b-8192-tool-use-preview` → repointed to the supported `llama-3.3-70b-versatile`.
 
 ---
 
-## New feature requests (queued — see TASKS.md #31–36)
+## Before deploying — set in the production `.env`
 
-| # | Request |
-|---|---|
-| 31 | **Flight prices** — add a flights provider + agent/tool + a prices section (needs an origin/home airport). |
-| 32 | **Local Events frontend section** — Events agent exists but events only surface as `event_add` approval banners; add persistence + endpoint + a browsable section. |
-| 33 | **Map as a sidebar** — move TripMap into a persistent side column. |
-| 34 | **Concierge full-column** — promote the chat from a small popup/drawer to a full column. |
-| 35 | **Hotel-upgrade accept bug** — accepting a budget "upgrade to hotel X" doesn't select X. |
-| 36 | **Deterministic must-see enforcement** — guarantee top icons are scheduled (the Louvre/under-ranking follow-up). |
+1. **`JWT_SECRET_KEY`** — strong 32+ chars (`python -c "import secrets; print(secrets.token_hex(32))"`). App refuses to boot without it.
+2. **`ENVIRONMENT=production`** — activates the fail-closed check + hides API docs.
+3. **`CORS_ORIGINS`** — your real frontend origin(s), never `*`.
+4. **`QDRANT_API_KEY`** — if Qdrant is reachable off-localhost; keep Postgres/Redis/Qdrant off the public internet regardless.
+5. **`RATE_LIMIT_ENABLED=true`** with `REDIS_URL` reachable.
 
 ---
 
@@ -70,8 +70,8 @@ backend\.venv\Scripts\python -m uvicorn backend.api.main:app --reload --port 800
 # 3. Celery worker (separate terminal, from repo root) — RESTART after any backend code change
 backend\.venv\Scripts\celery -A backend.workflows.celery_tasks worker --loglevel=info --pool=solo
 
-# 4. Frontend
-cd frontend; npm run dev   # http://localhost:3000
+# 4. Frontend — must be on port 3000 (CORS), use `npm run dev -- -p 3000`
+cd frontend; npm run dev -- -p 3000   # http://localhost:3000
 ```
 
 ---
@@ -80,19 +80,17 @@ cd frontend; npm run dev   # http://localhost:3000
 
 | Priority | Item |
 |----------|------|
-| **1** | **Commit this session's work** — 12 files (places/restaurants/itinerary/hotels/trips + frontend + 2 new test files). Suggested split: `feat(places)`, `fix(hotels)`, `fix(restaurants)`, `feat(itinerary)`, `fix(trips)`. All gates green (ruff, mypy, tests). |
-| 2 | New feature work (TASKS #31–36), starting with the **hotel-upgrade accept bug (#35)** — small and user-facing. |
-| 3 | Carry-over: Groq decommissioned tool-use model (#30), Qdrant init (#2), agent prompt-quality (#24–29). |
+| 1 | Visual QA of the daylight theme on the denser interior pages (trip detail `trips/[tripId]/page.tsx`, ~2k lines) — token flip themes them, but a hand-tuning pass may be wanted. |
+| 2 | Carry-over backend tasks: Qdrant collections init (#2 — now in `main.py` startup), weather taste-aware replans (#7/#26), under-count day validation (#8), agent prompt quality (#24–29), real-time status polling (#21 — already in trip page). |
+| 3 | Optional security defense-in-depth: Postgres RLS policies; shorter access-token TTL + refresh/revocation; `pip-audit` in CI; migrate off EOL `passlib`. |
 
 ---
 
 ## Known issues / gotchas
 
-- **Restart the Celery worker after any backend code change** — it caches imported code at startup; a regen will silently use the old code otherwise. (Hit repeatedly this session.)
-- **`taskkill /F /IM python.exe` kills the worker too.** Stop it surgically by PID (`Stop-Process -Id <pid>`); killing one entangled process can take the whole worker tree down.
-- **LiteAPI rates**: POST (not GET); `guestNationality` must be ISO-2 (`IN`, not `IND`); prices come back per the requested `currency`.
-- **Composite prominence is city-agnostic** but bounded by what OSM/Wikidata expose: the Louvre under-ranks because OSM tags that spot as "Louvre **Palace**" (sl 38) not "Louvre **Museum**" (~150); Akshardham-type temples tagged only `amenity=place_of_worship` (no `tourism`) get no tourist-intent boost.
-- **Hotel-upgrade approvals are a no-op** — `budget_upgrade` has no apply handler (#35).
-- **Groq is the permanent LLM** (llama-3.3-70b "large", llama-3.1-8b "small"). Do not switch to Claude/Anthropic.
-- **Place caches** (`places:*`, 6 h TTL) — cleared/`cache=None` paths re-fetch; the planner always fetches fresh.
+- **Frontend must run on port 3000** — Next falls back to 3001 if 3000 is taken, which breaks CORS. Use `npm run dev -- -p 3000` so it fails loudly instead of drifting.
+- **OneDrive locks `frontend/.next`** → stale Tailwind CSS in dev / EPERM on build. Clear `.next` and restart dev after big token changes.
+- **Restart the Celery worker after any backend code change** — it caches imported code at startup.
+- **Groq is the permanent LLM** (llama-3.3-70b "large", llama-3.1-8b "small"/"tools"). Do not switch to Claude/Anthropic.
 - **react-leaflet v4** — do not upgrade to v5 (needs React 19; project is React 18).
+- **passlib 1.7 is EOL** but functional (correctly pinned `bcrypt<4.1`); no drop-in replacement yet.

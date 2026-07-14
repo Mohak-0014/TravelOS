@@ -88,15 +88,17 @@ async def test_run_empty_itinerary_proceeds_without_replan_on_max_iterations() -
 
 
 @pytest.mark.asyncio
-async def test_run_time_overlap_triggers_replan() -> None:
-    # Two items on day 1 with overlapping windows
+async def test_run_time_overlap_is_warning_not_replan() -> None:
+    # Validation repairs overlaps deterministically before this node — a leftover
+    # overlap is reported as a conflict but no longer burns an LLM replan cycle.
     items = [
         _item(day=1, start_time="09:00", end_time="13:00"),
         _item(day=1, start_time="11:00", end_time="15:00", title="Overlap"),
     ]
     result = await run(_base_state(itinerary=items))
-    assert result["current_step"] == "itinerary_planner"
-    assert result["replan_iterations"] == 1
+    assert result["current_step"] == "approval_gate"
+    assert result["replan_iterations"] == 0
+    assert "overlap" in result["agent_messages"][0].content.lower()
 
 
 @pytest.mark.asyncio
@@ -320,3 +322,23 @@ def test_budget_approval_payload_values() -> None:
     assert approval["payload"]["estimated_total"] == pytest.approx(1200.0)
     assert approval["payload"]["budget_total"] == pytest.approx(1000.0)
     assert approval["payload"]["breach_pct"] == pytest.approx(20.0)
+
+
+@pytest.mark.asyncio
+async def test_run_replan_carries_feedback_for_planner() -> None:
+    # All-free itinerary triggers a replan — the reasons must be handed to the
+    # planner via replan_feedback, not buried in message prose.
+    items = [
+        {"title": "Free block", "item_type": "free", "day_number": 1},
+        {"title": "Free block", "item_type": "free", "day_number": 2},
+    ]
+    result = await run(_base_state(itinerary=items))
+    assert result["current_step"] == "itinerary_planner"
+    assert result["replan_feedback"]
+    assert any("free" in f.lower() for f in result["replan_feedback"])
+
+
+@pytest.mark.asyncio
+async def test_run_no_replan_clears_feedback() -> None:
+    result = await run(_base_state(itinerary=[]))
+    assert result["replan_feedback"] == []

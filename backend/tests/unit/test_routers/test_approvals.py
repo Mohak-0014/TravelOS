@@ -611,3 +611,107 @@ async def test_concierge_swap_approve_updates_item_with_description(
     updated_item = item_result.scalar_one()
     assert updated_item.title == "Senso-ji Temple"
     assert updated_item.description == "Ancient Buddhist temple in Asakusa."
+
+
+@pytest.mark.asyncio
+async def test_weather_replan_approve_swaps_item_with_grounded_alternative(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """weather_replan approval must APPLY the swap — title, coords and source_ref
+    all move to the grounded indoor alternative (regression: this change_type
+    previously had no apply-handler, so approving did nothing)."""
+    from sqlalchemy import select
+
+    from backend.db.models import Approval, ItineraryItem, Trip
+
+    token = await _auth(client, "weather_swap@test.com")
+    trip = await _create_trip(client, token)
+    item = await _add_item(client, token, trip["id"])
+
+    approval = Approval(
+        trip_id=trip["id"],
+        proposed_by="weather_agent",
+        change_type="weather_replan",
+        summary="Replace outdoor item due to rain",
+        payload={
+            "original_item": {"id": item["id"], "title": item["title"]},
+            "alternative_item": {
+                "title": "Indo-Portuguese Museum",
+                "description": "museum",
+                "item_type": "activity",
+                "is_outdoor": False,
+                "latitude": 9.9623,
+                "longitude": 76.2412,
+                "source_provider": "overpass",
+                "source_ref": "node/600348684",
+            },
+            "weather_condition": "Heavy rain",
+        },
+        status="pending",
+    )
+    db_session.add(approval)
+    trip_result = await db_session.execute(select(Trip).where(Trip.id == trip["id"]))
+    db_trip = trip_result.scalar_one()
+    db_trip.status = "awaiting_approval"
+    await db_session.commit()
+    await db_session.refresh(approval)
+
+    resp = await client.post(
+        f"/api/v1/approvals/{approval.id}",
+        json={"decision": "approved"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+
+    item_result = await db_session.execute(
+        select(ItineraryItem).where(ItineraryItem.id == item["id"])
+    )
+    updated = item_result.scalar_one()
+    assert updated.title == "Indo-Portuguese Museum"
+    assert updated.is_outdoor is False
+    assert updated.source_ref == "node/600348684"
+    assert float(updated.latitude) == pytest.approx(9.9623)
+
+
+@pytest.mark.asyncio
+async def test_weather_replan_reject_changes_nothing(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    from sqlalchemy import select
+
+    from backend.db.models import Approval, ItineraryItem, Trip
+
+    token = await _auth(client, "weather_rej@test.com")
+    trip = await _create_trip(client, token)
+    item = await _add_item(client, token, trip["id"])
+    original_title = item["title"]
+
+    approval = Approval(
+        trip_id=trip["id"],
+        proposed_by="weather_agent",
+        change_type="weather_replan",
+        summary="Replace outdoor item due to rain",
+        payload={
+            "original_item": {"id": item["id"], "title": original_title},
+            "alternative_item": {"title": "Some Museum", "source_ref": "node/1"},
+        },
+        status="pending",
+    )
+    db_session.add(approval)
+    trip_result = await db_session.execute(select(Trip).where(Trip.id == trip["id"]))
+    trip_row = trip_result.scalar_one()
+    trip_row.status = "awaiting_approval"
+    await db_session.commit()
+    await db_session.refresh(approval)
+
+    resp = await client.post(
+        f"/api/v1/approvals/{approval.id}",
+        json={"decision": "rejected"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+
+    item_result = await db_session.execute(
+        select(ItineraryItem).where(ItineraryItem.id == item["id"])
+    )
+    assert item_result.scalar_one().title == original_title

@@ -243,17 +243,26 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     itinerary: list[dict] = state.get("itinerary") or []  # type: ignore[type-arg]
     open_slots = _find_open_evening_slots(itinerary, start_date, end_date)
 
-    proposals: list[tuple[EventOffer, int]] = []
+    proposals: list[tuple[EventOffer, int]] = []  # slot-matched → pending approval
+    auto_events: list[tuple[EventOffer, int]] = []  # unmatched → auto-approved for browsing
     used_dates: set[date] = set()
+    proposed_event_names: set[str] = set()
 
     for event, _score in top10:
-        if len(proposals) >= _MAX_PROPOSALS:
-            break
-        for day_num, slot_date in open_slots:
-            if slot_date == event.event_date and slot_date not in used_dates:
-                proposals.append((event, day_num))
-                used_dates.add(slot_date)
-                break
+        matched = False
+        if len(proposals) < _MAX_PROPOSALS:
+            for day_num, slot_date in open_slots:
+                if slot_date == event.event_date and slot_date not in used_dates:
+                    proposals.append((event, day_num))
+                    used_dates.add(slot_date)
+                    proposed_event_names.add(event.name)
+                    matched = True
+                    break
+        if not matched:
+            # Store for display even without a matching open slot
+            day_offset = (event.event_date - start_date).days + 1
+            day_num = max(1, min(day_offset, (end_date - start_date).days + 1))
+            auto_events.append((event, day_num))
 
     # Step 6: Venue conflict detection — flag existing items within 500m of a top-10 event
     conflict_count = 0
@@ -289,7 +298,27 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
 
     # Steps 7 + 8: LLM summaries → ApprovalRequests
     proposed_names: list[str] = []
+
+    def _event_payload(event: EventOffer, day_num: int) -> dict:  # type: ignore[type-arg]
+        return {
+            "event_name": event.name,
+            "event_date": event.event_date.isoformat(),
+            "start_time": event.start_time.isoformat() if event.start_time else None,
+            "venue_name": event.venue_name,
+            "lat": event.lat,
+            "lng": event.lng,
+            "category": event.category,
+            "price_min": event.price_min,
+            "price_max": event.price_max,
+            "price_currency": event.price_currency,
+            "url": event.url,
+            "image_url": event.image_url,
+            "day_number": day_num,
+            "source": event.source,
+        }
+
     async with AsyncSessionLocal() as db:
+        # Pending proposals — require user action
         for event, day_num in proposals:
             summary = await _proposal_summary(event, city, style_tags, day_num)
             db.add(
@@ -298,50 +327,52 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
                     proposed_by="events_agent",
                     change_type="event_add",
                     summary=summary,
-                    payload={
-                        "event_name": event.name,
-                        "event_date": event.event_date.isoformat(),
-                        "start_time": event.start_time.isoformat() if event.start_time else None,
-                        "venue_name": event.venue_name,
-                        "lat": event.lat,
-                        "lng": event.lng,
-                        "category": event.category,
-                        "price_min": event.price_min,
-                        "price_max": event.price_max,
-                        "price_currency": event.price_currency,
-                        "url": event.url,
-                        "image_url": event.image_url,
-                        "day_number": day_num,
-                        "source": event.source,
-                    },
+                    payload=_event_payload(event, day_num),
                     status="pending",
                 )
             )
             proposed_names.append(event.name)
+
+        # Auto-approved events — stored for browsing, no user action needed
+        for event, day_num in auto_events:
+            summary = f"{event.name} at {event.venue_name}"
+            db.add(
+                Approval(
+                    trip_id=trip_id,
+                    proposed_by="events_agent",
+                    change_type="event_add",
+                    summary=summary,
+                    payload=_event_payload(event, day_num),
+                    status="approved",
+                )
+            )
 
         if proposals:
             trip_result = await db.execute(select(Trip).where(Trip.id == trip_id))
             db_trip = trip_result.scalar_one_or_none()
             if db_trip:
                 db_trip.status = "awaiting_approval"
-            await db.commit()
+        await db.commit()
 
     logger.info(
         "events_agent_done",
         trip_id=trip_id,
         proposed=len(proposed_names),
+        auto=len(auto_events),
         conflict_warnings=conflict_count,
     )
 
     msg = (
         f"Events agent: {fetched} fetched, {len(filtered)} filtered, "
-        f"{len(proposed_names)} proposed, {conflict_count} conflict warnings."
+        f"{len(proposed_names)} pending proposals, {len(auto_events)} auto-displayed, "
+        f"{conflict_count} conflict warnings."
     )
     return {
         "events_state": {
             "fetched": fetched,
             "filtered": len(filtered),
             "proposed": proposed_names,
+            "auto_displayed": len(auto_events),
             "conflict_warnings": conflict_count,
         },
         "agent_messages": [AIMessage(content=msg)],

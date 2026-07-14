@@ -34,11 +34,11 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     conflicts: list[str] = []
     should_replan = False
 
-    # ── 1. Time overlaps ──────────────────────────────────────────────────────
+    # ── 1. Time overlaps (validation repairs these deterministically — anything
+    # still overlapping here is logged as a warning, not worth an LLM replan) ──
     overlap_days = _find_time_overlaps(itinerary)
     if overlap_days:
         conflicts.append(f"Time overlaps on day(s): {overlap_days}")
-        should_replan = True
 
     # ── 2. All-default itinerary (LLM fallback) ───────────────────────────────
     if itinerary and all(it.get("item_type") == "free" for it in itinerary):
@@ -50,14 +50,15 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     # ── 3. Budget breach ──────────────────────────────────────────────────────
     estimated = budget_state.get("estimated_planned", 0.0)
     budget_total = budget_state.get("total")
+    currency = str(budget_state.get("currency") or "INR")
     if budget_total and float(estimated) > 0:
         breach_pct = (float(estimated) - float(budget_total)) / float(budget_total) * 100
         if breach_pct > _BUDGET_BREACH_THRESHOLD_PCT:
             conflicts.append(
-                f"Budget breach: estimated ${float(estimated):.0f} vs "
-                f"${float(budget_total):.0f} ({breach_pct:.0f}% over)"
+                f"Budget breach: estimated {currency} {float(estimated):.0f} vs "
+                f"{currency} {float(budget_total):.0f} ({breach_pct:.0f}% over)"
             )
-            approvals.append(_budget_approval(estimated, budget_total, breach_pct))
+            approvals.append(_budget_approval(estimated, budget_total, breach_pct, currency))
             budget_state["breach_pct"] = round(breach_pct, 1)
 
     # ── 4. Over-packed days ───────────────────────────────────────────────────
@@ -89,10 +90,14 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     # ── Routing decision ──────────────────────────────────────────────────────
     next_step = "approval_gate"
     new_iterations = replan_iterations
+    replan_feedback: list[str] = []
 
     if should_replan and replan_iterations < 3:
         next_step = "itinerary_planner"
         new_iterations = replan_iterations + 1
+        # Tell the planner WHY — injected into the regeneration prompt so the
+        # retry isn't a blind re-roll of the same prompt.
+        replan_feedback = list(conflicts)
         conflicts.append(f"Triggering replan (attempt {new_iterations}/3)")
 
     n = len(conflicts)
@@ -111,6 +116,7 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     return {
         "current_step": next_step,
         "replan_iterations": new_iterations,
+        "replan_feedback": replan_feedback,
         "approval_queue": approvals,
         "budget_state": budget_state,
         "agent_messages": [
@@ -153,19 +159,21 @@ def _budget_approval(
     estimated: float,
     budget_total: float,
     breach_pct: float,
+    currency: str = "INR",
 ) -> dict:  # type: ignore[type-arg]
     return {
         "id": str(uuid.uuid4()),
         "proposed_by": "conflict_detection",
         "change_type": "budget_exceed",
         "summary": (
-            f"Estimated itinerary cost ${float(estimated):.0f} exceeds "
-            f"budget ${float(budget_total):.0f} by {breach_pct:.0f}%"
+            f"Estimated itinerary cost {currency} {float(estimated):.0f} exceeds "
+            f"budget {currency} {float(budget_total):.0f} by {breach_pct:.0f}%"
         ),
         "payload": {
             "estimated_total": round(float(estimated), 2),
             "budget_total": round(float(budget_total), 2),
             "breach_pct": round(breach_pct, 1),
+            "currency": currency,
         },
         "status": "pending",
     }

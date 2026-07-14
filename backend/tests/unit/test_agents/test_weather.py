@@ -8,13 +8,14 @@ from backend.agents.weather import (
     _condition_for_date,
     _empty_weather_state,
     _item_to_dict,
-    _parse_alternative,
+    _next_alternative,
     create_approvals,
     impact_assessment,
     weather_adaptation,
     weather_check,
 )
 from backend.graphs.state import TravelOSState
+from backend.tools.places import Attraction
 from backend.tools.weather import WeatherDay
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
@@ -108,34 +109,31 @@ def _mock_item() -> MagicMock:
 # ── _parse_alternative ────────────────────────────────────────────────────────
 
 
-def test_parse_alternative_valid() -> None:
-    raw = (
-        '{"title": "Vatican Museum", "description": "World-class indoor art collection.",'
-        ' "item_type": "activity", "is_outdoor": false}'
+def _indoor_attraction(name: str = "Vatican Museum", ref: str = "way/vm") -> Attraction:
+    return Attraction(
+        osm_id=ref,
+        name=name,
+        lat=41.9,
+        lng=12.45,
+        kinds="museum",
+        category="museum_gallery",
+        source_ref=ref,
     )
-    result = _parse_alternative(raw)
-    assert result is not None
-    assert result["title"] == "Vatican Museum"
-    assert result["is_outdoor"] is False
 
 
-def test_parse_alternative_with_surrounding_text() -> None:
-    raw = (
-        'Sure! Here is an indoor option:\n{"title": "Borghese Gallery",'
-        ' "description": "Fine art indoors.", "item_type": "activity", "is_outdoor": false}'
-    )
-    result = _parse_alternative(raw)
-    assert result is not None
-    assert result["title"] == "Borghese Gallery"
+def test_next_alternative_is_grounded_in_pool_venue() -> None:
+    candidates = [_indoor_attraction()]
+    alt = _next_alternative(candidates)
+    assert alt is not None
+    assert alt["title"] == "Vatican Museum"
+    assert alt["is_outdoor"] is False
+    assert alt["source_ref"] == "way/vm"  # grounding: real OSM ref, never invented
+    assert alt["latitude"] == 41.9
+    assert candidates == []  # consumed — no duplicate proposals
 
 
-def test_parse_alternative_missing_title_returns_none() -> None:
-    raw = '{"description": "Some place", "is_outdoor": false}'
-    assert _parse_alternative(raw) is None
-
-
-def test_parse_alternative_malformed_json_returns_none() -> None:
-    assert _parse_alternative("not json at all") is None
+def test_next_alternative_empty_pool_returns_none() -> None:
+    assert _next_alternative([]) is None
 
 
 # ── _build_approval ───────────────────────────────────────────────────────────
@@ -336,21 +334,22 @@ async def test_weather_adaptation_proposes_alternatives() -> None:
         "affected_items": [item_dict],
     }
 
-    alternative = {
-        "title": "Vatican Museum",
-        "description": "Indoors.",
-        "item_type": "activity",
-        "is_outdoor": False,
-    }
-
     with (
         patch("backend.agents.weather._load_trip", AsyncMock(return_value=_mock_trip())),
-        patch("backend.agents.weather._generate_alternative", AsyncMock(return_value=alternative)),
+        patch(
+            "backend.agents.weather._indoor_candidates",
+            AsyncMock(return_value=[_indoor_attraction()]),
+        ),
     ):
         result = await weather_adaptation(state)
 
     assert len(result["approval_queue"]) == 1
-    assert result["approval_queue"][0]["change_type"] == "weather_replan"
+    approval = result["approval_queue"][0]
+    assert approval["change_type"] == "weather_replan"
+    # Grounded replacement: carries the real venue's coordinates and OSM ref
+    alt = approval["payload"]["alternative_item"]
+    assert alt["source_ref"] == "way/vm"
+    assert alt["latitude"] == 41.9
     assert result["current_step"] == "create_approvals"
 
 
@@ -371,7 +370,7 @@ async def test_weather_adaptation_no_affected_items() -> None:
 
 
 @pytest.mark.asyncio
-async def test_weather_adaptation_llm_failure_skips_item() -> None:
+async def test_weather_adaptation_empty_pool_skips_item() -> None:
     item_dict = _item_to_dict(_mock_item())
     state = _base_state()
     state["weather_state"] = {
@@ -383,7 +382,7 @@ async def test_weather_adaptation_llm_failure_skips_item() -> None:
 
     with (
         patch("backend.agents.weather._load_trip", AsyncMock(return_value=_mock_trip())),
-        patch("backend.agents.weather._generate_alternative", AsyncMock(return_value=None)),
+        patch("backend.agents.weather._indoor_candidates", AsyncMock(return_value=[])),
     ):
         result = await weather_adaptation(state)
 

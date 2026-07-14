@@ -31,6 +31,7 @@ def _mock_trip(
     trip.budget_total = budget_total
     trip.budget_currency = budget_currency
     trip.destination_city = destination_city
+    trip.flight_origin = None  # opt-in per test — MagicMock default would crash len()
     return trip
 
 
@@ -335,7 +336,8 @@ async def test_run_on_track_returns_budget_summary() -> None:
     state = _state(itinerary=items, hotel_state=hotel_state)
 
     with patch("backend.agents.budget_optimizer._load_trip") as mock_load:
-        mock_load.return_value = _mock_trip(budget_total=700.0)
+        # Unmapped city -> local currency USD == budget currency -> costs pass through
+        mock_load.return_value = _mock_trip(budget_total=700.0, destination_city="Springfield")
         result = await run(state)
 
     bs = result["budget_state"]
@@ -379,7 +381,7 @@ async def test_run_over_budget_creates_swap_proposals() -> None:
         patch("backend.agents.budget_optimizer._persist_approvals") as mock_persist,
         patch("backend.agents.budget_optimizer._set_trip_awaiting_approval") as mock_status,
     ):
-        mock_load.return_value = _mock_trip(budget_total=1500.0)
+        mock_load.return_value = _mock_trip(budget_total=1500.0, destination_city="Springfield")
         mock_items.return_value = fake_db_items  # auto-AsyncMock wraps this
         mock_swap.return_value = fake_proposal  # auto-AsyncMock wraps this
         mock_persist.return_value = None
@@ -438,3 +440,118 @@ async def test_run_handles_exception_gracefully() -> None:
 
     assert "budget_state" in result
     assert result["agent_messages"] == []
+
+
+# ── Flight cost inclusion ─────────────────────────────────────────────────────
+
+
+def _flight_offer(price: float = 400.0, currency: str = "USD"):
+    from backend.tools.flights import FlightOffer
+
+    return FlightOffer(
+        origin="DEL",
+        destination="COK",
+        departure_date="2026-08-01",
+        return_date="2026-08-05",
+        airline="AI",
+        price_total=price,
+        price_currency=currency,
+        cabin="ECONOMY",
+        duration_outbound="3h 10m",
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_includes_cheapest_flight_in_budget() -> None:
+    items = [_itinerary_item("activity", 100.0)]
+    hotel_state = {"selected": {"price_total": 500.0}}
+    state = _state(itinerary=items, hotel_state=hotel_state)
+    trip = _mock_trip(budget_total=2000.0, destination_city="Springfield")
+    trip.flight_origin = "DEL"
+    trip.start_date = MagicMock()
+    trip.end_date = MagicMock()
+    trip.num_travelers = 2
+
+    offers = [_flight_offer(450.0), _flight_offer(300.0), _flight_offer(500.0)]
+    with (
+        patch("backend.agents.budget_optimizer._load_trip", new=AsyncMock(return_value=trip)),
+        patch("backend.agents.budget_optimizer.search_flights", new=AsyncMock(return_value=offers)),
+        patch(
+            "backend.agents.budget_optimizer.get_redis_client",
+            return_value=MagicMock(aclose=AsyncMock()),
+        ),
+    ):
+        result = await run(state)
+
+    bs = result["budget_state"]
+    assert bs["by_category"]["flights"] == 300.0  # cheapest offer, already USD
+    # 100 activity + 500 hotel + 300 flights
+    assert bs["total_planned"] == pytest.approx(900.0)
+
+
+@pytest.mark.asyncio
+async def test_run_no_flight_origin_excludes_flights() -> None:
+    items = [_itinerary_item("activity", 100.0)]
+    hotel_state = {"selected": {"price_total": 500.0}}
+    state = _state(itinerary=items, hotel_state=hotel_state)
+    trip = _mock_trip(budget_total=2000.0, destination_city="Springfield")  # flight_origin=None
+
+    with patch("backend.agents.budget_optimizer._load_trip", new=AsyncMock(return_value=trip)):
+        result = await run(state)
+
+    assert "flights" not in result["budget_state"]["by_category"]
+
+
+@pytest.mark.asyncio
+async def test_run_flight_search_failure_excludes_flights() -> None:
+    # Real fare or nothing — an errored search must not fabricate a number
+    items = [_itinerary_item("activity", 100.0)]
+    hotel_state = {"selected": {"price_total": 500.0}}
+    state = _state(itinerary=items, hotel_state=hotel_state)
+    trip = _mock_trip(budget_total=2000.0, destination_city="Springfield")
+    trip.flight_origin = "DEL"
+    trip.start_date = MagicMock()
+    trip.end_date = MagicMock()
+    trip.num_travelers = 2
+
+    with (
+        patch("backend.agents.budget_optimizer._load_trip", new=AsyncMock(return_value=trip)),
+        patch(
+            "backend.agents.budget_optimizer.search_flights",
+            new=AsyncMock(side_effect=RuntimeError("duffel down")),
+        ),
+        patch(
+            "backend.agents.budget_optimizer.get_redis_client",
+            return_value=MagicMock(aclose=AsyncMock()),
+        ),
+    ):
+        result = await run(state)
+
+    assert "flights" not in result["budget_state"]["by_category"]
+    assert result["budget_state"]["total_planned"] == pytest.approx(600.0)
+
+
+# ── Budget state persistence (durable copy for the API) ────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_run_persists_budget_state_to_trip_row() -> None:
+    items = [_itinerary_item("activity", 100.0)]
+    hotel_state = {"selected": {"price_total": 500.0}}
+    state = _state(itinerary=items, hotel_state=hotel_state)
+    trip = _mock_trip(budget_total=2000.0, destination_city="Springfield")
+
+    with (
+        patch("backend.agents.budget_optimizer._load_trip", new=AsyncMock(return_value=trip)),
+        patch(
+            "backend.agents.budget_optimizer._persist_budget_state", new=AsyncMock()
+        ) as mock_persist,
+    ):
+        result = await run(state)
+
+    mock_persist.assert_awaited_once()
+    trip_id_arg, persisted = mock_persist.await_args.args
+    assert trip_id_arg == "trip-bo"
+    assert persisted["by_category"]["lodging"] == 500.0
+    assert persisted["total_planned"] == pytest.approx(600.0)
+    assert persisted == result["budget_state"]
