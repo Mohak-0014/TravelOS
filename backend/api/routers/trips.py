@@ -143,6 +143,7 @@ async def create_trip(
         num_travelers=body.num_travelers,
         budget_total=body.budget_total,
         budget_currency=body.budget_currency,
+        flight_origin=body.flight_origin,
         cover_image_url=cover_url,
     )
     db.add(trip)

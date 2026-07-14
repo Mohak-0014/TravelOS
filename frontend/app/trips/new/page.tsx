@@ -922,6 +922,7 @@ export default function NewTripPage() {
         num_travelers: travelers,
         budget_total: budget ? parseFloat(budget) : null,
         budget_currency: currency,
+        flight_origin: flightOrigin.trim().length === 3 ? flightOrigin.trim().toUpperCase() : null,
       });
       if (flightOrigin.trim().length === 3) {
         sessionStorage.setItem(`flight_origin_${trip.id}`, flightOrigin.trim().toUpperCase());

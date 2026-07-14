@@ -96,8 +96,14 @@ class Trip(Base):
     num_travelers: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     budget_total: Mapped[float | None] = mapped_column(Numeric(12, 2))
     budget_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
+    # Departure airport IATA code — lets the budget optimizer price round-trip flights
+    flight_origin: Mapped[str | None] = mapped_column(String(3), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="planning")
     packing_list: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Snapshot of the graph's budget_state (by_category, total_planned, deviation_pct,
+    # status…) written by the budget optimizer — the graph's own state is ephemeral
+    # (per-task MemorySaver), so this is the only durable copy the API can serve.
+    budget_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     cover_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     share_token: Mapped[str | None] = mapped_column(
         String(36), nullable=True, unique=True, index=True
