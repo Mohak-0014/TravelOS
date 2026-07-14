@@ -124,8 +124,10 @@ async def _run_trip_graph(trip_id: str, user_id: str) -> dict:  # type: ignore[r
         "replan_iterations": 0,
     }
 
-    # Mark trip as generating and record the thread_id before any work starts
+    # Mark trip as generating and clear any stale pending approvals from previous
+    # generations — they reference old itinerary item IDs and wrong cost data.
     await _set_trip_status(trip_id, "generating", thread_id=thread_id)
+    await _clear_pending_approvals(trip_id)
 
     try:
         # Phase 1: run until interrupt_before=["approval_gate"]
@@ -165,6 +167,23 @@ async def _run_trip_graph(trip_id: str, user_id: str) -> dict:  # type: ignore[r
     except Exception:
         await _set_trip_status(trip_id, "failed")
         raise
+
+
+async def _clear_pending_approvals(trip_id: str) -> None:
+    """Delete all pending approvals for a trip before a new generation run."""
+    from sqlalchemy import delete as sa_delete  # noqa: PLC0415
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                sa_delete(Approval).where(
+                    Approval.trip_id == trip_id,
+                    Approval.status == "pending",
+                )
+            )
+            await session.commit()
+    except SQLAlchemyError as exc:
+        logger.warning("clear_pending_approvals_error", trip_id=trip_id, error=str(exc))
 
 
 async def _set_trip_status(

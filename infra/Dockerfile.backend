@@ -1,16 +1,14 @@
-FROM python:3.11-slim
+FROM python:3.11-slim AS base
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     gcc \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml .
-RUN pip install --no-cache-dir -e ".[dev]"
-
-COPY backend/ ./backend/
 
 ENV PYTHONPATH=/app
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -18,4 +16,24 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000
 
-CMD ["uvicorn", "backend.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# ── dev stage (used by infra/docker-compose.yml) ────────────────────────────
+FROM base AS dev
+RUN pip install --no-cache-dir -e ".[dev]"
+COPY backend/ ./backend/
+CMD ["uvicorn", "backend.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+# ── prod stage (used by infra/docker-compose.prod.yml) ──────────────────────
+FROM base AS prod
+RUN pip install --no-cache-dir -e "."
+COPY backend/ ./backend/
+COPY alembic.ini ./
+
+# Pre-download the embedding model so the Celery worker avoids a cold-start
+# download (~80 MB) on first task. Baked into the image layer cache.
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+
+CMD ["gunicorn", "backend.api.main:app", \
+     "--worker-class", "uvicorn.workers.UvicornWorker", \
+     "--bind", "0.0.0.0:8000", \
+     "--workers", "2", \
+     "--timeout", "120"]

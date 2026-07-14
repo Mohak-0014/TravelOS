@@ -46,15 +46,6 @@ type IconComponent = LucideIcon;
 // Extended TripOut to allow for fields the API may return that aren't in the base type
 type TripOutExtended = TripOut & {
   agent_messages?: { role: string; content: string }[];
-  budget_state?: {
-    lodging?: number;
-    activities?: number;
-    meals?: number;
-    transport?: number;
-    total?: number;
-    currency?: string;
-    deviation_pct?: number;
-  };
 };
 
 // ── Status config ─────────────────────────────────────────────────────────────
@@ -110,6 +101,24 @@ const ITEM_ICONS: Record<string, { emoji: string; icon: IconComponent; color: st
   lodging:  { emoji: "🏨", icon: Hotel,     color: "text-coral-400"    },
   free:     { emoji: "☀️", icon: Sun,       color: "text-gold-400"     },
 };
+
+// ── Currency conversion (mirrors backend/tools/currency.py) ──────────────────
+const _RATE_TO_INR: Record<string, number> = {
+  INR: 1, USD: 0.0119, EUR: 0.01099, GBP: 0.00943, JPY: 1.851, AUD: 0.01852,
+  NZD: 0.02, CAD: 0.01639, CHF: 0.01053, SGD: 0.01587, HKD: 0.09346, MYR: 0.05263,
+  THB: 0.41667, IDR: 192.31, PHP: 0.68027, VND: 303.03, KRW: 16.667, CNY: 0.08696,
+  TWD: 0.38462, AED: 0.04386, QAR: 0.04329, EGP: 0.57143, ZAR: 0.22222, TRY: 0.41667,
+  BRL: 0.06667, MXN: 0.2381, SEK: 0.125, NOK: 0.11111, DKK: 0.08197, NPR: 1.6,
+  LKR: 3.175, RUB: 1.07527, CZK: 0.2381, HUF: 3.07692, PLN: 0.04167,
+};
+function convertToBudgetCurrency(amount: number, from: string, to: string): number {
+  if (from === to) return amount;
+  const fromRate = _RATE_TO_INR[from.toUpperCase()];
+  const toRate   = _RATE_TO_INR[to.toUpperCase()];
+  if (!fromRate || !toRate) return amount;
+  const inr = amount / fromRate;   // convert to INR pivot
+  return inr * toRate;             // then to target currency
+}
 
 // ── Destination gradient helper ───────────────────────────────────────────────
 
@@ -203,22 +212,42 @@ function DonutChart({ slices, currency }: { slices: DonutSlice[]; currency?: str
 
 // ── Agent Pipeline ─────────────────────────────────────────────────────────────
 
-const PIPELINE_STEPS = [
-  "Travel Style",
-  "Itinerary Planner",
-  "Hotels",
-  "Budget",
-  "Events",
-  "Packing List",
-  "Validation",
-  "Saved",
+// Cumulative elapsed-second thresholds at which each step becomes "active".
+// Derived from real worker timing: total ~85 s, itinerary planner is the long pole.
+const PIPELINE_STEPS: { label: string; hint: string; startsAt: number }[] = [
+  { label: "Travel Style",      hint: "Reading your preferences…",         startsAt: 0  },
+  { label: "Itinerary Planner", hint: "Fetching attractions & weather…",   startsAt: 8  },
+  { label: "Hotels",            hint: "Searching available hotels…",       startsAt: 46 },
+  { label: "Budget",            hint: "Optimising costs…",                 startsAt: 56 },
+  { label: "Events",            hint: "Finding local events…",             startsAt: 63 },
+  { label: "Packing List",      hint: "Preparing your packing list…",      startsAt: 69 },
+  { label: "Validation",        hint: "Reviewing the plan…",               startsAt: 74 },
+  { label: "Saving",            hint: "Almost there…",                     startsAt: 79 },
 ];
 
-function AgentPipeline({ messages }: { messages?: { role: string; content: string }[] }) {
-  const activeStep = Math.min(
-    Math.floor(((messages?.length ?? 0) / 3)),
-    PIPELINE_STEPS.length - 1,
+const GEN_START_KEY = (id: string) => `gen_start_${id}`;
+
+function AgentPipeline({ tripId }: { tripId: string }) {
+  const [elapsed, setElapsed] = useState<number>(() => {
+    const raw = sessionStorage.getItem(GEN_START_KEY(tripId));
+    return raw ? Math.floor((Date.now() - Number(raw)) / 1000) : 0;
+  });
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      const raw = sessionStorage.getItem(GEN_START_KEY(tripId));
+      const start = raw ? Number(raw) : Date.now();
+      setElapsed(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [tripId]);
+
+  // activeStep = last step whose startsAt threshold has been passed
+  const activeStep = PIPELINE_STEPS.reduce(
+    (acc, step, i) => (elapsed >= step.startsAt ? i : acc),
+    0,
   );
+  const currentHint = PIPELINE_STEPS[activeStep].hint;
 
   return (
     <div className="glass-card p-8 text-center">
@@ -231,8 +260,11 @@ function AgentPipeline({ messages }: { messages?: { role: string; content: strin
       </div>
 
       <h2 className="text-xl font-bold text-white mb-1">Building Your Journey</h2>
-      <p className="text-sm text-slate-500 mb-10">
-        AI agents are crafting a personalised itinerary. This usually takes 30–60 s.
+      <p className="text-sm text-slate-500 mb-2">
+        AI agents are crafting a personalised itinerary. This usually takes 60–90 s.
+      </p>
+      <p className="text-xs text-electric-400 mb-10 h-4 transition-all duration-500">
+        {currentHint}
       </p>
 
       {/* Pipeline steps */}
@@ -241,7 +273,7 @@ function AgentPipeline({ messages }: { messages?: { role: string; content: strin
           const done = i < activeStep;
           const active = i === activeStep;
           return (
-            <div key={step} className="flex items-center">
+            <div key={step.label} className="flex items-center">
               <div className="flex flex-col items-center gap-1.5">
                 <motion.div
                   animate={active ? { scale: [1, 1.08, 1] } : {}}
@@ -271,7 +303,7 @@ function AgentPipeline({ messages }: { messages?: { role: string; content: strin
                       : "text-slate-600"
                   }`}
                 >
-                  {step}
+                  {step.label}
                 </span>
               </div>
 
@@ -287,10 +319,15 @@ function AgentPipeline({ messages }: { messages?: { role: string; content: strin
         })}
       </div>
 
-      {/* Live message stream */}
-      {messages && messages.length > 0 && (
+      {/* Elapsed time */}
+      <p className="text-[10px] text-slate-600 tabular-nums">
+        {elapsed}s elapsed
+      </p>
+
+      {/* Kept for structural parity — hidden since agent_messages isn't in TripOut */}
+      {false && (
         <div className="glass-light rounded-xl p-4 max-h-32 overflow-y-auto text-left space-y-1.5">
-          {messages.slice(-6).map((msg, i) => (
+          {[].map((msg: { role: string; content: string }, i: number) => (
             <p key={i} className="text-xs text-slate-400 leading-relaxed">
               <span className="text-electric-400 font-medium">{msg.role}:</span>{" "}
               {msg.content}
@@ -304,7 +341,7 @@ function AgentPipeline({ messages }: { messages?: { role: string; content: strin
 
 // ── Weather Timeline strip ─────────────────────────────────────────────────────
 
-function WeatherTimeline({ days }: { days: WeatherDay[] }) {
+function WeatherTimeline({ days, heroStyle = false }: { days: WeatherDay[]; heroStyle?: boolean }) {
   if (!days.length) return null;
   return (
     <div className="flex gap-2 overflow-x-auto pb-0.5 scrollbar-hide">
@@ -312,18 +349,22 @@ function WeatherTimeline({ days }: { days: WeatherDay[] }) {
         <div
           key={d.date}
           className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl shrink-0 ${
-            d.is_adverse
+            heroStyle
+              ? d.is_adverse
+                ? "bg-coral-500/35 backdrop-blur-sm border border-coral-400/50"
+                : "bg-black/40 backdrop-blur-sm border border-white/20"
+              : d.is_adverse
               ? "bg-coral-500/10 border border-coral-500/20"
               : "bg-ink-900/[0.04] border border-ink-900/10"
           }`}
         >
-          <span className="text-[10px] text-slate-500">
+          <span className={`text-[10px] ${heroStyle ? "text-white/70" : "text-slate-500"}`}>
             {new Date(d.date + "T00:00:00").toLocaleDateString("en-US", {
               weekday: "short",
             })}
           </span>
           <WeatherIcon code={d.condition_code} adverse={d.is_adverse} />
-          <span className="text-[10px] text-slate-300 tabular-nums">
+          <span className={`text-[10px] tabular-nums ${heroStyle ? "text-white/90 font-medium" : "text-slate-300"}`}>
             {Math.round(d.temp_max_c)}°
           </span>
         </div>
@@ -477,7 +518,7 @@ function EditTripModal({
 
           <div>
             <label className="text-xs text-slate-500 mb-1 block">Currency</label>
-            <input className={`${fieldCls} uppercase`} maxLength={3} value={form.budget_currency ?? "USD"} onChange={(e) => set("budget_currency", e.target.value.toUpperCase())} />
+            <input className={`${fieldCls} uppercase`} maxLength={3} value={form.budget_currency ?? "INR"} onChange={(e) => set("budget_currency", e.target.value.toUpperCase())} />
           </div>
 
           {error && <p className="text-xs text-coral-400">{error}</p>}
@@ -1024,6 +1065,17 @@ export default function TripDetailPage() {
 
   const [flightOrigin, setFlightOrigin] = useState("");
   const [flightSearch, setFlightSearch] = useState("");
+  const [selectedFlight, setSelectedFlight] = useState<FlightOfferOut | null>(null);
+
+  // Auto-fill flight origin saved during trip creation
+  useEffect(() => {
+    if (!tripId) return;
+    const saved = sessionStorage.getItem(`flight_origin_${tripId}`);
+    if (saved && saved.length === 3) {
+      setFlightOrigin(saved);
+      setFlightSearch(saved);
+    }
+  }, [tripId]);
   const { data: flights = [], isFetching: flightsFetching } = useQuery<FlightOfferOut[]>({
     queryKey: ["flights", tripId, flightSearch],
     queryFn: () => api.getTripFlights(tripId as string, flightSearch),
@@ -1146,6 +1198,8 @@ export default function TripDetailPage() {
     setGenerateError(null);
     try {
       await api.post(`/api/v1/trips/${tripId}/itinerary/generate`);
+      // Record start time so AgentPipeline can drive time-based step progress.
+      sessionStorage.setItem(GEN_START_KEY(tripId), String(Date.now()));
       // Optimistically flip to "generating" so the trip query's refetchInterval starts
       // polling and the status-transition effect refreshes the itinerary once the worker
       // finishes. An immediate refetch can race and read the stale "planned" status,
@@ -1215,6 +1269,7 @@ export default function TripDetailPage() {
 
   const [sidebarTab, setSidebarTab] = useState<"concierge" | "map">("concierge");
   const [chatOpen, setChatOpen] = useState(false);
+  const [eventCategory, setEventCategory] = useState("All");
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
@@ -1316,16 +1371,65 @@ export default function TripDetailPage() {
   const pinnedItems = items.filter((i) => i.latitude != null && i.longitude != null);
 
   const selectedHotel = hotels.find((h) => h.is_selected);
-  const otherHotels = hotels.filter((h) => !h.is_selected);
+  const otherHotels = hotels.filter(
+    (h) => !h.is_selected && (h.price_total != null || h.price_per_night != null),
+  );
 
-  const budgetSlices: { label: string; value: number; color: string }[] = trip?.budget_state
-    ? [
-        { label: "Lodging",    value: trip.budget_state.lodging    ?? 0, color: "#3b82f6" },
-        { label: "Activities", value: trip.budget_state.activities ?? 0, color: "#a78bfa" },
-        { label: "Meals",      value: trip.budget_state.meals      ?? 0, color: "#fbbf24" },
-        { label: "Transport",  value: trip.budget_state.transport  ?? 0, color: "#34d399" },
-      ].filter((s) => s.value > 0)
-    : [];
+  const budgetSlices: { label: string; value: number; color: string }[] = (() => {
+    const byCategory = trip?.budget_state?.by_category;
+    if (byCategory) {
+      return [
+        { label: "Flights",    value: byCategory.flights    ?? 0, color: "#f472b6" },
+        { label: "Lodging",    value: byCategory.lodging    ?? 0, color: "#3b82f6" },
+        { label: "Activities", value: byCategory.activities ?? 0, color: "#a78bfa" },
+        { label: "Meals",      value: byCategory.meals      ?? 0, color: "#fbbf24" },
+        { label: "Transport",  value: byCategory.transport  ?? 0, color: "#34d399" },
+      ].filter((s) => s.value > 0);
+    }
+    // Derive from fetched data — convert all costs to the trip's budget currency
+    const bc = trip?.budget_currency ?? "INR";
+    const toCurrency = (amount: number, from: string | null | undefined): number =>
+      convertToBudgetCurrency(amount, from ?? bc, bc);
+    const sumConverted = (subset: typeof items) =>
+      subset.reduce((s, i) => s + toCurrency(i.est_cost ?? 0, i.est_cost_currency), 0);
+    const hotelCost = selectedHotel?.price_total != null
+      ? toCurrency(selectedHotel.price_total, selectedHotel.price_currency)
+      : sumConverted(items.filter((i) => i.item_type === "lodging"));
+    const lodging    = hotelCost;
+    const activities = sumConverted(items.filter((i) => i.item_type === "activity"));
+    const meals      = sumConverted(items.filter((i) => i.item_type === "meal"));
+    const transport  = sumConverted(items.filter((i) => i.item_type === "transport"));
+    const flightCost = selectedFlight != null
+      ? toCurrency(selectedFlight.price_total, selectedFlight.price_currency)
+      : 0;
+    return [
+      { label: "Flights",    value: flightCost, color: "#f472b6" },
+      { label: "Lodging",    value: lodging,    color: "#3b82f6" },
+      { label: "Activities", value: activities, color: "#a78bfa" },
+      { label: "Meals",      value: meals,      color: "#fbbf24" },
+      { label: "Transport",  value: transport,  color: "#34d399" },
+    ].filter((s) => s.value > 0);
+  })();
+
+  const budgetDerivedTotal = budgetSlices.reduce((s, d) => s + d.value, 0);
+  const budgetDeviationPct: number | null =
+    trip?.budget_state?.deviation_pct ??
+    (trip?.budget_total && budgetDerivedTotal > 0
+      ? ((budgetDerivedTotal - trip.budget_total) / trip.budget_total) * 100
+      : null);
+  const budgetCurrency = trip?.budget_state?.currency ?? trip?.budget_currency ?? "INR";
+  const budgetStateTotal =
+    trip?.budget_state?.total_planned ?? (budgetDerivedTotal > 0 ? budgetDerivedTotal : null);
+
+  const displayEvents = tripEvents.filter((ev) => ev.approval_status !== "rejected");
+  const eventCategories = [
+    "All",
+    ...Array.from(new Set(displayEvents.map((ev) => ev.category).filter(Boolean))),
+  ];
+  const filteredEvents =
+    eventCategory === "All"
+      ? displayEvents
+      : displayEvents.filter((ev) => ev.category === eventCategory);
 
   // ── Early returns ─────────────────────────────────────────────────────────────
 
@@ -1387,7 +1491,7 @@ export default function TripDetailPage() {
             </span>
           </div>
 
-          <AgentPipeline messages={trip.agent_messages} />
+          <AgentPipeline tripId={tripId} />
         </main>
       </div>
     );
@@ -1631,7 +1735,7 @@ export default function TripDetailPage() {
               {/* Weather timeline strip */}
               {weatherDays.length > 0 && (
                 <div className="mt-1">
-                  <WeatherTimeline days={weatherDays} />
+                  <WeatherTimeline days={weatherDays} heroStyle={true} />
                 </div>
               )}
             </div>
@@ -1720,6 +1824,19 @@ export default function TripDetailPage() {
                       Budget
                     </button>
                   )}
+                  {trip.status === "planned" && (
+                    <button
+                      onClick={() =>
+                        document
+                          .getElementById("events-section")
+                          ?.scrollIntoView({ behavior: "smooth" })
+                      }
+                      className="w-full text-left px-3 py-2 rounded-xl text-sm text-slate-500 hover:text-slate-300 hover:bg-ink-900/[0.04] transition-all flex items-center gap-2"
+                    >
+                      <CalendarDays className="w-3 h-3" />
+                      Events
+                    </button>
+                  )}
                   {trip?.packing_list && (
                     <button
                       onClick={() =>
@@ -1754,26 +1871,105 @@ export default function TripDetailPage() {
                   <h2 className="text-sm font-semibold text-slate-200 uppercase tracking-widest">
                     Budget Breakdown
                   </h2>
-                  {trip.budget_state?.deviation_pct != null && (
+                  {budgetDeviationPct != null && (
                     <span
                       className={`ml-auto text-xs px-2.5 py-1 rounded-full font-medium border ${
-                        Math.abs(trip.budget_state.deviation_pct) < 5
+                        Math.abs(budgetDeviationPct) < 5
                           ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
-                          : trip.budget_state.deviation_pct > 0
+                          : budgetDeviationPct > 0
                           ? "text-coral-400 bg-coral-500/10 border-coral-500/20"
                           : "text-gold-400 bg-gold-500/10 border-gold-500/20"
                       }`}
                     >
-                      {trip.budget_state.deviation_pct > 0 ? "+" : ""}
-                      {trip.budget_state.deviation_pct.toFixed(1)}% vs budget
+                      {budgetDeviationPct > 0 ? "+" : ""}
+                      {budgetDeviationPct.toFixed(1)}% vs budget
                     </span>
                   )}
                 </div>
-                <div className="glass-card p-6">
+                <div className="glass-card p-6 space-y-6">
+                  {/* Donut chart */}
                   <DonutChart
                     slices={budgetSlices}
-                    currency={trip.budget_state?.currency ?? trip.budget_currency}
+                    currency={budgetCurrency}
                   />
+
+                  {/* Category bar chart */}
+                  <div className="space-y-3 pt-4 border-t border-white/[0.05]">
+                    {(() => {
+                      const total = budgetSlices.reduce((s, d) => s + d.value, 0);
+                      return budgetSlices.map((slice) => {
+                        const pct = total > 0 ? (slice.value / total) * 100 : 0;
+                        return (
+                          <div key={slice.label}>
+                            <div className="flex items-center justify-between text-xs mb-1.5">
+                              <span className="text-slate-400 flex items-center gap-2">
+                                <span
+                                  className="w-2 h-2 rounded-full shrink-0"
+                                  style={{ background: slice.color }}
+                                />
+                                {slice.label}
+                              </span>
+                              <span className="text-slate-300 font-medium tabular-nums">
+                                {budgetCurrency}{" "}
+                                {slice.value.toLocaleString()}
+                                <span className="text-slate-600 ml-1.5">
+                                  ({pct.toFixed(0)}%)
+                                </span>
+                              </span>
+                            </div>
+                            <div className="h-1.5 rounded-full overflow-hidden bg-white/[0.05]">
+                              <motion.div
+                                className="h-full rounded-full"
+                                style={{ background: slice.color }}
+                                initial={{ width: 0 }}
+                                animate={{ width: `${pct}%` }}
+                                transition={{ duration: 0.6, delay: 0.1 }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+
+                  {/* Total vs budget progress */}
+                  {trip.budget_total != null && budgetStateTotal != null && (
+                    <div className="pt-4 border-t border-white/[0.05]">
+                      <div className="flex items-center justify-between text-xs mb-2">
+                        <span className="text-slate-500">Estimated spend vs. budget</span>
+                        <span
+                          className={`font-semibold tabular-nums ${
+                            (budgetDeviationPct ?? 0) > 0
+                              ? "text-coral-400"
+                              : "text-emerald-400"
+                          }`}
+                        >
+                          {budgetCurrency}{" "}
+                          {budgetStateTotal.toLocaleString()} /{" "}
+                          {trip.budget_total.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="relative h-2 rounded-full overflow-hidden bg-white/[0.05]">
+                        <motion.div
+                          className={`h-full rounded-full ${
+                            (budgetDeviationPct ?? 0) > 0
+                              ? "bg-coral-500"
+                              : "bg-emerald-500"
+                          }`}
+                          initial={{ width: 0 }}
+                          animate={{
+                            width: `${Math.min(100, (budgetStateTotal / trip.budget_total) * 100)}%`,
+                          }}
+                          transition={{ duration: 0.8, ease: "easeOut" }}
+                        />
+                      </div>
+                      <p className="text-[10px] text-slate-600 mt-1.5">
+                        {(budgetDeviationPct ?? 0) > 0
+                          ? `${budgetCurrency} ${Math.abs(trip.budget_total - budgetStateTotal).toLocaleString()} over budget`
+                          : `${budgetCurrency} ${Math.abs(trip.budget_total - budgetStateTotal).toLocaleString()} remaining`}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </motion.section>
             )}
@@ -1908,11 +2104,19 @@ export default function TripDetailPage() {
                                       </div>
 
                                       <div className="flex flex-col items-end gap-1.5 shrink-0">
-                                        {item.est_cost != null && (
-                                          <span className="text-xs font-semibold text-gold-400 tabular-nums whitespace-nowrap">
-                                            {item.est_cost_currency ?? ""} {item.est_cost}
-                                          </span>
-                                        )}
+                                        {item.est_cost != null && (() => {
+                                          const bc = trip?.budget_currency ?? "INR";
+                                          const cv = convertToBudgetCurrency(
+                                            item.est_cost,
+                                            item.est_cost_currency ?? bc,
+                                            bc,
+                                          );
+                                          return (
+                                            <span className="text-xs font-semibold text-gold-400 tabular-nums whitespace-nowrap">
+                                              {bc} {Math.round(cv).toLocaleString("en-IN")}
+                                            </span>
+                                          );
+                                        })()}
                                         <button
                                           onClick={() => {
                                             setReplaceTitle("");
@@ -2158,16 +2362,20 @@ export default function TripDetailPage() {
                         </div>
                         <div className="text-right shrink-0 flex flex-col items-end gap-2">
                           <div>
-                            {hotel.price_per_night != null && (
-                              <p className="text-sm font-semibold text-slate-300 tabular-nums">
-                                {hotel.price_currency ?? ""} {hotel.price_per_night.toLocaleString()}
-                                <span className="text-[10px] font-normal text-slate-600">/night</span>
-                              </p>
-                            )}
-                            {hotel.price_total != null && (
-                              <p className="text-[10px] text-slate-600 tabular-nums">
-                                {hotel.price_currency ?? ""} {hotel.price_total.toLocaleString()} total
-                              </p>
+                            {hotel.price_per_night != null ? (
+                              <>
+                                <p className="text-sm font-semibold text-slate-300 tabular-nums">
+                                  {hotel.price_currency ?? ""} {hotel.price_per_night.toLocaleString()}
+                                  <span className="text-[10px] font-normal text-slate-600">/night</span>
+                                </p>
+                                {hotel.price_total != null && (
+                                  <p className="text-[10px] text-slate-600 tabular-nums">
+                                    {hotel.price_currency ?? ""} {hotel.price_total.toLocaleString()} total
+                                  </p>
+                                )}
+                              </>
+                            ) : (
+                              <p className="text-[11px] text-slate-500 italic">Price on request</p>
                             )}
                           </div>
                           <motion.button
@@ -2235,41 +2443,74 @@ export default function TripDetailPage() {
 
                 {flights.length > 0 && (
                   <div className="space-y-2">
-                    {flights.map((f, i) => (
-                      <div key={i} className="glass-light rounded-xl p-3 border border-ink-900/10 hover:border-sky-500/20 transition-all">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-0.5">
-                              <span className="font-mono text-xs font-bold text-slate-200">{f.origin}</span>
-                              <ArrowRight className="w-3 h-3 text-slate-500 shrink-0" />
-                              <span className="font-mono text-xs font-bold text-slate-200">{f.destination}</span>
-                              <span className="text-[9px] text-slate-500 bg-ink-900/[0.06] px-1.5 py-0.5 rounded-full">{f.airline}</span>
+                    {flights.map((f, i) => {
+                      const isSelected =
+                        selectedFlight != null &&
+                        selectedFlight.origin === f.origin &&
+                        selectedFlight.destination === f.destination &&
+                        selectedFlight.airline === f.airline &&
+                        selectedFlight.price_total === f.price_total;
+                      return (
+                        <div
+                          key={i}
+                          className={`glass-light rounded-xl p-3 border transition-all ${
+                            isSelected
+                              ? "border-pink-500/40 shadow-[0_0_0_1px_rgba(244,114,182,0.2)]"
+                              : "border-ink-900/10 hover:border-sky-500/20"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-0.5">
+                                {isSelected && (
+                                  <span className="text-[9px] font-semibold text-pink-400 bg-pink-500/10 border border-pink-500/20 px-1.5 py-0.5 rounded-full">
+                                    Selected
+                                  </span>
+                                )}
+                                <span className="font-mono text-xs font-bold text-slate-200">{f.origin}</span>
+                                <ArrowRight className="w-3 h-3 text-slate-500 shrink-0" />
+                                <span className="font-mono text-xs font-bold text-slate-200">{f.destination}</span>
+                                <span className="text-[9px] text-slate-500 bg-ink-900/[0.06] px-1.5 py-0.5 rounded-full">{f.airline}</span>
+                              </div>
+                              <div className="text-[10px] text-slate-500">
+                                {f.duration_outbound}
+                                {f.stops_outbound === 0 ? " · nonstop" : ` · ${f.stops_outbound} stop`}
+                                {f.duration_return && (
+                                  <span> · return {f.duration_return}{f.stops_return === 0 ? " nonstop" : ""}</span>
+                                )}
+                                <span className="ml-2 text-electric-400/60">{f.cabin.toLowerCase()}</span>
+                              </div>
                             </div>
-                            <div className="text-[10px] text-slate-500">
-                              {f.duration_outbound}
-                              {f.stops_outbound === 0 ? " · nonstop" : ` · ${f.stops_outbound} stop`}
-                              {f.duration_return && (
-                                <span> · return {f.duration_return}{f.stops_return === 0 ? " nonstop" : ""}</span>
-                              )}
-                              <span className="ml-2 text-electric-400/60">{f.cabin.toLowerCase()}</span>
+                            <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
+                              <div>
+                                <p className="text-sm font-bold text-slate-100">
+                                  {f.price_currency} {f.price_total.toLocaleString()}
+                                </p>
+                                <p className="text-[9px] text-slate-500">per person</p>
+                              </div>
+                              <motion.button
+                                whileTap={{ scale: 0.96 }}
+                                onClick={() => setSelectedFlight(isSelected ? null : f)}
+                                className={`text-[10px] font-semibold px-2.5 py-1 rounded-lg border transition-colors whitespace-nowrap ${
+                                  isSelected
+                                    ? "bg-pink-500/10 text-pink-400 border-pink-500/20 hover:bg-pink-500/20"
+                                    : "bg-electric-500/10 text-electric-400 border-electric-500/20 hover:bg-electric-500/20"
+                                }`}
+                              >
+                                {isSelected ? "Deselect" : "Add to budget"}
+                              </motion.button>
                             </div>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <p className="text-sm font-bold text-slate-100">
-                              {f.price_currency} {f.price_total.toLocaleString()}
-                            </p>
-                            <p className="text-[9px] text-slate-500">per person</p>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </motion.section>
             )}
 
             {/* Local Events */}
-            {tripEvents.length > 0 && (
+            {(trip.status === "planned" || trip.status === "awaiting_approval") && (
               <motion.section
                 id="events-section"
                 initial={{ opacity: 0, y: 24 }}
@@ -2281,63 +2522,106 @@ export default function TripDetailPage() {
                   <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shadow-sm">
                     <CalendarDays className="w-3.5 h-3.5 text-white" />
                   </div>
-                  <h2 className="text-sm font-semibold text-slate-200">Local Events</h2>
-                  <span className="ml-auto text-[10px] text-slate-500 font-medium">{tripEvents.length} found</span>
+                  <h2 className="text-sm font-semibold text-slate-200">Local Events &amp; Shows</h2>
+                  {displayEvents.length > 0 && (
+                    <span className="ml-auto text-[10px] text-slate-500 font-medium">
+                      {filteredEvents.length}/{displayEvents.length} events
+                    </span>
+                  )}
                 </div>
-                <div className="space-y-3">
-                  {tripEvents.map((ev) => (
-                    <div key={ev.id} className="glass-light rounded-xl p-3 border border-ink-900/10 hover:border-electric-500/20 transition-all">
-                      <div className="flex items-start gap-3">
-                        {ev.image_url && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={ev.image_url} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0" />
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                            <p className="text-xs font-semibold text-slate-200 truncate">{ev.event_name}</p>
-                            <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ${
-                              ev.source === "ticketmaster"
-                                ? "bg-blue-500/15 text-blue-400 border border-blue-500/20"
-                                : "bg-orange-500/15 text-orange-400 border border-orange-500/20"
-                            }`}>
-                              {ev.source === "ticketmaster" ? "Ticketmaster" : "Eventbrite"}
-                            </span>
-                          </div>
-                          <p className="text-[10px] text-slate-500 mb-1">
-                            {ev.venue_name}
-                            {ev.event_date && ` · ${new Date(ev.event_date).toLocaleDateString("en", { month: "short", day: "numeric" })}`}
-                            {ev.start_time && ` · ${ev.start_time.slice(0, 5)}`}
-                          </p>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            {ev.category && (
-                              <span className="text-[9px] text-electric-400 bg-electric-500/10 px-1.5 py-0.5 rounded-full border border-electric-500/15">
-                                {ev.category}
+
+                {/* Category filter tabs */}
+                {eventCategories.length > 1 && (
+                  <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide mb-4">
+                    {eventCategories.map((cat) => (
+                      <button
+                        key={cat}
+                        onClick={() => setEventCategory(cat)}
+                        className={`shrink-0 text-[10px] font-semibold px-3 py-1.5 rounded-full border transition-all ${
+                          eventCategory === cat
+                            ? "bg-purple-500/20 border-purple-500/40 text-purple-300"
+                            : "bg-ink-900/[0.04] border-ink-900/10 text-slate-500 hover:text-slate-300 hover:border-ink-900/15"
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {filteredEvents.length > 0 ? (
+                  <div className="space-y-3">
+                    {filteredEvents.map((ev) => (
+                      <div key={ev.id} className="glass-light rounded-xl p-3 border border-ink-900/10 hover:border-purple-500/20 transition-all">
+                        <div className="flex items-start gap-3">
+                          {ev.image_url && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={ev.image_url} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0" />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                              <p className="text-xs font-semibold text-slate-200 truncate">{ev.event_name}</p>
+                              <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ${
+                                ev.source === "ticketmaster"
+                                  ? "bg-blue-500/15 text-blue-400 border border-blue-500/20"
+                                  : "bg-orange-500/15 text-orange-400 border border-orange-500/20"
+                              }`}>
+                                {ev.source === "ticketmaster" ? "Ticketmaster" : "Eventbrite"}
                               </span>
-                            )}
-                            {ev.price_min != null && (
-                              <span className="text-[9px] text-slate-400">
-                                {ev.price_currency ?? ""} {ev.price_min === 0 ? "Free" : `from ${ev.price_min}`}
-                              </span>
-                            )}
-                            {ev.url && (
-                              <a
-                                href={ev.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-[9px] text-electric-400 hover:text-electric-300 transition-colors ml-auto"
-                              >
-                                Tickets →
-                              </a>
-                            )}
+                            </div>
+                            <p className="text-[10px] text-slate-500 mb-1">
+                              {ev.venue_name}
+                              {ev.event_date && ` · ${new Date(ev.event_date).toLocaleDateString("en", { month: "short", day: "numeric" })}`}
+                              {ev.start_time && ` · ${ev.start_time.slice(0, 5)}`}
+                            </p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {ev.category && (
+                                <span className="text-[9px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded-full border border-purple-500/15">
+                                  {ev.category}
+                                </span>
+                              )}
+                              {ev.price_min != null && (
+                                <span className="text-[9px] text-slate-400">
+                                  {ev.price_currency ?? ""}{" "}
+                                  {ev.price_min === 0 ? "Free" : `from ${ev.price_min}`}
+                                </span>
+                              )}
+                              {ev.url && (
+                                <a
+                                  href={ev.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[9px] text-purple-400 hover:text-purple-300 transition-colors ml-auto"
+                                >
+                                  Tickets →
+                                </a>
+                              )}
+                            </div>
                           </div>
                         </div>
+                        {ev.summary && (
+                          <p className="text-[10px] text-slate-500 mt-2 leading-relaxed border-t border-ink-900/10 pt-2">
+                            {ev.summary}
+                          </p>
+                        )}
                       </div>
-                      {ev.summary && (
-                        <p className="text-[10px] text-slate-500 mt-2 leading-relaxed border-t border-ink-900/10 pt-2">{ev.summary}</p>
-                      )}
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 px-4">
+                    <div className="w-10 h-10 rounded-full bg-purple-500/10 border border-purple-500/20 flex items-center justify-center mx-auto mb-3">
+                      <CalendarDays className="w-5 h-5 text-purple-400" />
                     </div>
-                  ))}
-                </div>
+                    <p className="text-sm text-slate-400 font-medium mb-1">
+                      {eventCategory === "All"
+                        ? "No events found for your dates"
+                        : `No ${eventCategory} events found`}
+                    </p>
+                    <p className="text-xs text-slate-600 leading-relaxed max-w-xs mx-auto">
+                      The events agent searches Ticketmaster and Eventbrite for concerts, comedy shows, theatre, sports and more during your trip.
+                    </p>
+                  </div>
+                )}
               </motion.section>
             )}
 

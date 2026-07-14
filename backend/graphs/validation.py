@@ -7,7 +7,10 @@ from datetime import time as dt_time
 from langchain_core.messages import SystemMessage
 
 from backend.core.logging import get_logger
+from backend.db.base import AsyncSessionLocal
+from backend.db.models import Trip
 from backend.graphs.state import TravelOSState
+from backend.tools.currency import convert as convert_currency
 
 logger = get_logger(__name__)
 
@@ -47,6 +50,12 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     if not cleaned:
         issues.append("Itinerary is empty after validation")
 
+    # Repair same-day time overlaps deterministically — an overlap is a scheduling
+    # arithmetic problem, not something worth a full LLM replan round-trip.
+    repaired_days = _repair_time_overlaps(cleaned)
+    if repaired_days:
+        issues.append(f"Repaired overlapping times on day(s): {repaired_days}")
+
     # Pace-based under-count check: flag days below pace_target - 1
     min_items = _PACE_MIN_ITEMS.get(pace, 3)
     day_counts: dict[int, int] = {}
@@ -60,11 +69,24 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
                 f" for '{pace}' pace"
             )
 
-    # Compute total planned cost and write it into budget_state for conflict detection
-    estimated_total = sum(float(it.get("est_cost") or 0) for it in cleaned)
+    # Compute total planned cost in trip's budget currency for conflict detection
     budget_state: dict = dict(state.get("budget_state") or {})  # type: ignore[type-arg]
+    budget_currency = await _get_budget_currency(state)
+    estimated_total = sum(
+        convert_currency(
+            float(it.get("est_cost") or 0),
+            str(it.get("est_cost_currency") or budget_currency),
+            budget_currency,
+        )
+        for it in cleaned
+    )
+    # Hotel + flights (computed by the budget optimizer, already in budget currency)
+    # belong in the breach check too — itinerary items alone understate the trip.
+    by_category: dict = budget_state.get("by_category") or {}  # type: ignore[type-arg]
+    estimated_total += sum(float(by_category.get(k) or 0) for k in ("lodging", "flights"))
     if estimated_total > 0:
         budget_state["estimated_planned"] = round(estimated_total, 2)
+        budget_state["currency"] = budget_currency
 
     summary = (
         f"{len(cleaned)} items valid"
@@ -123,6 +145,67 @@ def _validate_and_fix(raw: dict) -> tuple[dict | None, list[str]]:  # type: igno
     item["is_outdoor"] = bool(item.get("is_outdoor", False))
 
     return item, issues
+
+
+_OVERLAP_GAP_MIN = 30  # minutes inserted between rescheduled consecutive items
+
+
+def _repair_time_overlaps(items: list[dict]) -> list[int]:  # type: ignore[type-arg]
+    """Shift overlapping same-day items later, preserving order and duration.
+
+    Mutates ``items`` in place. Returns the day numbers that needed repair.
+    Items pushed past midnight lose their times (null) rather than wrapping.
+    """
+    by_day: dict[int, list[dict]] = {}  # type: ignore[type-arg]
+    for it in items:
+        by_day.setdefault(int(it.get("day_number", 1)), []).append(it)
+
+    repaired: list[int] = []
+    for day, day_items in sorted(by_day.items()):
+        timed = [
+            (it, _parse_time(it.get("start_time")), _parse_time(it.get("end_time")))
+            for it in sorted(day_items, key=lambda x: x.get("sort_order", 0))
+        ]
+        prev_end_min: int | None = None
+        day_repaired = False
+        for it, start, end in timed:
+            if start is None:
+                continue
+            start_min = start.hour * 60 + start.minute
+            duration = (
+                (end.hour * 60 + end.minute) - start_min if end is not None and end > start else 90
+            )
+            if prev_end_min is not None and start_min < prev_end_min:
+                start_min = prev_end_min + _OVERLAP_GAP_MIN
+                end_min = start_min + duration
+                if end_min >= 24 * 60:
+                    it["start_time"] = None
+                    it["end_time"] = None
+                    day_repaired = True
+                    continue
+                it["start_time"] = f"{start_min // 60:02d}:{start_min % 60:02d}"
+                it["end_time"] = f"{end_min // 60:02d}:{end_min % 60:02d}"
+                day_repaired = True
+            prev_end_min = start_min + duration
+        if day_repaired:
+            repaired.append(day)
+    return repaired
+
+
+async def _get_budget_currency(state: TravelOSState) -> str:
+    """Load budget_currency from the trip row, fallback to INR."""
+    trip_id = state.get("trip_id")
+    if not trip_id:
+        return "INR"
+    try:
+        from sqlalchemy import select  # noqa: PLC0415
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Trip).where(Trip.id == trip_id))
+            trip = result.scalar_one_or_none()
+            return trip.budget_currency if trip and trip.budget_currency else "INR"
+    except Exception:
+        return "INR"
 
 
 def _parse_time(t: object) -> dt_time | None:

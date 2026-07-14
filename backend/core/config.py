@@ -7,6 +7,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # (uvicorn --reload worker processes may inherit a different working directory)
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
+_WEAK_SECRETS = {"change-me-in-production", "secret", "dev", "test", ""}
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -14,7 +16,8 @@ class Settings(BaseSettings):
     )
 
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/travelos"
+    # Note: local Docker postgres is on port 5433 (Windows native pg owns 5432)
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5433/travelos"
 
     # Redis / Celery
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -63,10 +66,7 @@ class Settings(BaseSettings):
     def _enforce_production_secrets(self) -> "Settings":
         """Fail closed: never boot production with the insecure default JWT secret."""
         if self.ENVIRONMENT == "production":
-            if (
-                self.JWT_SECRET_KEY in ("", "change-me-in-production")
-                or len(self.JWT_SECRET_KEY) < 32
-            ):
+            if self.JWT_SECRET_KEY in _WEAK_SECRETS or len(self.JWT_SECRET_KEY) < 32:
                 raise ValueError(
                     "JWT_SECRET_KEY must be a strong value (>=32 chars) in production. "
                     "Generate one with: openssl rand -hex 32"

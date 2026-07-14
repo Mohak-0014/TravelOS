@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, NotRequired
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -29,7 +29,7 @@ class TravelOSState(TypedDict):
     packing_state: dict  # keys: categories, status
 
     # Semantic memory context injected by Travel Style agent
-    memory_context: dict  # keys: preferences, embedding_hits, past_trips
+    memory_context: dict  # keys: preferences, travel_style_profile, past_trips
 
     # Pending approval records (dicts matching Approval schema)
     approval_queue: list[dict]
@@ -49,3 +49,8 @@ class TravelOSState(TypedDict):
 
     # Incremented by conflict_detection; caps at 3 to prevent infinite loops
     replan_iterations: int
+
+    # Why the last replan was triggered — conflict_detection writes it, the
+    # itinerary planner injects it into the regeneration prompt, then clears it.
+    # NotRequired: absent on states built before this key existed.
+    replan_feedback: NotRequired[list[str]]

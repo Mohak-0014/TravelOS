@@ -14,6 +14,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from backend.graphs.replan_graph import build_replan_graph
 from backend.graphs.state import TravelOSState
+from backend.tools.places import Attraction
 from backend.tools.weather import WeatherDay
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -107,12 +108,17 @@ async def test_replan_graph_e2e_adverse_weather_creates_approval() -> None:
         _make_weather_day("2026-08-03", is_adverse=False, label="Partly cloudy"),
     ]
     outdoor_item = _make_outdoor_item("2026-08-02")
-    indoor_alternative = {
-        "title": "Vatican Museums",
-        "description": "World-class art collection housed indoors.",
-        "item_type": "activity",
-        "is_outdoor": False,
-    }
+    indoor_pool = [
+        Attraction(
+            osm_id="way/vm",
+            name="Vatican Museums",
+            lat=41.906,
+            lng=12.453,
+            kinds="museum",
+            category="museum_gallery",
+            source_ref="way/vm",
+        )
+    ]
 
     persisted_approvals: list[dict] = []  # type: ignore[type-arg]
 
@@ -128,8 +134,8 @@ async def test_replan_graph_e2e_adverse_weather_creates_approval() -> None:
             "backend.agents.weather._load_affected_items", AsyncMock(return_value=[outdoor_item])
         ),
         patch(
-            "backend.agents.weather._generate_alternative",
-            AsyncMock(return_value=indoor_alternative),
+            "backend.agents.weather._indoor_candidates",
+            AsyncMock(return_value=indoor_pool),
         ),
         patch("backend.agents.weather._persist_approvals", AsyncMock(side_effect=_capture_persist)),
         patch("backend.agents.weather._set_trip_awaiting_approval", AsyncMock()),
@@ -248,17 +254,18 @@ async def test_replan_graph_e2e_multiple_affected_items() -> None:
         },
     ]
 
-    call_count = 0
-
-    async def _alt_by_index(item: dict, city: str, style_profile: dict | None = None) -> dict:  # type: ignore[type-arg]
-        nonlocal call_count
-        call_count += 1
-        return {
-            "title": f"Indoor Option {call_count}",
-            "description": "A great indoor activity.",
-            "item_type": "activity",
-            "is_outdoor": False,
-        }
+    indoor_pool = [
+        Attraction(
+            osm_id=f"way/in{i}",
+            name=f"Indoor Option {i}",
+            lat=41.9,
+            lng=12.45,
+            kinds="museum",
+            category="museum_gallery",
+            source_ref=f"way/in{i}",
+        )
+        for i in (1, 2)
+    ]
 
     with (
         patch("backend.agents.weather._load_trip", AsyncMock(return_value=_make_trip())),
@@ -266,7 +273,7 @@ async def test_replan_graph_e2e_multiple_affected_items() -> None:
         patch("backend.agents.weather.fetch_weather", AsyncMock(return_value=weather_days)),
         patch("backend.agents.weather._save_weather_snapshots", AsyncMock()),
         patch("backend.agents.weather._load_affected_items", AsyncMock(return_value=outdoor_items)),
-        patch("backend.agents.weather._generate_alternative", AsyncMock(side_effect=_alt_by_index)),
+        patch("backend.agents.weather._indoor_candidates", AsyncMock(return_value=indoor_pool)),
         patch("backend.agents.weather._persist_approvals", AsyncMock()),
         patch("backend.agents.weather._set_trip_awaiting_approval", AsyncMock()),
     ):

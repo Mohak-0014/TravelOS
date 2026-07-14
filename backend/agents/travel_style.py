@@ -52,9 +52,9 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     prefs_dict = _preference_to_dict(pref)
     trip_context = _trip_to_context(trip)
 
-    # Fetch past trips and approval feedback to personalise the profile
-    embedding_hits = await _search_past_trips(user_id, prefs_dict)
-    feedback_hits = await _search_feedback(user_id, prefs_dict, trip_context)
+    # Fetch past trips and approval feedback to personalise the profile —
+    # one shared Qdrant client for both searches.
+    embedding_hits, feedback_hits = await _search_memory(user_id, prefs_dict, trip_context)
 
     profile = await _synthesize_profile(
         prefs_dict, trip_context, state.get("traveler_profiles", []), embedding_hits, feedback_hits
@@ -72,7 +72,6 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
         "memory_context": {
             "preferences": prefs_dict,
             "travel_style_profile": profile,
-            "embedding_hits": embedding_hits,
             "past_trips": embedding_hits,
         },
         "agent_messages": [
@@ -250,50 +249,37 @@ def _default_profile() -> dict:  # type: ignore[type-arg]
     }
 
 
-async def _search_past_trips(
-    user_id: str,
-    prefs: dict,  # type: ignore[type-arg]
-) -> list[dict]:  # type: ignore[type-arg]
-    """
-    Embed the current preference text and search Qdrant trip_memories for similar past trips.
-    Degrades gracefully to [] when Qdrant is unavailable or no trips exist yet.
-    """
-    if not prefs:
-        return []
-    try:
-        text = preference_text(prefs)
-        vector = embed_text(text)
-        client = get_qdrant_client()
-        try:
-            hits = await search_trip_memories(client, vector, user_id, limit=5)
-        finally:
-            await client.close()
-        return hits
-    except Exception as exc:
-        logger.warning("travel_style_embedding_search_failed", user_id=user_id, error=str(exc))
-        return []
-
-
-async def _search_feedback(
+async def _search_memory(
     user_id: str,
     prefs: dict,  # type: ignore[type-arg]
     trip_context: str,
-) -> list[dict]:  # type: ignore[type-arg]
+) -> tuple[list[dict], list[dict]]:  # type: ignore[type-arg]
+    """Search Qdrant for similar past trips and approve/reject feedback with one
+    shared client. Each search degrades independently to [] when Qdrant is
+    unavailable or the collections are empty.
     """
-    Embed the current trip context and search Qdrant user_feedback for semantically similar
-    past approve/reject decisions from this user.
-    Degrades gracefully to [] when Qdrant is unavailable or no feedback exists yet.
-    """
+    past_trips: list[dict] = []  # type: ignore[type-arg]
+    feedback: list[dict] = []  # type: ignore[type-arg]
     try:
-        prefs_str = preference_text(prefs) if prefs else "unspecified preferences"
-        query = f"{trip_context} {prefs_str}"
-        vector = embed_text(query)
         client = get_qdrant_client()
-        try:
-            hits = await search_feedback(client, vector, user_id, limit=8)
-        finally:
-            await client.close()
-        return hits
     except Exception as exc:
-        logger.warning("travel_style_feedback_search_failed", user_id=user_id, error=str(exc))
-        return []
+        logger.warning("travel_style_qdrant_unavailable", user_id=user_id, error=str(exc))
+        return past_trips, feedback
+    try:
+        if prefs:
+            try:
+                vector = embed_text(preference_text(prefs))
+                past_trips = await search_trip_memories(client, vector, user_id, limit=5)
+            except Exception as exc:
+                logger.warning(
+                    "travel_style_embedding_search_failed", user_id=user_id, error=str(exc)
+                )
+        try:
+            prefs_str = preference_text(prefs) if prefs else "unspecified preferences"
+            vector = embed_text(f"{trip_context} {prefs_str}")
+            feedback = await search_feedback(client, vector, user_id, limit=8)
+        except Exception as exc:
+            logger.warning("travel_style_feedback_search_failed", user_id=user_id, error=str(exc))
+    finally:
+        await client.close()
+    return past_trips, feedback

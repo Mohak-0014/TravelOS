@@ -67,13 +67,13 @@ async def checkpoint_save_node(state: TravelOSState, config: RunnableConfig) -> 
 # ── Conditional edge functions ────────────────────────────────────────────────
 
 
-def route_supervisor(state: TravelOSState) -> str:
-    if state.get("error_state") and state.get("replan_iterations", 0) >= 3:
-        return END
-    step = state.get("current_step", "travel_style")
-    if step in ("travel_style", "itinerary_planner", "error_recovery"):
-        return step
-    return "travel_style"
+def route_after_planner(state: TravelOSState) -> str:
+    """Initial run joins the hotel branch at budget_optimizer; a replan takes the
+    short path straight to validation — hotel/budget/events/packing don't depend
+    on the regenerated day plan and must not re-run up to 3 times."""
+    if state.get("replan_iterations", 0) > 0:
+        return "validation"
+    return "budget_optimizer"
 
 
 def route_conflict_detection(state: TravelOSState) -> str:
@@ -108,18 +108,19 @@ def build_trip_graph(checkpointer=None):  # type: ignore[no-untyped-def]
 
     g.set_entry_point("supervisor")
 
+    g.add_edge("supervisor", "travel_style")
+    # Fan-out: hotel search only needs trip + style, not the itinerary — run it in
+    # parallel with the (much slower) itinerary planner; join at budget_optimizer.
+    g.add_edge("travel_style", "itinerary_planner")
+    g.add_edge("travel_style", "hotel_agent")
     g.add_conditional_edges(
-        "supervisor",
-        route_supervisor,
+        "itinerary_planner",
+        route_after_planner,
         {
-            "travel_style": "travel_style",
-            "itinerary_planner": "itinerary_planner",
-            "error_recovery": "supervisor",
-            END: END,
+            "budget_optimizer": "budget_optimizer",
+            "validation": "validation",
         },
     )
-    g.add_edge("travel_style", "itinerary_planner")
-    g.add_edge("itinerary_planner", "hotel_agent")
     g.add_edge("hotel_agent", "budget_optimizer")
     g.add_edge("budget_optimizer", "events_agent")
     g.add_edge("events_agent", "packing_list")

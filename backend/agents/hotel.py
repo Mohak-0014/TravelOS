@@ -80,6 +80,13 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
     )
     await redis.aclose()
 
+    # A hotel with no price can't be budgeted or fairly ranked — drop it rather
+    # than score it neutrally and let it pollute the candidate list.
+    priced = [o for o in offers if o.price_per_night is not None or o.price_total is not None]
+    if len(priced) < len(offers):
+        logger.info("hotel_unpriced_dropped", trip_id=trip_id, dropped=len(offers) - len(priced))
+    offers = priced
+
     if not offers:
         logger.warning("hotel_agent_no_offers", trip_id=trip_id)
         return {
@@ -107,6 +114,10 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
 
     selected_idx = await _select_with_llm(top, style_profile, trip)
     selected = top[selected_idx] if top else None
+    if selected_idx != 0:
+        # Track how often the LLM overrides the deterministic top-ranked offer —
+        # if this never fires, the selection call is not earning its latency.
+        logger.info("hotel_llm_overrode_rank1", trip_id=trip_id, selected_index=selected_idx)
 
     await _persist_candidates(trip_id, top, selected_idx if selected else None)
 
@@ -247,7 +258,8 @@ async def _select_with_llm(
 
     candidates_summary = "\n".join(
         f"{i}. {o.name} — {o.star_rating or '?'}★, "
-        f"${o.price_per_night or '?'}/night ({o.source_provider})"
+        f"{o.price_per_night or '?'} {o.price_currency or trip.budget_currency}/night"
+        f" ({o.source_provider})"
         for i, o in enumerate(candidates)
     )
 

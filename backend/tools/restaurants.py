@@ -197,10 +197,10 @@ async def _search_overpass(lat: float, lng: float, radius_m: int) -> list[Restau
     amenity_filter = "".join(
         f'node["amenity"="{a}"](around:{radius_m},{lat},{lng});' for a in _OSM_AMENITIES
     )
-    query = f"[out:json][timeout:15];({amenity_filter});out body 25;"
+    query = f"[out:json][timeout:25];({amenity_filter});out body 25;"
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 _OVERPASS_URL,
                 data={"data": query},

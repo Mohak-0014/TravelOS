@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 # ── Auth ────────────────────────────────────────────────────────────────────
 
@@ -75,6 +75,17 @@ class TripCreate(BaseModel):
     num_travelers: int = Field(default=1, ge=1, le=20)
     budget_total: float | None = Field(default=None, ge=0)
     budget_currency: str = Field(default="USD", min_length=3, max_length=3)
+    flight_origin: str | None = None  # departure airport IATA code, e.g. "DEL"
+
+    @field_validator("flight_origin")
+    @classmethod
+    def _validate_flight_origin(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return None
+        v = v.strip().upper()
+        if len(v) != 3 or not v.isalpha():
+            raise ValueError("flight_origin must be a 3-letter IATA code")
+        return v
 
 
 class TripUpdate(BaseModel):
@@ -86,6 +97,17 @@ class TripUpdate(BaseModel):
     num_travelers: int | None = Field(default=None, ge=1, le=20)
     budget_total: float | None = Field(default=None, ge=0)
     budget_currency: str | None = Field(default=None, min_length=3, max_length=3)
+    flight_origin: str | None = None
+
+    @field_validator("flight_origin")
+    @classmethod
+    def _validate_flight_origin(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return None
+        v = v.strip().upper()
+        if len(v) != 3 or not v.isalpha():
+            raise ValueError("flight_origin must be a 3-letter IATA code")
+        return v
 
 
 class TripOut(BaseModel):
@@ -102,8 +124,10 @@ class TripOut(BaseModel):
     num_travelers: int
     budget_total: float | None
     budget_currency: str
+    flight_origin: str | None = None
     status: str
     packing_list: dict[str, Any] | None = None
+    budget_state: dict[str, Any] | None = None
     cover_image_url: str | None = None
     share_token: str | None = None
     share_expires_at: datetime | None = None

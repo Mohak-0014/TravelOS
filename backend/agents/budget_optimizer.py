@@ -8,10 +8,15 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import select
 
 from backend.agents._llm import build_llm
+from backend.core.config import settings
 from backend.core.logging import get_logger
 from backend.db.base import AsyncSessionLocal
 from backend.db.models import Approval, HotelCandidate, ItineraryItem, Trip
 from backend.graphs.state import TravelOSState
+from backend.tools import get_redis_client
+from backend.tools.currency import convert as convert_currency
+from backend.tools.currency import destination_currency
+from backend.tools.flights import search_flights
 
 logger = get_logger(__name__)
 
@@ -49,10 +54,22 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
             return _noop(state)
 
         budget_total = float(trip.budget_total)
+        # The true local currency of the destination — used to correct items whose
+        # est_cost_currency was stored as the budget currency (a common LLM error).
+        local_curr = destination_currency(trip.destination_city, trip.destination_country)
         itinerary: list[dict] = list(state.get("itinerary") or [])  # type: ignore[arg-type]
         hotel_state: dict = dict(state.get("hotel_state") or {})  # type: ignore[type-arg]
 
-        costs = _compute_costs(itinerary, hotel_state)
+        costs = _compute_costs(
+            itinerary, hotel_state, trip.budget_currency, budget_total, local_curr
+        )
+
+        # Round-trip flights for all travelers, when a departure airport is known.
+        # Real Duffel price or nothing — an unknown fare is excluded, never guessed.
+        flight_cost = await _flight_cost(trip)
+        if flight_cost is not None:
+            costs["flights"] = round(flight_cost, 2)
+
         total_planned = sum(costs.values())
 
         if total_planned == 0:
@@ -65,7 +82,13 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
 
         if deviation > _OVER_THRESHOLD:
             # Load items from DB so we have real UUIDs for on-approve lookup
-            db_items = await _load_expensive_activities(trip_id, top_n=_MAX_SWAP_PROPOSALS)
+            db_items = await _load_expensive_activities(
+                trip_id,
+                budget_currency=trip.budget_currency,
+                budget_total=budget_total,
+                local_currency=local_curr,
+                top_n=_MAX_SWAP_PROPOSALS,
+            )
             for item in db_items:
                 p = await _propose_swap(trip, item, deviation, costs)
                 if p:
@@ -103,6 +126,9 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
         existing: dict = dict(state.get("budget_state") or {})  # type: ignore[type-arg]
         existing.update(budget_summary)
 
+        # Durable copy for the API — the graph's own state doesn't survive the task.
+        await _persist_budget_state(trip_id, existing)
+
         sign = "+" if deviation >= 0 else ""
         summary = (
             f"Budget: {trip.budget_currency} {total_planned:.0f} planned"
@@ -131,13 +157,83 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
 # ── Cost calculation ──────────────────────────────────────────────────────────
 
 
-def _compute_costs(itinerary: list[dict], hotel_state: dict) -> dict:  # type: ignore[type-arg]
+async def _flight_cost(trip: Trip) -> float | None:
+    """Cheapest round-trip fare (all travelers) in the trip's budget currency.
+
+    Requires trips.flight_origin. Degrades to None — excluded from the budget —
+    when no origin is set, Duffel is unconfigured, or the search returns nothing.
+    """
+    origin = (trip.flight_origin or "").strip().upper()
+    if len(origin) != 3:
+        return None
+    try:
+        redis = get_redis_client()
+    except Exception:
+        redis = None
+    try:
+        offers = await search_flights(
+            origin_iata=origin,
+            destination_city=trip.destination_city,
+            departure_date=trip.start_date,
+            return_date=trip.end_date,
+            num_travelers=trip.num_travelers,
+            currency=trip.budget_currency or "USD",
+            api_key=settings.DUFFEL_API_KEY,
+            cache=redis,
+        )
+    except Exception as exc:
+        logger.warning("budget_flight_fetch_failed", trip_id=str(trip.id), error=str(exc))
+        return None
+    finally:
+        if redis is not None:
+            await redis.aclose()
+    if not offers:
+        return None
+    cheapest = min(offers, key=lambda o: o.price_total)
+    return convert_currency(
+        cheapest.price_total, cheapest.price_currency, trip.budget_currency or "USD"
+    )
+
+
+def _normalise_item_currency(
+    stored: str,
+    budget_currency: str,
+    local_currency: str,
+) -> str:
+    """Return the currency that should be used to interpret an item's est_cost.
+
+    The LLM is told to use local_currency amounts but often emits budget_currency
+    instead (e.g. "INR" for a Bali trip whose local currency is "IDR").  When the
+    stored currency equals the budget currency but the destination's local currency
+    is different, we treat the amount as being in local_currency so the conversion
+    to budget_currency is correct.
+    """
+    if stored == budget_currency and local_currency != budget_currency:
+        return local_currency
+    return stored
+
+
+def _compute_costs(
+    itinerary: list[dict],  # type: ignore[type-arg]
+    hotel_state: dict,  # type: ignore[type-arg]
+    budget_currency: str = "INR",
+    budget_total: float = 0.0,
+    local_currency: str = "",
+) -> dict:  # type: ignore[type-arg]
     costs: dict[str, float] = {"lodging": 0.0, "activities": 0.0, "meals": 0.0, "transport": 0.0}
+
+    # Per-item cap: safety net if a single item's converted cost is still unreasonably
+    # large after currency normalisation.  Cap at 30 % of budget or 10 000 absolute.
+    per_item_cap = (budget_total * 0.30) if budget_total > 0 else 10_000.0
 
     selected = hotel_state.get("selected") or {}
     if isinstance(selected, dict):
         hotel_cost = float(selected.get("price_total") or 0)
-        costs["lodging"] = round(hotel_cost, 2)
+        hotel_currency = str(selected.get("price_currency") or budget_currency)
+        if hotel_cost > 0:
+            costs["lodging"] = round(
+                convert_currency(hotel_cost, hotel_currency, budget_currency), 2
+            )
 
     for item in itinerary:
         raw_cost = item.get("est_cost")
@@ -146,22 +242,32 @@ def _compute_costs(itinerary: list[dict], hotel_state: dict) -> dict:  # type: i
         cost = float(raw_cost)
         if cost <= 0:
             continue
+        stored_currency = str(item.get("est_cost_currency") or budget_currency)
+        effective_currency = _normalise_item_currency(
+            stored_currency, budget_currency, local_currency
+        )
+        converted = convert_currency(cost, effective_currency, budget_currency)
+        converted = min(converted, per_item_cap)
         itype = str(item.get("item_type") or "")
         if itype == "activity":
-            costs["activities"] += cost
+            costs["activities"] += converted
         elif itype == "meal":
-            costs["meals"] += cost
+            costs["meals"] += converted
         elif itype == "transport":
-            costs["transport"] += cost
+            costs["transport"] += converted
 
     return {k: round(v, 2) for k, v in costs.items()}
 
 
 async def _load_expensive_activities(
     trip_id: str,
+    budget_currency: str = "INR",
+    budget_total: float = 0.0,
+    local_currency: str = "",
     top_n: int = 3,
 ) -> list[dict]:  # type: ignore[type-arg]
-    """Load paid activity items from DB (with real UUIDs) sorted by cost desc."""
+    """Load paid activity items from DB (with real UUIDs) sorted by converted cost desc."""
+    per_item_cap = (budget_total * 0.30) if budget_total > 0 else 10_000.0
     try:
         async with AsyncSessionLocal() as session:
             result = await session.execute(
@@ -172,18 +278,28 @@ async def _load_expensive_activities(
                     ItineraryItem.est_cost > 0,
                 )
                 .order_by(ItineraryItem.est_cost.desc())
-                .limit(top_n)
+                .limit(top_n * 5)  # fetch more so we can sort by converted cost
             )
             rows = result.scalars().all()
-            return [
-                {
-                    "id": str(r.id),
-                    "day_number": r.day_number,
-                    "title": r.title,
-                    "est_cost": float(r.est_cost),
-                }
-                for r in rows
-            ]
+            items = []
+            for r in rows:
+                stored = r.est_cost_currency or budget_currency
+                effective = _normalise_item_currency(stored, budget_currency, local_currency)
+                converted = convert_currency(float(r.est_cost), effective, budget_currency)
+                converted = min(converted, per_item_cap)
+                items.append(
+                    {
+                        "id": str(r.id),
+                        "day_number": r.day_number,
+                        "title": r.title,
+                        "est_cost": float(r.est_cost),
+                        "est_cost_currency": effective,
+                        "est_cost_converted": converted,
+                    }
+                )
+            # sort by converted cost so the most expensive in budget currency float to top
+            items.sort(key=lambda x: x["est_cost_converted"], reverse=True)
+            return items[:top_n]
     except Exception as exc:
         logger.error("budget_optimizer_load_items_error", trip_id=trip_id, error=str(exc))
         return []
@@ -199,10 +315,11 @@ async def _propose_swap(
     costs: dict,  # type: ignore[type-arg]
 ) -> dict | None:  # type: ignore[type-arg]
     currency = trip.budget_currency
-    cost = float(item.get("est_cost") or 0)
+    # Use the pre-converted cost (in budget currency) for display and LLM context
+    cost = float(item.get("est_cost_converted") or item.get("est_cost") or 0)
     prompt = (
         f"City: {trip.destination_city}\n"
-        f"Paid activity: \"{item.get('title')}\" costs {currency} {cost:.0f}\n"
+        f'Paid activity: "{item.get("title")}" costs {currency} {cost:.0f}\n'
         f"Trip budget: {currency} {trip.budget_total:.0f}"
         f" ({deviation * 100:+.1f}% over budget)\n"
         f"By category — lodging: {costs['lodging']:.0f},"
@@ -219,8 +336,8 @@ async def _propose_swap(
         "proposed_by": "budget_optimizer",
         "change_type": "budget_swap",
         "summary": (
-            f"Day {item.get('day_number')}: Replace \"{item.get('title')}\""
-            f" (est. {currency} {cost:.0f}) with \"{raw['title']}\" to reduce spend"
+            f'Day {item.get("day_number")}: Replace "{item.get("title")}"'
+            f' (est. {currency} {cost:.0f}) with "{raw["title"]}" to reduce spend'
         ),
         "payload": {
             "item_id": str(item.get("id") or ""),
@@ -273,7 +390,7 @@ async def _propose_upgrade(
         "proposed_by": "budget_optimizer",
         "change_type": "budget_upgrade",
         "summary": (
-            f"Budget upgrade: switch to \"{candidate['name']}\""
+            f'Budget upgrade: switch to "{candidate["name"]}"'
             f" — trip is {abs(deviation) * 100:.0f}% under budget"
         ),
         "payload": {
@@ -381,6 +498,22 @@ async def _set_trip_awaiting_approval(trip_id: str) -> None:
                 await session.commit()
     except Exception as exc:
         logger.error("budget_optimizer_status_error", trip_id=trip_id, error=str(exc))
+
+
+async def _persist_budget_state(trip_id: str, budget_state: dict) -> None:  # type: ignore[type-arg]
+    """Write the computed budget summary to trips.budget_state.
+
+    The graph's own state is ephemeral (per-task MemorySaver) — this is the only
+    copy the API can serve back to the frontend's budget breakdown.
+    """
+    try:
+        async with AsyncSessionLocal() as session:
+            trip = await session.get(Trip, trip_id)
+            if trip is not None:
+                trip.budget_state = budget_state
+                await session.commit()
+    except Exception as exc:
+        logger.error("budget_optimizer_state_persist_error", trip_id=trip_id, error=str(exc))
 
 
 def _noop(state: TravelOSState) -> dict:  # type: ignore[type-arg]
