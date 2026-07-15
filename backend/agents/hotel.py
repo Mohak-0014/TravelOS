@@ -77,6 +77,8 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
         country=trip.destination_country,
         currency=trip.budget_currency,
         cache=redis,
+        lat=float(trip.latitude) if trip.latitude is not None else None,
+        lng=float(trip.longitude) if trip.longitude is not None else None,
     )
     await redis.aclose()
 

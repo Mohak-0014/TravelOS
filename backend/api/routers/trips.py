@@ -165,7 +165,10 @@ async def create_trip(
         user_id=current_user.id,
         title=body.title,
         destination_city=body.destination_city,
-        destination_country=body.destination_country,
+        # Backfill from geocoding when the user left country blank — hotel search
+        # (LiteAPI countryCode), local-currency detection, and airport resolution
+        # all degrade without one.
+        destination_country=body.destination_country or (geo.country if geo else None),
         latitude=geo.lat if geo else None,
         longitude=geo.lng if geo else None,
         start_date=body.start_date,
@@ -245,6 +248,8 @@ async def update_trip(
         if geo:
             trip.latitude = geo.lat
             trip.longitude = geo.lng
+            if not trip.destination_country and geo.country:
+                trip.destination_country = geo.country
         if cover_url:
             trip.cover_image_url = cover_url
 

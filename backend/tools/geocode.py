@@ -22,6 +22,10 @@ class GeoPoint(BaseModel):
     # Half-diagonal of the Nominatim bounding box in metres — the place's own extent.
     # A city gives a few km; a state like Goa ~60 km. None for cached pre-bbox entries.
     bbox_radius_m: float | None = None
+    # From Nominatim addressdetails — lets trip creation backfill a country the user
+    # left blank (hotel/currency/flight lookups all degrade without one).
+    country: str | None = None
+    country_code: str | None = None  # ISO-3166-1 alpha-2, uppercased
 
 
 def _bbox_radius_m(bbox: list) -> float | None:  # type: ignore[type-arg]
@@ -37,7 +41,10 @@ def _bbox_radius_m(bbox: list) -> float | None:  # type: ignore[type-arg]
 
 
 def _cache_key(query: str) -> str:
-    return f"geo:{hashlib.sha256(query.lower().strip().encode()).hexdigest()}"
+    # v2: entries carry country/country_code from addressdetails — old cached
+    # payloads lack them, so the version bump forces a refetch rather than
+    # serving country-less results for another 30 days.
+    return f"geo:v2:{hashlib.sha256(query.lower().strip().encode()).hexdigest()}"
 
 
 async def geocode(query: str, cache: Redis | None = None) -> GeoPoint | None:  # type: ignore[type-arg]
@@ -58,7 +65,7 @@ async def geocode(query: str, cache: Redis | None = None) -> GeoPoint | None:  #
             "nominatim",
             "GET",
             _NOMINATIM_URL,
-            params={"q": query, "format": "json", "limit": 1},
+            params={"q": query, "format": "json", "limit": 1, "addressdetails": 1},
             headers={"User-Agent": _USER_AGENT},
             timeout=10.0,
         )
@@ -73,11 +80,15 @@ async def geocode(query: str, cache: Redis | None = None) -> GeoPoint | None:  #
         return None
 
     first = results[0]
+    address = first.get("address") or {}
+    country_code = address.get("country_code")
     point = GeoPoint(
         lat=float(first["lat"]),
         lng=float(first["lon"]),
         display_name=first.get("display_name", ""),
         bbox_radius_m=_bbox_radius_m(first.get("boundingbox") or []),
+        country=address.get("country"),
+        country_code=country_code.upper() if country_code else None,
     )
 
     await redis_set_cached(cache, key, point.model_dump(), _CACHE_TTL)

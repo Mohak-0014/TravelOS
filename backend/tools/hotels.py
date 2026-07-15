@@ -92,6 +92,50 @@ _CITY_COUNTRY: dict[str, str] = {
     "bangalore": "IN",
     "kolkata": "IN",
     "assam": "IN",
+    "goa": "IN",
+    "kochi": "IN",
+    "chennai": "IN",
+    "hyderabad": "IN",
+    "pune": "IN",
+    "jaipur": "IN",
+    "agra": "IN",
+    "udaipur": "IN",
+    "varanasi": "IN",
+    "amritsar": "IN",
+    "rishikesh": "IN",
+    "manali": "IN",
+    "shimla": "IN",
+    "ankara": "TR",
+    "izmir": "TR",
+    "antalya": "TR",
+    "cappadocia": "TR",
+    "santorini": "GR",
+    "mykonos": "GR",
+    "venice": "IT",
+    "florence": "IT",
+    "naples": "IT",
+    "munich": "DE",
+    "frankfurt": "DE",
+    "nice": "FR",
+    "lyon": "FR",
+    "geneva": "CH",
+    "phuket": "TH",
+    "chiang mai": "TH",
+    "krabi": "TH",
+    "pattaya": "TH",
+    "da nang": "VN",
+    "busan": "KR",
+    "vancouver": "CA",
+    "montreal": "CA",
+    "chicago": "US",
+    "san francisco": "US",
+    "miami": "US",
+    "las vegas": "US",
+    "boston": "US",
+    "seattle": "US",
+    "auckland": "NZ",
+    "edinburgh": "GB",
+    "manchester": "GB",
     "paris": "FR",
     "london": "GB",
     "new york": "US",
@@ -172,9 +216,15 @@ class HotelOffer(BaseModel):
 
 
 def _cache_key(
-    destination: str, check_in: date, check_out: date, guests: int, currency: str
+    destination: str,
+    check_in: date,
+    check_out: date,
+    guests: int,
+    currency: str,
+    lat: float | None = None,
+    lng: float | None = None,
 ) -> str:
-    raw = f"{destination}|{check_in}|{check_out}|{guests}|{currency}"
+    raw = f"{destination}|{check_in}|{check_out}|{guests}|{currency}|{lat}|{lng}"
     return f"hotels:{hashlib.sha256(raw.encode()).hexdigest()}"
 
 
@@ -273,18 +323,27 @@ async def _search_liteapi(
     guests: int,
     country: str | None = None,
     currency: str = "USD",
+    lat: float | None = None,
+    lng: float | None = None,
 ) -> list[HotelOffer]:
     if not settings.LITEAPI_KEY:
         logger.warning("liteapi_key_missing")
         return []
 
+    # /data/hotels requires countryCode alongside cityName (400 without it). When we
+    # can't resolve one, search by the trip's geocoded coordinates instead — 30 km
+    # covers a metro area and region-sized destinations like Goa whose geocode point
+    # sits inland of the hotel belt.
     country_code = _country_code(destination, country)
-    params: dict[str, str | int] = {
-        "cityName": destination,
-        "limit": 20,
-    }
+    params: dict[str, str | int | float]
     if country_code:
-        params["countryCode"] = country_code
+        params = {"cityName": destination, "countryCode": country_code, "limit": 20}
+    elif lat is not None and lng is not None:
+        params = {"latitude": lat, "longitude": lng, "radius": 30_000, "limit": 20}
+        logger.info("liteapi_coord_search", destination=destination, lat=lat, lng=lng)
+    else:
+        logger.warning("liteapi_no_country_or_coords", destination=destination)
+        return []
 
     try:
         resp = await resilient_request(
@@ -350,18 +409,25 @@ async def search_hotels(
     country: str | None = None,
     currency: str = "USD",
     cache: Redis | None = None,  # type: ignore[type-arg]
+    lat: float | None = None,
+    lng: float | None = None,
 ) -> list[HotelOffer]:
     """
     Search hotels via LiteAPI /data/hotels (static metadata + star/location).
+
+    ``lat``/``lng`` (the trip's geocoded coordinates) are the fallback search
+    key when no ISO country code can be resolved for the destination.
     Returns [] on failure — never raises.
     """
-    key = _cache_key(destination, check_in, check_out, guests, currency)
+    key = _cache_key(destination, check_in, check_out, guests, currency, lat, lng)
     cached = await redis_get_cached(cache, key)
     if cached:
         logger.info("hotels_cache_hit", destination=destination)
         return [HotelOffer(**h) for h in cached]
 
-    offers = await _search_liteapi(destination, check_in, check_out, guests, country, currency)
+    offers = await _search_liteapi(
+        destination, check_in, check_out, guests, country, currency, lat, lng
+    )
 
     if offers:
         payload = [o.model_dump() for o in offers]
