@@ -493,6 +493,11 @@ async def get_trip_flights(
         currency=trip.budget_currency or "USD",
         api_key=settings.DUFFEL_API_KEY,
         cache=cache,
+        near=(
+            (float(trip.latitude), float(trip.longitude))
+            if trip.latitude is not None and trip.longitude is not None
+            else None
+        ),
     )
 
 

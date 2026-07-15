@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from datetime import date
 from typing import Any
@@ -63,6 +64,14 @@ def _fmt_duration(iso: str) -> str:
     return " ".join(parts) if parts else iso
 
 
+def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    rlat1, rlat2 = math.radians(lat1), math.radians(lat2)
+    dlat = rlat2 - rlat1
+    dlng = math.radians(lng2 - lng1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlng / 2) ** 2
+    return 6371.0 * 2 * math.asin(math.sqrt(a))
+
+
 # ── IATA resolution via Duffel airports search ────────────────────────────────
 
 
@@ -70,9 +79,19 @@ async def resolve_iata(
     city: str,
     api_key: str,
     cache: Any = None,
+    near: tuple[float, float] | None = None,
 ) -> str | None:
-    """Return the primary airport IATA code for a city name."""
-    key = f"duffel:iata:{city.lower().replace(' ', '_')}"
+    """Return the primary airport IATA code for a city name.
+
+    Duffel's suggestions rank exact IATA-code matches high, so a bare name
+    query is a homonym trap: "Goa" returns Genoa, Italy (IATA GOA) and
+    "Kochi" returns Kōchi, Japan (KCZ). When ``near`` (the trip's geocoded
+    lat/lng) is given, the candidate closest to it wins instead of the first.
+    """
+    # v2: geographic disambiguation — version the key so ranking changes never
+    # keep serving a resolution made by an older algorithm.
+    coord_part = f":{near[0]:.1f}:{near[1]:.1f}" if near else ""
+    key = f"duffel:iata:v2:{city.lower().replace(' ', '_')}{coord_part}"
     if cache:
         cached = await redis_get_cached(cache, key)
         if cached and isinstance(cached, dict):
@@ -89,22 +108,43 @@ async def resolve_iata(
         )
         r.raise_for_status()
         items = r.json().get("data", [])
-        # Prefer city-level IATA (e.g. LON, PAR, NYC) — covers all metro airports
-        for item in items:
-            if item.get("type") == "city":
-                iata = item.get("iata_code")
+
+        iata: str | None = None
+        if near is not None:
+            # Distance to the trip's real location kills homonyms (Genoa for
+            # "Goa" is 6,000 km away). Within 50 km of the nearest candidate,
+            # prefer a city-level code (MEL, LON, NYC) over a single airport —
+            # metro codes search every airport of the city, so Melbourne must
+            # not resolve to Essendon just because it is 3 km closer.
+            candidates: list[tuple[float, int, str]] = []
+            for item in items:
+                code = item.get("iata_code")
+                lat, lng = item.get("latitude"), item.get("longitude")
+                if not code or lat is None or lng is None:
+                    continue
+                dist = _haversine_km(near[0], near[1], float(lat), float(lng))
+                candidates.append((dist, 0 if item.get("type") == "city" else 1, str(code)))
+            if candidates:
+                nearest = min(c[0] for c in candidates)
+                dist, _, iata = min(
+                    (c for c in candidates if c[0] <= nearest + 50.0),
+                    key=lambda c: (c[1], c[0]),
+                )
+                logger.info("duffel_iata_resolved", city=city, iata=iata, km=round(dist, 1))
+        if iata is None:
+            # No location context — first city-level result, else first airport.
+            for wanted in ("city", "airport"):
+                for item in items:
+                    if item.get("type") == wanted and item.get("iata_code"):
+                        iata = str(item["iata_code"])
+                        break
                 if iata:
-                    if cache:
-                        await redis_set_cached(cache, key, {"iata": iata}, ttl=_IATA_TTL)
-                    return str(iata)
-        # Fall back to first airport result
-        for item in items:
-            if item.get("type") == "airport":
-                iata = item.get("iata_code")
-                if iata:
-                    if cache:
-                        await redis_set_cached(cache, key, {"iata": iata}, ttl=_IATA_TTL)
-                    return str(iata)
+                    break
+
+        if iata:
+            if cache:
+                await redis_set_cached(cache, key, {"iata": iata}, ttl=_IATA_TTL)
+            return iata
     except Exception as exc:
         logger.warning("duffel_iata_resolve_error", city=city, error=str(exc))
     return None
@@ -176,28 +216,34 @@ async def search_flights(
     api_key: str = "",
     cache: Any = None,
     max_results: int = 5,
+    near: tuple[float, float] | None = None,
 ) -> list[FlightOffer]:
     """
     Search round-trip flight offers via Duffel.
+
+    ``near`` (the destination's geocoded lat/lng) disambiguates homonym city
+    names during IATA resolution — see resolve_iata.
     Returns [] gracefully when api_key is absent or the API errors.
     """
     if not api_key:
         logger.info("duffel_no_api_key")
         return []
 
+    dest_iata = await resolve_iata(destination_city, api_key, cache, near=near)
+    if not dest_iata:
+        logger.warning("duffel_no_iata", city=destination_city)
+        return []
+
+    # Keyed by the RESOLVED airport, not the raw city name — a fixed resolution
+    # must never keep serving offers cached under a homonym's airport.
     cache_key = (
-        f"duffel:flights:{origin_iata}:{destination_city}:"
+        f"duffel:flights:{origin_iata}:{dest_iata}:"
         f"{departure_date}:{return_date}:{num_travelers}:{currency}"
     )
     if cache:
         cached = await redis_get_cached(cache, cache_key)
         if cached and isinstance(cached, list):
             return [FlightOffer(**o) for o in cached if isinstance(o, dict)]
-
-    dest_iata = await resolve_iata(destination_city, api_key, cache)
-    if not dest_iata:
-        logger.warning("duffel_no_iata", city=destination_city)
-        return []
 
     slices: list[dict[str, str]] = [
         {

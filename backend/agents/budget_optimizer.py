@@ -15,7 +15,6 @@ from backend.db.models import Approval, HotelCandidate, ItineraryItem, Trip
 from backend.graphs.state import TravelOSState
 from backend.tools import get_redis_client
 from backend.tools.currency import convert as convert_currency
-from backend.tools.currency import destination_currency
 from backend.tools.flights import search_flights
 
 logger = get_logger(__name__)
@@ -54,21 +53,29 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
             return _noop(state)
 
         budget_total = float(trip.budget_total)
-        # The true local currency of the destination — used to correct items whose
-        # est_cost_currency was stored as the budget currency (a common LLM error).
-        local_curr = destination_currency(trip.destination_city, trip.destination_country)
         itinerary: list[dict] = list(state.get("itinerary") or [])  # type: ignore[arg-type]
         hotel_state: dict = dict(state.get("hotel_state") or {})  # type: ignore[type-arg]
 
-        costs = _compute_costs(
-            itinerary, hotel_state, trip.budget_currency, budget_total, local_curr
-        )
+        costs = _compute_costs(itinerary, hotel_state, trip.budget_currency, budget_total)
 
         # Round-trip flights for all travelers, when a departure airport is known.
         # Real Duffel price or nothing — an unknown fare is excluded, never guessed.
         flight_cost = await _flight_cost(trip)
         if flight_cost is not None:
             costs["flights"] = round(flight_cost, 2)
+
+        # Major categories with no real price are EXCLUDED from total_planned, so
+        # comparing against the full budget would fake a huge "under budget". Track
+        # them so the status/UI can say "partial estimate" instead of "-75%".
+        missing_categories = [
+            cat
+            for cat, absent in (
+                ("flights", flight_cost is None),
+                ("lodging", costs.get("lodging", 0) <= 0),
+            )
+            if absent
+        ]
+        partial = bool(missing_categories)
 
         total_planned = sum(costs.values())
 
@@ -81,12 +88,13 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
         proposals: list[dict] = []  # type: ignore[type-arg]
 
         if deviation > _OVER_THRESHOLD:
-            # Load items from DB so we have real UUIDs for on-approve lookup
+            # Over budget is genuine even on partial data — the missing categories
+            # could only push the total higher. Load items from DB so we have real
+            # UUIDs for on-approve lookup.
             db_items = await _load_expensive_activities(
                 trip_id,
                 budget_currency=trip.budget_currency,
                 budget_total=budget_total,
-                local_currency=local_curr,
                 top_n=_MAX_SWAP_PROPOSALS,
             )
             for item in db_items:
@@ -94,8 +102,9 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
                 if p:
                     proposals.append(p)
 
-        elif deviation < _UNDER_THRESHOLD:
-            # Well under budget — propose one premium upgrade
+        elif deviation < _UNDER_THRESHOLD and not partial:
+            # Well under budget on COMPLETE data — propose one premium upgrade.
+            # On partial data "under budget" is an artifact of the missing prices.
             p = await _propose_upgrade(trip, hotel_state, costs, deviation)
             if p:
                 proposals.append(p)
@@ -104,13 +113,14 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
             await _persist_approvals(trip_id, proposals)
             await _set_trip_awaiting_approval(trip_id)
 
-        status = (
-            "over_budget"
-            if deviation > _OVER_THRESHOLD
-            else "under_budget"
-            if deviation < _UNDER_THRESHOLD
-            else "on_track"
-        )
+        if deviation > _OVER_THRESHOLD:
+            status = "over_budget"
+        elif partial:
+            status = "partial"
+        elif deviation < _UNDER_THRESHOLD:
+            status = "under_budget"
+        else:
+            status = "on_track"
 
         budget_summary: dict = {  # type: ignore[type-arg]
             "by_category": costs,
@@ -119,6 +129,7 @@ async def run(state: TravelOSState) -> dict:  # type: ignore[type-arg]
             "deviation_pct": round(deviation * 100, 1),
             "currency": trip.budget_currency,
             "status": status,
+            "missing_categories": missing_categories,
             "proposals_created": len(proposals),
         }
 
@@ -180,6 +191,11 @@ async def _flight_cost(trip: Trip) -> float | None:
             currency=trip.budget_currency or "USD",
             api_key=settings.DUFFEL_API_KEY,
             cache=redis,
+            near=(
+                (float(trip.latitude), float(trip.longitude))
+                if trip.latitude is not None and trip.longitude is not None
+                else None
+            ),
         )
     except Exception as exc:
         logger.warning("budget_flight_fetch_failed", trip_id=str(trip.id), error=str(exc))
@@ -195,35 +211,23 @@ async def _flight_cost(trip: Trip) -> float | None:
     )
 
 
-def _normalise_item_currency(
-    stored: str,
-    budget_currency: str,
-    local_currency: str,
-) -> str:
-    """Return the currency that should be used to interpret an item's est_cost.
-
-    The LLM is told to use local_currency amounts but often emits budget_currency
-    instead (e.g. "INR" for a Bali trip whose local currency is "IDR").  When the
-    stored currency equals the budget currency but the destination's local currency
-    is different, we treat the amount as being in local_currency so the conversion
-    to budget_currency is correct.
-    """
-    if stored == budget_currency and local_currency != budget_currency:
-        return local_currency
-    return stored
-
-
 def _compute_costs(
     itinerary: list[dict],  # type: ignore[type-arg]
     hotel_state: dict,  # type: ignore[type-arg]
     budget_currency: str = "INR",
     budget_total: float = 0.0,
-    local_currency: str = "",
 ) -> dict:  # type: ignore[type-arg]
+    """Sum itinerary + hotel costs in the budget currency.
+
+    Stored est_cost_currency is trusted as-is: the itinerary planner now converts
+    whatever currency the LLM declared into the destination's local currency at
+    write time, so second-guessing the label here (the old "normalise" heuristic)
+    only corrupted correct data — ₹500 reinterpreted as €500 is a 91× error.
+    """
     costs: dict[str, float] = {"lodging": 0.0, "activities": 0.0, "meals": 0.0, "transport": 0.0}
 
-    # Per-item cap: safety net if a single item's converted cost is still unreasonably
-    # large after currency normalisation.  Cap at 30 % of budget or 10 000 absolute.
+    # Per-item cap: safety net if a single item's converted cost is unreasonably
+    # large (LLM price hallucination).  Cap at 30 % of budget or 10 000 absolute.
     per_item_cap = (budget_total * 0.30) if budget_total > 0 else 10_000.0
 
     selected = hotel_state.get("selected") or {}
@@ -243,10 +247,7 @@ def _compute_costs(
         if cost <= 0:
             continue
         stored_currency = str(item.get("est_cost_currency") or budget_currency)
-        effective_currency = _normalise_item_currency(
-            stored_currency, budget_currency, local_currency
-        )
-        converted = convert_currency(cost, effective_currency, budget_currency)
+        converted = convert_currency(cost, stored_currency, budget_currency)
         converted = min(converted, per_item_cap)
         itype = str(item.get("item_type") or "")
         if itype == "activity":
@@ -263,7 +264,6 @@ async def _load_expensive_activities(
     trip_id: str,
     budget_currency: str = "INR",
     budget_total: float = 0.0,
-    local_currency: str = "",
     top_n: int = 3,
 ) -> list[dict]:  # type: ignore[type-arg]
     """Load paid activity items from DB (with real UUIDs) sorted by converted cost desc."""
@@ -284,8 +284,7 @@ async def _load_expensive_activities(
             items = []
             for r in rows:
                 stored = r.est_cost_currency or budget_currency
-                effective = _normalise_item_currency(stored, budget_currency, local_currency)
-                converted = convert_currency(float(r.est_cost), effective, budget_currency)
+                converted = convert_currency(float(r.est_cost), stored, budget_currency)
                 converted = min(converted, per_item_cap)
                 items.append(
                     {
@@ -293,7 +292,7 @@ async def _load_expensive_activities(
                         "day_number": r.day_number,
                         "title": r.title,
                         "est_cost": float(r.est_cost),
-                        "est_cost_currency": effective,
+                        "est_cost_currency": stored,
                         "est_cost_converted": converted,
                     }
                 )

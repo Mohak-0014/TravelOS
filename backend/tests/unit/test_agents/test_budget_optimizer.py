@@ -32,6 +32,8 @@ def _mock_trip(
     trip.budget_currency = budget_currency
     trip.destination_city = destination_city
     trip.flight_origin = None  # opt-in per test — MagicMock default would crash len()
+    trip.latitude = None  # opt-in per test — MagicMock default would crash float()
+    trip.longitude = None
     return trip
 
 
@@ -332,18 +334,21 @@ async def test_run_on_track_returns_budget_summary() -> None:
         _itinerary_item("meal", 50.0),
     ]
     hotel_state = {"selected": {"price_total": 500.0}}
-    # Total = 650 vs budget 700 → deviation -7.1% → on_track (between -30% and +15%)
+    # Total = 650 + 30 flights vs budget 700 → deviation -2.9% → on_track
     state = _state(itinerary=items, hotel_state=hotel_state)
 
-    with patch("backend.agents.budget_optimizer._load_trip") as mock_load:
-        # Unmapped city -> local currency USD == budget currency -> costs pass through
+    with (
+        patch("backend.agents.budget_optimizer._load_trip") as mock_load,
+        patch("backend.agents.budget_optimizer._flight_cost", new=AsyncMock(return_value=30.0)),
+    ):
         mock_load.return_value = _mock_trip(budget_total=700.0, destination_city="Springfield")
         result = await run(state)
 
     bs = result["budget_state"]
     assert bs["status"] == "on_track"
-    assert bs["total_planned"] == pytest.approx(650.0)
+    assert bs["total_planned"] == pytest.approx(680.0)
     assert bs["budget_total"] == 700.0
+    assert bs["missing_categories"] == []
     assert bs["proposals_created"] == 0
 
 
@@ -398,7 +403,7 @@ async def test_run_over_budget_creates_swap_proposals() -> None:
 async def test_run_under_budget_creates_upgrade_proposal() -> None:
     items = [_itinerary_item("activity", 100.0)]
     hotel_state = {"selected": {"price_total": 200.0}}
-    # Total = 300 vs budget 1500 → 80% under
+    # Total = 300 + 100 flights = 400 vs budget 1500 → 73% under, all categories priced
     state = _state(itinerary=items, hotel_state=hotel_state)
 
     fake_upgrade = {
@@ -416,6 +421,7 @@ async def test_run_under_budget_creates_upgrade_proposal() -> None:
 
     with (
         patch("backend.agents.budget_optimizer._load_trip") as mock_load,
+        patch("backend.agents.budget_optimizer._flight_cost", new=AsyncMock(return_value=100.0)),
         patch("backend.agents.budget_optimizer._propose_upgrade") as mock_upgrade,
         patch("backend.agents.budget_optimizer._persist_approvals") as mock_persist,
         patch("backend.agents.budget_optimizer._set_trip_awaiting_approval") as mock_status,
@@ -429,7 +435,30 @@ async def test_run_under_budget_creates_upgrade_proposal() -> None:
 
     bs = result["budget_state"]
     assert bs["status"] == "under_budget"
+    assert bs["missing_categories"] == []
     assert bs["deviation_pct"] < _UNDER_THRESHOLD * 100
+
+
+@pytest.mark.asyncio
+async def test_run_partial_data_never_claims_under_budget() -> None:
+    """Flights/lodging with no real price → status 'partial', never a fake surplus."""
+    items = [_itinerary_item("activity", 100.0)]
+    # No hotel selected and no flight origin → both major categories unpriced.
+    state = _state(itinerary=items, hotel_state={})
+
+    with (
+        patch("backend.agents.budget_optimizer._load_trip") as mock_load,
+        patch("backend.agents.budget_optimizer._propose_upgrade") as mock_upgrade,
+        patch("backend.agents.budget_optimizer._persist_budget_state", new=AsyncMock()),
+    ):
+        mock_load.return_value = _mock_trip(budget_total=1500.0)
+        result = await run(state)
+
+    bs = result["budget_state"]
+    assert bs["status"] == "partial"
+    assert sorted(bs["missing_categories"]) == ["flights", "lodging"]
+    assert bs["proposals_created"] == 0
+    mock_upgrade.assert_not_called()
 
 
 @pytest.mark.asyncio
