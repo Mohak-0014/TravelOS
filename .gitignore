@@ -30,6 +30,13 @@ yarn-error.log*
 # Docker
 *.log
 
+# Celery beat schedule (runtime state)
+celerybeat-schedule*
+
+# Local verification artifacts
+screenshots/
+ss_*.png
+
 # OS
 .DS_Store
 Thumbs.db
