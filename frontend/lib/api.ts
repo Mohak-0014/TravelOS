@@ -27,11 +27,7 @@ function buildUrl(path: string, params?: Record<string, string | number | boolea
   return url.toString();
 }
 
-async function request<T>(
-  method: Method,
-  path: string,
-  options: RequestOptions = {},
-): Promise<T> {
+async function request<T>(method: Method, path: string, options: RequestOptions = {}): Promise<T> {
   // Explicit token takes priority (e.g. immediately after login before store persists to localStorage)
   let token: string | null = options.token ?? null;
   if (!token && typeof window !== "undefined") {
@@ -75,8 +71,7 @@ async function request<T>(
 }
 
 export const api = {
-  get: <T>(path: string, params?: Record<string, string | number | boolean>, token?: string) =>
-    request<T>("GET", path, { params, token }),
+  get: <T>(path: string, params?: Record<string, string | number | boolean>, token?: string) => request<T>("GET", path, { params, token }),
 
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, { body }),
 
@@ -86,23 +81,18 @@ export const api = {
 
   delete: <T>(path: string) => request<T>("DELETE", path),
 
-  createShareLink: (tripId: string) =>
-    request<TripOut>("POST", `/api/v1/trips/${tripId}/share`),
+  createShareLink: (tripId: string) => request<TripOut>("POST", `/api/v1/trips/${tripId}/share`),
 
-  getSharedTrip: (token: string) =>
-    request<ShareTripOut>("GET", `/api/v1/share/${token}`),
+  getSharedTrip: (token: string) => request<ShareTripOut>("GET", `/api/v1/share/${token}`),
 
-  updateTrip: (tripId: string, body: Partial<TripUpdate>) =>
-    request<TripOut>("PUT", `/api/v1/trips/${tripId}`, { body }),
+  updateTrip: (tripId: string, body: Partial<TripUpdate>) => request<TripOut>("PUT", `/api/v1/trips/${tripId}`, { body }),
 
-  deleteTrip: (tripId: string) =>
-    request<void>("DELETE", `/api/v1/trips/${tripId}`),
+  deleteTrip: (tripId: string) => request<void>("DELETE", `/api/v1/trips/${tripId}`),
 
   selectHotel: (tripId: string, hotelId: string) =>
     request<HotelCandidateOut[]>("POST", `/api/v1/trips/${tripId}/hotels/${hotelId}/select`),
 
-  getTripEvents: (tripId: string) =>
-    request<TripEventOut[]>("GET", `/api/v1/trips/${tripId}/events`),
+  getTripEvents: (tripId: string) => request<TripEventOut[]>("GET", `/api/v1/trips/${tripId}/events`),
 
   getTripFlights: (tripId: string, origin: string) =>
     request<FlightOfferOut[]>("GET", `/api/v1/trips/${tripId}/flights`, { params: { origin } }),
@@ -116,7 +106,9 @@ export const api = {
         const parsed = JSON.parse(raw) as { state?: { token?: string } };
         token = parsed.state?.token ?? null;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     const res = await fetch(buildUrl(`/api/v1/trips/${tripId}/calendar.ics`), {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -186,6 +178,7 @@ export interface TripOut {
     deviation_pct?: number;
     currency?: string;
     status?: string;
+    missing_categories?: string[];
     proposals_created?: number;
     estimated_planned?: number;
   } | null;

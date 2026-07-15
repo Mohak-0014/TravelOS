@@ -3,1017 +3,53 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { motion, AnimatePresence, useScroll, useTransform } from "framer-motion";
-import dynamic from "next/dynamic";
+import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import {
-  Compass, MapPin, Calendar, Users, DollarSign, Sparkles, Clock,
-  CheckCircle2, AlertCircle, Loader2, ArrowRight, ChevronRight,
-  Send, X, Hotel, Star, Wallet, Activity, Utensils, Bus,
-  Sun, CloudRain, Wind, ZapIcon, Luggage, ChevronDown,
-  Share2, Check, Pencil, Trash2, CalendarPlus, CalendarDays, Download,
-  type LucideIcon,
-} from "lucide-react";
+import { ChevronRight, AlertCircle, Loader2, Sparkles, Compass, MapPin, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type {
-  TripOut, ItineraryItemOut, ApprovalOut, ChatResponse, ChatSource,
-  WeatherDay, HotelCandidateOut, TripUpdate, TripEventOut, FlightOfferOut,
+  TripOut,
+  ItineraryItemOut,
+  ApprovalOut,
+  ChatResponse,
+  WeatherDay,
+  HotelCandidateOut,
+  TripUpdate,
+  TripEventOut,
+  FlightOfferOut,
 } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
+import { flightOriginKey, genStartKey } from "@/lib/constants";
+import { convertToBudgetCurrency } from "@/lib/currency";
+import { EASE } from "@/lib/motion";
 import NavBar from "@/components/ui/NavBar";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { Tabs } from "@/components/ui/Tabs";
+import { AgentProgress } from "@/components/trip/AgentProgress";
+import { ApprovalCard } from "@/components/trip/ApprovalCards";
+import { TripHero } from "@/components/trip/TripHero";
+import { BudgetPanel } from "@/components/trip/BudgetPanel";
+import { ItinerarySection, EmptyItineraryState } from "@/components/trip/ItineraryDay";
+import { HotelsPanel } from "@/components/trip/HotelsPanel";
+import { FlightsPanel } from "@/components/trip/FlightsPanel";
+import { EventsPanel } from "@/components/trip/EventsPanel";
+import { PackingList } from "@/components/trip/PackingList";
+import { SectionNav } from "@/components/trip/SectionNav";
+import { ConciergeThread, type ChatMessage } from "@/components/trip/ConciergeThread";
+import { MapCard } from "@/components/trip/MapCard";
+import { EditTripModal } from "@/components/trip/EditTripModal";
 
-// ── TripMap (dynamic, no SSR) ─────────────────────────────────────────────────
-
-const TripMap = dynamic(() => import("./TripMap"), {
-  ssr: false,
-  loading: () => (
-    <div className="h-[300px] rounded-2xl bg-space-800 animate-pulse flex items-center justify-center">
-      <Loader2 className="w-6 h-6 text-electric-400 animate-spin" />
-    </div>
-  ),
-});
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-type ChatMessage = {
-  role: "user" | "assistant";
-  text: string;
-  sources?: ChatSource[];
+// ── Budget category palette (mirrors the map-pin legend for cross-widget consistency) ──
+const BUDGET_COLORS: Record<string, string> = {
+  Flights: "#6BB6FF",
+  Lodging: "#FF9E64",
+  Activities: "#D9A05B",
+  Meals: "#FFC46B",
+  Transport: "#3ECF8E",
 };
-
-type IconComponent = LucideIcon;
-
-// Extended TripOut to allow for fields the API may return that aren't in the base type
-type TripOutExtended = TripOut & {
-  agent_messages?: { role: string; content: string }[];
-};
-
-// ── Status config ─────────────────────────────────────────────────────────────
-
-const STATUS_CONFIG: Record<
-  string,
-  { label: string; color: string; icon: IconComponent; glow: string }
-> = {
-  planning: {
-    label: "Planning",
-    color: "text-gold-400 bg-gold-500/10 border-gold-500/20",
-    icon: Clock,
-    glow: "shadow-gold-sm",
-  },
-  generating: {
-    label: "Generating…",
-    color: "text-electric-400 bg-electric-500/10 border-electric-500/20",
-    icon: Loader2,
-    glow: "shadow-electric-sm",
-  },
-  awaiting_approval: {
-    label: "Your Call",
-    color: "text-coral-400 bg-coral-500/10 border-coral-500/20",
-    icon: AlertCircle,
-    glow: "shadow-coral-sm",
-  },
-  planned: {
-    label: "Ready",
-    color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
-    icon: CheckCircle2,
-    glow: "",
-  },
-  failed: {
-    label: "Failed",
-    color: "text-coral-400 bg-coral-500/10 border-coral-500/20",
-    icon: AlertCircle,
-    glow: "",
-  },
-  cancelled: {
-    label: "Cancelled",
-    color: "text-slate-400 bg-slate-700/30 border-slate-700/30",
-    icon: X,
-    glow: "",
-  },
-};
-
-// ── Item icons ─────────────────────────────────────────────────────────────────
-
-const ITEM_ICONS: Record<string, { emoji: string; icon: IconComponent; color: string }> = {
-  activity: { emoji: "🎭", icon: Activity,  color: "text-electric-400" },
-  meal:     { emoji: "🍽",  icon: Utensils,  color: "text-gold-400"     },
-  transport:{ emoji: "🚌", icon: Bus,       color: "text-emerald-400"  },
-  lodging:  { emoji: "🏨", icon: Hotel,     color: "text-coral-400"    },
-  free:     { emoji: "☀️", icon: Sun,       color: "text-gold-400"     },
-};
-
-// ── Currency conversion (mirrors backend/tools/currency.py) ──────────────────
-const _RATE_TO_INR: Record<string, number> = {
-  INR: 1, USD: 0.0119, EUR: 0.01099, GBP: 0.00943, JPY: 1.851, AUD: 0.01852,
-  NZD: 0.02, CAD: 0.01639, CHF: 0.01053, SGD: 0.01587, HKD: 0.09346, MYR: 0.05263,
-  THB: 0.41667, IDR: 192.31, PHP: 0.68027, VND: 303.03, KRW: 16.667, CNY: 0.08696,
-  TWD: 0.38462, AED: 0.04386, QAR: 0.04329, EGP: 0.57143, ZAR: 0.22222, TRY: 0.41667,
-  BRL: 0.06667, MXN: 0.2381, SEK: 0.125, NOK: 0.11111, DKK: 0.08197, NPR: 1.6,
-  LKR: 3.175, RUB: 1.07527, CZK: 0.2381, HUF: 3.07692, PLN: 0.04167,
-};
-function convertToBudgetCurrency(amount: number, from: string, to: string): number {
-  if (from === to) return amount;
-  const fromRate = _RATE_TO_INR[from.toUpperCase()];
-  const toRate   = _RATE_TO_INR[to.toUpperCase()];
-  if (!fromRate || !toRate) return amount;
-  const inr = amount / fromRate;   // convert to INR pivot
-  return inr * toRate;             // then to target currency
-}
-
-// ── Destination gradient helper ───────────────────────────────────────────────
-
-const DEST_GRADIENTS = [
-  "from-sky-400 via-cyan-500 to-blue-600",
-  "from-amber-400 via-orange-500 to-rose-500",
-  "from-emerald-400 via-teal-500 to-cyan-600",
-  "from-rose-400 via-pink-500 to-fuchsia-600",
-  "from-indigo-400 via-blue-500 to-sky-600",
-  "from-orange-400 via-amber-500 to-yellow-500",
-];
-
-function destGradient(city: string): string {
-  let hash = 0;
-  for (let i = 0; i < city.length; i++) hash = city.charCodeAt(i) + ((hash << 5) - hash);
-  return DEST_GRADIENTS[Math.abs(hash) % DEST_GRADIENTS.length];
-}
-
-// ── Weather icon helper ────────────────────────────────────────────────────────
-
-function WeatherIcon({ code, adverse }: { code: number; adverse: boolean }) {
-  if (adverse || code >= 60) return <CloudRain className="w-4 h-4 text-blue-400" />;
-  if (code >= 40) return <Wind className="w-4 h-4 text-slate-400" />;
-  if (code >= 1) return <ZapIcon className="w-4 h-4 text-gold-400" />;
-  return <Sun className="w-4 h-4 text-gold-400" />;
-}
-
-// ── SVG Donut Chart ────────────────────────────────────────────────────────────
-
-interface DonutSlice {
-  label: string;
-  value: number;
-  color: string;
-}
-
-function DonutChart({ slices, currency }: { slices: DonutSlice[]; currency?: string }) {
-  const total = slices.reduce((s, d) => s + d.value, 0);
-  if (total === 0) return null;
-
-  const radius = 54;
-  const circumference = 2 * Math.PI * radius;
-  let offset = 0;
-
-  return (
-    <div className="flex items-center gap-6">
-      <svg width="140" height="140" viewBox="0 0 140 140" className="shrink-0">
-        <circle cx="70" cy="70" r={radius} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="18" />
-        {slices.map((slice) => {
-          const pct = slice.value / total;
-          const dashLen = pct * circumference;
-          const thisOffset = offset;
-          offset += dashLen;
-          return (
-            <circle
-              key={slice.label}
-              cx="70"
-              cy="70"
-              r={radius}
-              fill="none"
-              stroke={slice.color}
-              strokeWidth="18"
-              strokeDasharray={`${dashLen} ${circumference - dashLen}`}
-              strokeDashoffset={-thisOffset + circumference * 0.25}
-              strokeLinecap="round"
-              style={{ transition: "stroke-dasharray 0.6s ease" }}
-            />
-          );
-        })}
-        <text x="70" y="65" textAnchor="middle" fontSize="11" fill="rgba(255,255,255,0.4)" fontFamily="inherit">
-          Total
-        </text>
-        <text x="70" y="84" textAnchor="middle" fontSize="13" fill="white" fontWeight="600" fontFamily="inherit">
-          {currency ?? ""} {total.toLocaleString()}
-        </text>
-      </svg>
-
-      <div className="flex flex-col gap-2 min-w-0">
-        {slices.map((slice) => (
-          <div key={slice.label} className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: slice.color }} />
-            <span className="text-xs text-slate-400 flex-1">{slice.label}</span>
-            <span className="text-xs text-slate-200 tabular-nums font-medium">
-              {currency} {slice.value.toLocaleString()}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Agent Pipeline ─────────────────────────────────────────────────────────────
-
-// Cumulative elapsed-second thresholds at which each step becomes "active".
-// Derived from real worker timing: total ~85 s, itinerary planner is the long pole.
-const PIPELINE_STEPS: { label: string; hint: string; startsAt: number }[] = [
-  { label: "Travel Style",      hint: "Reading your preferences…",         startsAt: 0  },
-  { label: "Itinerary Planner", hint: "Fetching attractions & weather…",   startsAt: 8  },
-  { label: "Hotels",            hint: "Searching available hotels…",       startsAt: 46 },
-  { label: "Budget",            hint: "Optimising costs…",                 startsAt: 56 },
-  { label: "Events",            hint: "Finding local events…",             startsAt: 63 },
-  { label: "Packing List",      hint: "Preparing your packing list…",      startsAt: 69 },
-  { label: "Validation",        hint: "Reviewing the plan…",               startsAt: 74 },
-  { label: "Saving",            hint: "Almost there…",                     startsAt: 79 },
-];
-
-const GEN_START_KEY = (id: string) => `gen_start_${id}`;
-
-function AgentPipeline({ tripId }: { tripId: string }) {
-  const [elapsed, setElapsed] = useState<number>(() => {
-    const raw = sessionStorage.getItem(GEN_START_KEY(tripId));
-    return raw ? Math.floor((Date.now() - Number(raw)) / 1000) : 0;
-  });
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      const raw = sessionStorage.getItem(GEN_START_KEY(tripId));
-      const start = raw ? Number(raw) : Date.now();
-      setElapsed(Math.floor((Date.now() - start) / 1000));
-    }, 1000);
-    return () => clearInterval(id);
-  }, [tripId]);
-
-  // activeStep = last step whose startsAt threshold has been passed
-  const activeStep = PIPELINE_STEPS.reduce(
-    (acc, step, i) => (elapsed >= step.startsAt ? i : acc),
-    0,
-  );
-  const currentHint = PIPELINE_STEPS[activeStep].hint;
-
-  return (
-    <div className="glass-card p-8 text-center">
-      {/* Animated orb */}
-      <div className="relative inline-flex w-20 h-20 mb-8">
-        <div className="absolute inset-0 rounded-full bg-electric-gradient animate-pulse-glow" />
-        <div className="absolute inset-1 rounded-full bg-space-800 flex items-center justify-center">
-          <Sparkles className="w-8 h-8 text-electric-400 animate-pulse" />
-        </div>
-      </div>
-
-      <h2 className="text-xl font-bold text-white mb-1">Building Your Journey</h2>
-      <p className="text-sm text-slate-500 mb-2">
-        AI agents are crafting a personalised itinerary. This usually takes 60–90 s.
-      </p>
-      <p className="text-xs text-electric-400 mb-10 h-4 transition-all duration-500">
-        {currentHint}
-      </p>
-
-      {/* Pipeline steps */}
-      <div className="flex items-center justify-center gap-0 mb-10 flex-wrap gap-y-4">
-        {PIPELINE_STEPS.map((step, i) => {
-          const done = i < activeStep;
-          const active = i === activeStep;
-          return (
-            <div key={step.label} className="flex items-center">
-              <div className="flex flex-col items-center gap-1.5">
-                <motion.div
-                  animate={active ? { scale: [1, 1.08, 1] } : {}}
-                  transition={{ repeat: Infinity, duration: 1.4 }}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center border transition-all duration-500 ${
-                    done
-                      ? "bg-emerald-500/20 border-emerald-500/60 text-emerald-400"
-                      : active
-                      ? "bg-electric-500/20 border-electric-500/60 text-electric-400 shadow-electric-sm"
-                      : "bg-space-700 border-ink-900/10 text-slate-600"
-                  }`}
-                >
-                  {done ? (
-                    <CheckCircle2 className="w-4 h-4" />
-                  ) : active ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <div className="w-1.5 h-1.5 rounded-full bg-current" />
-                  )}
-                </motion.div>
-                <span
-                  className={`text-[10px] font-medium whitespace-nowrap ${
-                    done
-                      ? "text-emerald-400"
-                      : active
-                      ? "text-electric-400"
-                      : "text-slate-600"
-                  }`}
-                >
-                  {step.label}
-                </span>
-              </div>
-
-              {i < PIPELINE_STEPS.length - 1 && (
-                <div
-                  className={`w-8 h-px mx-1 mb-5 transition-all duration-700 ${
-                    done ? "bg-emerald-500/60" : "bg-ink-900/[0.06]"
-                  }`}
-                />
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Elapsed time */}
-      <p className="text-[10px] text-slate-600 tabular-nums">
-        {elapsed}s elapsed
-      </p>
-
-      {/* Kept for structural parity — hidden since agent_messages isn't in TripOut */}
-      {false && (
-        <div className="glass-light rounded-xl p-4 max-h-32 overflow-y-auto text-left space-y-1.5">
-          {[].map((msg: { role: string; content: string }, i: number) => (
-            <p key={i} className="text-xs text-slate-400 leading-relaxed">
-              <span className="text-electric-400 font-medium">{msg.role}:</span>{" "}
-              {msg.content}
-            </p>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Weather Timeline strip ─────────────────────────────────────────────────────
-
-function WeatherTimeline({ days, heroStyle = false }: { days: WeatherDay[]; heroStyle?: boolean }) {
-  if (!days.length) return null;
-  return (
-    <div className="flex gap-2 overflow-x-auto pb-0.5 scrollbar-hide">
-      {days.slice(0, 7).map((d) => (
-        <div
-          key={d.date}
-          className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl shrink-0 ${
-            heroStyle
-              ? d.is_adverse
-                ? "bg-coral-500/35 backdrop-blur-sm border border-coral-400/50"
-                : "bg-black/40 backdrop-blur-sm border border-white/20"
-              : d.is_adverse
-              ? "bg-coral-500/10 border border-coral-500/20"
-              : "bg-ink-900/[0.04] border border-ink-900/10"
-          }`}
-        >
-          <span className={`text-[10px] ${heroStyle ? "text-white/70" : "text-slate-500"}`}>
-            {new Date(d.date + "T00:00:00").toLocaleDateString("en-US", {
-              weekday: "short",
-            })}
-          </span>
-          <WeatherIcon code={d.condition_code} adverse={d.is_adverse} />
-          <span className={`text-[10px] tabular-nums ${heroStyle ? "text-white/90 font-medium" : "text-slate-300"}`}>
-            {Math.round(d.temp_max_c)}°
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ── Day Nav sidebar ────────────────────────────────────────────────────────────
-
-function DayNav({
-  days,
-  activeDay,
-  onSelect,
-}: {
-  days: number[];
-  activeDay: number;
-  onSelect: (d: number) => void;
-}) {
-  return (
-    <nav className="flex flex-col gap-0.5">
-      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-2 px-2">
-        Days
-      </p>
-      {days.map((d) => (
-        <button
-          key={d}
-          onClick={() => onSelect(d)}
-          className={`relative w-full text-left px-3 py-2 rounded-xl text-sm font-medium transition-colors duration-150 ${
-            d === activeDay ? "text-electric-400" : "text-slate-500 hover:text-slate-300"
-          }`}
-        >
-          {d === activeDay && (
-            <motion.div
-              layoutId="day-active-bg"
-              className="absolute inset-0 bg-electric-500/15 border border-electric-500/30 rounded-xl"
-              transition={{ type: "spring", damping: 30, stiffness: 340 }}
-            />
-          )}
-          <span className="relative z-10">Day {d}</span>
-        </button>
-      ))}
-    </nav>
-  );
-}
-
-// ── Edit Trip Modal ────────────────────────────────────────────────────────────
-
-function EditTripModal({
-  trip,
-  onClose,
-  onSave,
-}: {
-  trip: TripOut;
-  onClose: () => void;
-  onSave: (updates: TripUpdate) => Promise<void>;
-}) {
-  const [form, setForm] = useState<TripUpdate>({
-    title: trip.title,
-    destination_city: trip.destination_city,
-    destination_country: trip.destination_country ?? "",
-    start_date: trip.start_date,
-    end_date: trip.end_date,
-    num_travelers: trip.num_travelers,
-    budget_total: trip.budget_total ?? undefined,
-    budget_currency: trip.budget_currency,
-  });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const set = (key: keyof TripUpdate, value: unknown) =>
-    setForm((f) => ({ ...f, [key]: value }));
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setSaving(true);
-    setError(null);
-    try {
-      await onSave(form);
-      onClose();
-    } catch {
-      setError("Could not save changes. Please try again.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const fieldCls = "w-full bg-space-800 border border-ink-900/10 rounded-xl px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-electric-500/50 transition-colors";
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink-900/40 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ scale: 0.95, opacity: 0, y: 8 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.95, opacity: 0, y: 8 }}
-        transition={{ type: "spring", damping: 28, stiffness: 340 }}
-        className="glass-card p-6 w-full max-w-md"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-base font-semibold text-slate-100">Edit Trip</h2>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-ink-900/[0.04] transition-all">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div>
-            <label className="text-xs text-slate-500 mb-1 block">Trip name</label>
-            <input className={fieldCls} value={form.title ?? ""} onChange={(e) => set("title", e.target.value)} required />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-slate-500 mb-1 block">City</label>
-              <input className={fieldCls} value={form.destination_city ?? ""} onChange={(e) => set("destination_city", e.target.value)} required />
-            </div>
-            <div>
-              <label className="text-xs text-slate-500 mb-1 block">Country</label>
-              <input className={fieldCls} placeholder="Optional" value={form.destination_country ?? ""} onChange={(e) => set("destination_country", e.target.value || null)} />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-slate-500 mb-1 block">Start date</label>
-              <input type="date" className={fieldCls} value={form.start_date ?? ""} onChange={(e) => set("start_date", e.target.value)} required />
-            </div>
-            <div>
-              <label className="text-xs text-slate-500 mb-1 block">End date</label>
-              <input type="date" className={fieldCls} value={form.end_date ?? ""} onChange={(e) => set("end_date", e.target.value)} required />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-slate-500 mb-1 block">Travelers</label>
-              <input type="number" min={1} max={20} className={fieldCls} value={form.num_travelers ?? 1} onChange={(e) => set("num_travelers", parseInt(e.target.value))} required />
-            </div>
-            <div>
-              <label className="text-xs text-slate-500 mb-1 block">Budget</label>
-              <input type="number" min={0} className={fieldCls} placeholder="Optional" value={form.budget_total ?? ""} onChange={(e) => set("budget_total", e.target.value ? parseFloat(e.target.value) : null)} />
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs text-slate-500 mb-1 block">Currency</label>
-            <input className={`${fieldCls} uppercase`} maxLength={3} value={form.budget_currency ?? "INR"} onChange={(e) => set("budget_currency", e.target.value.toUpperCase())} />
-          </div>
-
-          {error && <p className="text-xs text-coral-400">{error}</p>}
-
-          <div className="flex gap-3 pt-1">
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm text-slate-400 border border-ink-900/10 hover:bg-ink-900/[0.04] transition-colors">
-              Cancel
-            </button>
-            <motion.button
-              type="submit"
-              whileTap={{ scale: 0.97 }}
-              disabled={saving}
-              className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-electric-gradient text-white shadow-electric-sm hover:shadow-electric transition-all disabled:opacity-50"
-            >
-              {saving ? "Saving…" : "Save changes"}
-            </motion.button>
-          </div>
-        </form>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-// ── Approval Cards ─────────────────────────────────────────────────────────────
-
-type OnDecision = (id: string, decision: "approved" | "rejected", resolutionNote?: string) => void;
-
-// ── ConciergeSwapCard ──────────────────────────────────────────────────────────
-
-function ConciergeSwapCard({ approval, onDecision }: { approval: ApprovalOut; onDecision: OnDecision }) {
-  const a = approval;
-  const alternatives = (a.payload.alternatives as Array<{ title: string; description: string }> | undefined) ?? [];
-  const [selectedAlt, setSelectedAlt] = useState(0);
-  const current = a.payload.current as { title: string; item_type?: string; start_time?: string; est_cost?: number };
-  const chosen = alternatives[selectedAlt] ?? (a.payload.replacement as { title: string; description?: string });
-
-  return (
-    <div className="glass-card p-4">
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold text-electric-400 bg-electric-500/10 border border-electric-500/20">
-          AI Concierge
-        </span>
-        <span className="text-[10px] text-slate-500">Suggestion · Day {a.payload.day as number}</span>
-      </div>
-
-      {/* Before → After diff */}
-      <div className="flex items-start gap-2 mb-3">
-        <div className="flex-1 p-2.5 rounded-xl bg-ink-900/[0.03] border border-ink-900/10">
-          <p className="text-[10px] text-slate-500 mb-0.5">Current</p>
-          <p className="text-xs text-slate-400 line-through leading-snug">{current.title}</p>
-          {current.start_time && (
-            <p className="text-[10px] text-slate-600 mt-0.5">{current.start_time.slice(0, 5)}</p>
-          )}
-          {current.est_cost != null && (
-            <p className="text-[10px] text-slate-600">{current.est_cost}</p>
-          )}
-        </div>
-        <ArrowRight className="w-3.5 h-3.5 text-slate-600 shrink-0 mt-3.5" />
-        <div className="flex-1 p-2.5 rounded-xl bg-electric-500/5 border border-electric-500/20">
-          <p className="text-[10px] text-electric-400 mb-0.5">Proposed</p>
-          <p className="text-xs text-slate-200 font-medium leading-snug">{chosen.title}</p>
-          {chosen.description && (
-            <p className="text-[10px] text-slate-500 line-clamp-2 mt-0.5">{chosen.description}</p>
-          )}
-        </div>
-      </div>
-
-      {/* Alternatives selector */}
-      {alternatives.length > 1 && (
-        <div className="mb-3 space-y-1.5">
-          <p className="text-[10px] text-slate-500 uppercase tracking-widest">Choose an option</p>
-          {alternatives.map((alt, idx) => (
-            <button
-              key={idx}
-              onClick={() => setSelectedAlt(idx)}
-              className={`w-full text-left px-3 py-2 rounded-xl text-xs transition-all border ${
-                idx === selectedAlt
-                  ? "bg-electric-500/15 border-electric-500/30 text-slate-100"
-                  : "bg-ink-900/[0.03] border-ink-900/10 text-slate-400 hover:bg-ink-900/[0.04]"
-              }`}
-            >
-              <span className="font-medium">{alt.title}</span>
-              {alt.description && (
-                <span className="text-[10px] text-slate-500 block line-clamp-1 mt-0.5">{alt.description}</span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {!!a.payload.reason && (
-        <p className="text-xs text-slate-500 italic mb-4">{a.payload.reason as string}</p>
-      )}
-
-      <div className="flex gap-2">
-        <motion.button
-          whileTap={{ scale: 0.96 }}
-          onClick={() => onDecision(a.id, "approved", alternatives.length > 1 ? `alt:${selectedAlt}` : undefined)}
-          className="text-xs bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-4 py-2 rounded-xl hover:bg-emerald-500/25 transition-colors font-medium"
-        >
-          Accept swap
-        </motion.button>
-        <motion.button
-          whileTap={{ scale: 0.96 }}
-          onClick={() => onDecision(a.id, "rejected")}
-          className="text-xs bg-ink-900/[0.04] text-slate-400 border border-ink-900/10 px-4 py-2 rounded-xl hover:bg-ink-900/[0.06] transition-colors"
-        >
-          Keep original
-        </motion.button>
-      </div>
-    </div>
-  );
-}
-
-// ── ConciergeAddCard ───────────────────────────────────────────────────────────
-
-function ConciergeAddCard({ approval, onDecision }: { approval: ApprovalOut; onDecision: OnDecision }) {
-  const a = approval;
-  return (
-    <div className="glass-card p-4">
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20">
-          AI Concierge
-        </span>
-        <span className="text-[10px] text-slate-500">Day {a.payload.day as number} · Add</span>
-      </div>
-      <p className="font-semibold text-slate-100 text-sm leading-snug mb-0.5">
-        {a.payload.title as string}
-      </p>
-      {!!a.payload.description && (
-        <p className="text-xs text-slate-500 line-clamp-2 mb-1">
-          {a.payload.description as string}
-        </p>
-      )}
-      {!!a.payload.reason && (
-        <p className="text-xs text-slate-500 italic mb-4">{a.payload.reason as string}</p>
-      )}
-      <div className="flex gap-2">
-        <motion.button
-          whileTap={{ scale: 0.96 }}
-          onClick={() => onDecision(a.id, "approved")}
-          className="text-xs bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-4 py-2 rounded-xl hover:bg-emerald-500/25 transition-colors font-medium"
-        >
-          Add to itinerary
-        </motion.button>
-        <motion.button
-          whileTap={{ scale: 0.96 }}
-          onClick={() => onDecision(a.id, "rejected")}
-          className="text-xs bg-ink-900/[0.04] text-slate-400 border border-ink-900/10 px-4 py-2 rounded-xl hover:bg-ink-900/[0.06] transition-colors"
-        >
-          No thanks
-        </motion.button>
-      </div>
-    </div>
-  );
-}
-
-// ── ApprovalCard (dispatcher) ──────────────────────────────────────────────────
-
-function ApprovalCard({
-  approval,
-  onDecision,
-}: {
-  approval: ApprovalOut;
-  onDecision: OnDecision;
-}) {
-  const a = approval;
-
-  if (a.change_type === "event_add") {
-    return (
-      <div className="glass-card p-4">
-        <div className="flex gap-3">
-          {/* Event source badge + category */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 mb-1">
-              <span
-                className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
-                  a.payload.source === "ticketmaster"
-                    ? "text-electric-400 bg-electric-500/10 border-electric-500/20"
-                    : "text-purple-400 bg-purple-500/10 border-purple-500/20"
-                }`}
-              >
-                {a.payload.source === "ticketmaster" ? "Ticketmaster" : "Eventbrite"}
-              </span>
-              <span className="text-[10px] text-slate-500">{a.payload.category as string}</span>
-            </div>
-            <p className="font-semibold text-slate-100 text-sm leading-snug">
-              {a.payload.event_name as string}
-            </p>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Day {a.payload.day_number as number} · {a.payload.venue_name as string}
-            </p>
-            {!!a.payload.start_time && (
-              <p className="text-xs text-slate-600">{String(a.payload.start_time)}</p>
-            )}
-            {a.payload.price_min != null && (
-              <p className="text-xs text-gold-400 mt-0.5 font-medium">
-                {a.payload.price_currency as string}{" "}
-                {(a.payload.price_min as number).toFixed(0)}
-                {a.payload.price_max !== a.payload.price_min
-                  ? `–${(a.payload.price_max as number).toFixed(0)}`
-                  : ""}
-              </p>
-            )}
-            <p className="text-xs text-slate-500 mt-1.5 line-clamp-2">{a.summary}</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 mt-4">
-          <motion.button
-            whileTap={{ scale: 0.96 }}
-            onClick={() => onDecision(a.id, "approved")}
-            className="text-xs bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-4 py-2 rounded-xl hover:bg-emerald-500/25 transition-colors font-medium"
-          >
-            Add to itinerary
-          </motion.button>
-          <motion.button
-            whileTap={{ scale: 0.96 }}
-            onClick={() => onDecision(a.id, "rejected")}
-            className="text-xs bg-ink-900/[0.04] text-slate-400 border border-ink-900/10 px-4 py-2 rounded-xl hover:bg-ink-900/[0.06] transition-colors"
-          >
-            Skip
-          </motion.button>
-          {!!a.payload.url && (
-            <a
-              href={String(a.payload.url)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-electric-400 hover:underline ml-auto"
-            >
-              View ↗
-            </a>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  if (a.change_type === "budget_swap") {
-    return (
-      <div className="glass-card p-4">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold text-coral-400 bg-coral-500/10 border border-coral-500/20">
-            Over Budget
-          </span>
-          <span className="text-[10px] text-slate-500">Budget Optimizer</span>
-        </div>
-        <div className="space-y-1 mb-3">
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <span className="line-through">
-              {(a.payload.current as { title: string }).title}
-              {a.payload.est_cost_original != null
-                ? ` · ${a.payload.currency as string} ${(a.payload.est_cost_original as number).toFixed(0)}`
-                : ""}
-            </span>
-            <ArrowRight className="w-3 h-3 text-slate-600 shrink-0" />
-            <span className="text-slate-200 font-medium">
-              {(a.payload.replacement as { title: string }).title}
-            </span>
-          </div>
-          {(a.payload.replacement as { description?: string }).description && (
-            <p className="text-xs text-slate-500 line-clamp-2">
-              {(a.payload.replacement as { description: string }).description}
-            </p>
-          )}
-        </div>
-        <p className="text-xs text-slate-500 italic mb-4">{a.payload.reason as string}</p>
-        <div className="flex gap-2">
-          <motion.button
-            whileTap={{ scale: 0.96 }}
-            onClick={() => onDecision(a.id, "approved")}
-            className="text-xs bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-4 py-2 rounded-xl hover:bg-emerald-500/25 transition-colors font-medium"
-          >
-            Accept swap
-          </motion.button>
-          <motion.button
-            whileTap={{ scale: 0.96 }}
-            onClick={() => onDecision(a.id, "rejected")}
-            className="text-xs bg-ink-900/[0.04] text-slate-400 border border-ink-900/10 px-4 py-2 rounded-xl hover:bg-ink-900/[0.06] transition-colors"
-          >
-            Keep original
-          </motion.button>
-        </div>
-      </div>
-    );
-  }
-
-  if (a.change_type === "budget_upgrade") {
-    return (
-      <div className="glass-card p-4">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20">
-            Under Budget
-          </span>
-          <span className="text-[10px] text-slate-500">Budget Optimizer</span>
-          {a.payload.budget_remaining != null && (
-            <span className="text-[10px] text-slate-500 ml-auto">
-              {a.payload.currency as string}{" "}
-              {(a.payload.budget_remaining as number).toFixed(0)} remaining
-            </span>
-          )}
-        </div>
-        <p className="font-semibold text-slate-100 text-sm mb-0.5">{String(a.payload.title ?? "")}</p>
-        {!!a.payload.description && (
-          <p className="text-xs text-slate-500 line-clamp-2 mb-1">
-            {String(a.payload.description)}
-          </p>
-        )}
-        <p className="text-xs text-slate-500 italic mb-4">{String(a.payload.reason ?? "")}</p>
-        <div className="flex gap-2">
-          <motion.button
-            whileTap={{ scale: 0.96 }}
-            onClick={() => onDecision(a.id, "approved")}
-            className="text-xs bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-4 py-2 rounded-xl hover:bg-emerald-500/25 transition-colors font-medium"
-          >
-            Sounds great
-          </motion.button>
-          <motion.button
-            whileTap={{ scale: 0.96 }}
-            onClick={() => onDecision(a.id, "rejected")}
-            className="text-xs bg-ink-900/[0.04] text-slate-400 border border-ink-900/10 px-4 py-2 rounded-xl hover:bg-ink-900/[0.06] transition-colors"
-          >
-            Not interested
-          </motion.button>
-        </div>
-      </div>
-    );
-  }
-
-  if (a.change_type === "concierge_swap") {
-    return <ConciergeSwapCard approval={a} onDecision={onDecision} />;
-  }
-
-  if (a.change_type === "concierge_add") {
-    return <ConciergeAddCard approval={a} onDecision={onDecision} />;
-  }
-
-  // Generic fallback
-  return (
-    <div className="glass-card p-4">
-      <p className="text-[10px] text-electric-400 uppercase tracking-widest mb-1 font-semibold">
-        {a.change_type.replace(/_/g, " ")}
-      </p>
-      <p className="text-sm text-slate-300 mb-4">{a.summary}</p>
-      <div className="flex gap-2">
-        <motion.button
-          whileTap={{ scale: 0.96 }}
-          onClick={() => onDecision(a.id, "approved")}
-          className="text-xs bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-4 py-2 rounded-xl hover:bg-emerald-500/25 transition-colors font-medium"
-        >
-          Approve
-        </motion.button>
-        <motion.button
-          whileTap={{ scale: 0.96 }}
-          onClick={() => onDecision(a.id, "rejected")}
-          className="text-xs bg-ink-900/[0.04] text-slate-400 border border-ink-900/10 px-4 py-2 rounded-xl hover:bg-ink-900/[0.06] transition-colors"
-        >
-          Reject
-        </motion.button>
-      </div>
-    </div>
-  );
-}
-
-// ── Packing List Panel ────────────────────────────────────────────────────────
-
-const CATEGORY_ICONS: Record<string, string> = {
-  "Documents & Money": "📄",
-  Clothing: "👕",
-  Electronics: "⚡",
-  "Health & Toiletries": "💊",
-  Accessories: "🎒",
-  "Destination-Specific": "📍",
-};
-
-function PackingListPanel({
-  packingList,
-}: {
-  packingList: { categories: Record<string, string[]>; destination_specific?: string[] } | null;
-}) {
-  const [open, setOpen] = useState(false);
-  const [checked, setChecked] = useState<Set<string>>(new Set());
-
-  if (!packingList || Object.keys(packingList.categories ?? {}).length === 0) return null;
-
-  const allItems = Object.values(packingList.categories).flat();
-  const totalItems = allItems.length;
-  const checkedCount = checked.size;
-
-  const toggle = (item: string) => {
-    setChecked((prev) => {
-      const next = new Set(prev);
-      if (next.has(item)) { next.delete(item); } else { next.add(item); }
-      return next;
-    });
-  };
-
-  return (
-    <motion.section
-      id="packing-section"
-      initial={{ opacity: 0, y: 20 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true }}
-      transition={{ duration: 0.4 }}
-    >
-      <div className="flex items-center gap-2 mb-4">
-        <Luggage className="w-4 h-4 text-emerald-400" />
-        <h2 className="text-sm font-semibold text-slate-200 uppercase tracking-widest">
-          Packing List
-        </h2>
-        <span className="ml-auto text-xs text-slate-500">
-          {checkedCount}/{totalItems} packed
-        </span>
-      </div>
-
-      {/* Progress bar */}
-      <div className="mb-4 h-1.5 bg-ink-900/[0.04] rounded-full overflow-hidden">
-        <motion.div
-          className="h-full bg-emerald-500 rounded-full"
-          animate={{ width: `${totalItems > 0 ? (checkedCount / totalItems) * 100 : 0}%` }}
-          transition={{ duration: 0.4 }}
-        />
-      </div>
-
-      <div className="glass-card overflow-hidden">
-        {/* Toggle header */}
-        <button
-          onClick={() => setOpen((v) => !v)}
-          className="w-full flex items-center justify-between px-5 py-4 hover:bg-ink-900/[0.03] transition-colors"
-        >
-          <span className="text-sm text-slate-400">
-            {open ? "Hide checklist" : `Show ${totalItems} items across ${Object.keys(packingList.categories).length} categories`}
-          </span>
-          <ChevronDown
-            className={`w-4 h-4 text-slate-500 transition-transform duration-300 ${open ? "rotate-180" : ""}`}
-          />
-        </button>
-
-        <AnimatePresence initial={false}>
-          {open && (
-            <motion.div
-              key="packing-body"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-              className="overflow-hidden"
-            >
-              <div className="px-5 pb-5 space-y-5 border-t border-ink-900/8">
-                {Object.entries(packingList.categories).map(([cat, items]) => (
-                  <div key={cat} className="pt-4">
-                    <div className="flex items-center gap-2 mb-2.5">
-                      <span className="text-base">{CATEGORY_ICONS[cat] ?? "📦"}</span>
-                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
-                        {cat}
-                      </p>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                      {items.map((item) => (
-                        <button
-                          key={item}
-                          onClick={() => toggle(item)}
-                          className={`flex items-center gap-2.5 text-left px-3 py-2 rounded-xl transition-all text-xs ${
-                            checked.has(item)
-                              ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400"
-                              : "bg-ink-900/[0.03] border border-ink-900/8 text-slate-400 hover:bg-ink-900/[0.05] hover:text-slate-300"
-                          }`}
-                        >
-                          <div
-                            className={`w-4 h-4 rounded-md border shrink-0 flex items-center justify-center transition-all ${
-                              checked.has(item)
-                                ? "bg-emerald-500 border-emerald-500"
-                                : "border-ink-900/15"
-                            }`}
-                          >
-                            {checked.has(item) && <CheckCircle2 className="w-2.5 h-2.5 text-white" />}
-                          </div>
-                          <span className={checked.has(item) ? "line-through opacity-60" : ""}>
-                            {item}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-    </motion.section>
-  );
-}
-
-// ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function TripDetailPage() {
   const { tripId } = useParams<{ tripId: string }>();
@@ -1027,13 +63,12 @@ export default function TripDetailPage() {
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
-  const { data: tripRaw, isLoading: tripLoading } = useQuery<TripOut>({
+  const { data: trip, isLoading: tripLoading } = useQuery<TripOut>({
     queryKey: ["trip", tripId],
     queryFn: () => api.get<TripOut>(`/api/v1/trips/${tripId}`),
     refetchInterval: (q) => (q.state.data?.status === "generating" ? 2000 : false),
     enabled: !!token && !!tripId,
   });
-  const trip = tripRaw as TripOutExtended | undefined;
 
   const { data: weatherDays = [] } = useQuery<WeatherDay[]>({
     queryKey: ["weather", tripId],
@@ -1070,12 +105,13 @@ export default function TripDetailPage() {
   // Auto-fill flight origin saved during trip creation
   useEffect(() => {
     if (!tripId) return;
-    const saved = sessionStorage.getItem(`flight_origin_${tripId}`);
+    const saved = sessionStorage.getItem(flightOriginKey(tripId as string));
     if (saved && saved.length === 3) {
       setFlightOrigin(saved);
       setFlightSearch(saved);
     }
   }, [tripId]);
+
   const { data: flights = [], isFetching: flightsFetching } = useQuery<FlightOfferOut[]>({
     queryKey: ["flights", tripId, flightSearch],
     queryFn: () => api.getTripFlights(tripId as string, flightSearch),
@@ -1085,8 +121,7 @@ export default function TripDetailPage() {
 
   const { data: pendingApprovals = [] } = useQuery<ApprovalOut[]>({
     queryKey: ["approvals", tripId, "pending"],
-    queryFn: () =>
-      api.get<ApprovalOut[]>(`/api/v1/trips/${tripId}/approvals`, { status: "pending" }),
+    queryFn: () => api.get<ApprovalOut[]>(`/api/v1/trips/${tripId}/approvals`, { status: "pending" }),
     enabled: trip?.status === "awaiting_approval",
   });
 
@@ -1139,7 +174,7 @@ export default function TripDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
 
   async function handleEditSave(updates: TripUpdate) {
-    const updated = await api.updateTrip(tripId, updates);
+    const updated = await api.updateTrip(tripId as string, updates);
     queryClient.setQueryData(["trip", tripId], updated);
   }
 
@@ -1151,7 +186,7 @@ export default function TripDetailPage() {
   async function handleDelete() {
     setDeleting(true);
     try {
-      await api.deleteTrip(tripId);
+      await api.deleteTrip(tripId as string);
       router.replace("/trips");
     } finally {
       setDeleting(false);
@@ -1198,15 +233,13 @@ export default function TripDetailPage() {
     setGenerateError(null);
     try {
       await api.post(`/api/v1/trips/${tripId}/itinerary/generate`);
-      // Record start time so AgentPipeline can drive time-based step progress.
-      sessionStorage.setItem(GEN_START_KEY(tripId), String(Date.now()));
+      // Record start time so AgentProgress can drive time-based step progress.
+      sessionStorage.setItem(genStartKey(tripId as string), String(Date.now()));
       // Optimistically flip to "generating" so the trip query's refetchInterval starts
       // polling and the status-transition effect refreshes the itinerary once the worker
       // finishes. An immediate refetch can race and read the stale "planned" status,
       // which would leave polling off and the UI stuck on the old plan.
-      queryClient.setQueryData<TripOut>(["trip", tripId], (old) =>
-        old ? { ...old, status: "generating" } : old,
-      );
+      queryClient.setQueryData<TripOut>(["trip", tripId], (old) => (old ? { ...old, status: "generating" } : old));
     } catch (err) {
       if (err instanceof ApiError) {
         const detail = err.detail as { message?: string } | null;
@@ -1221,16 +254,9 @@ export default function TripDetailPage() {
 
   // ── Approvals ─────────────────────────────────────────────────────────────────
 
-  async function handleDecision(
-    approvalId: string,
-    decision: "approved" | "rejected",
-    resolutionNote?: string,
-  ) {
+  async function handleDecision(approvalId: string, decision: "approved" | "rejected", resolutionNote?: string) {
     try {
-      await api.post(`/api/v1/approvals/${approvalId}`, {
-        decision,
-        ...(resolutionNote ? { resolution_note: resolutionNote } : {}),
-      });
+      await api.post(`/api/v1/approvals/${approvalId}`, { decision, ...(resolutionNote ? { resolution_note: resolutionNote } : {}) });
       queryClient.invalidateQueries({ queryKey: ["approvals", tripId, "pending"] });
       queryClient.invalidateQueries({ queryKey: ["trip", tripId] });
       queryClient.invalidateQueries({ queryKey: ["itinerary", tripId] });
@@ -1250,10 +276,7 @@ export default function TripDetailPage() {
     if (!title || replaceLoading) return;
     setReplaceLoading(true);
     try {
-      await api.post(`/api/v1/trips/${tripId}/approvals`, {
-        item_id: itemId,
-        replacement_title: title,
-      });
+      await api.post(`/api/v1/trips/${tripId}/approvals`, { item_id: itemId, replacement_title: title });
       setReplaceTarget(null);
       setReplaceTitle("");
       queryClient.invalidateQueries({ queryKey: ["trip", tripId] });
@@ -1274,8 +297,6 @@ export default function TripDetailPage() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const { scrollY } = useScroll();
-  const heroBgY = useTransform(scrollY, [0, 300], [0, 90]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1283,23 +304,21 @@ export default function TripDetailPage() {
 
   async function sendMessage(userText: string): Promise<void> {
     try {
-      const res = await api.post<ChatResponse>(`/api/v1/trips/${tripId}/chat`, {
-        question: userText,
-      });
-      setChatMessages((prev) => [
-        ...prev,
-        { role: "assistant", text: res.answer, sources: res.sources },
-      ]);
+      const res = await api.post<ChatResponse>(`/api/v1/trips/${tripId}/chat`, { question: userText });
+      setChatMessages((prev) => [...prev, { role: "assistant", text: res.answer, sources: res.sources }]);
       if (res.proposal_id) {
         queryClient.invalidateQueries({ queryKey: ["trip", tripId] });
         queryClient.invalidateQueries({ queryKey: ["approvals", tripId, "pending"] });
       }
     } catch {
-      setChatMessages((prev) => [
-        ...prev,
-        { role: "assistant", text: "Sorry, I couldn't answer that right now. Please try again." },
-      ]);
+      setChatMessages((prev) => [...prev, { role: "assistant", text: "Sorry, I couldn't answer that right now. Please try again." }]);
     }
+  }
+
+  function askSuggestion(q: string) {
+    setChatMessages((prev) => [...prev, { role: "user", text: q }]);
+    setChatLoading(true);
+    sendMessage(q).finally(() => setChatLoading(false));
   }
 
   async function handleChatSubmit(e: React.FormEvent) {
@@ -1314,6 +333,11 @@ export default function TripDetailPage() {
     } finally {
       setChatLoading(false);
     }
+  }
+
+  function handleAskConcierge() {
+    setSidebarTab("concierge");
+    setChatOpen(true);
   }
 
   // ── Day navigation via IntersectionObserver ────────────────────────────────
@@ -1352,12 +376,7 @@ export default function TripDetailPage() {
 
   // ── Derived values ────────────────────────────────────────────────────────────
 
-  const nights = trip
-    ? Math.ceil(
-        (new Date(trip.end_date).getTime() - new Date(trip.start_date).getTime()) /
-          (1000 * 60 * 60 * 24),
-      )
-    : 0;
+  const nights = trip ? Math.ceil((new Date(trip.end_date).getTime() - new Date(trip.start_date).getTime()) / (1000 * 60 * 60 * 24)) : 0;
 
   const itemsByDay = items.reduce<Record<number, ItineraryItemOut[]>>((acc, item) => {
     (acc[item.day_number] ??= []).push(item);
@@ -1371,65 +390,61 @@ export default function TripDetailPage() {
   const pinnedItems = items.filter((i) => i.latitude != null && i.longitude != null);
 
   const selectedHotel = hotels.find((h) => h.is_selected);
-  const otherHotels = hotels.filter(
-    (h) => !h.is_selected && (h.price_total != null || h.price_per_night != null),
-  );
+  const otherHotels = hotels.filter((h) => !h.is_selected && (h.price_total != null || h.price_per_night != null));
 
   const budgetSlices: { label: string; value: number; color: string }[] = (() => {
     const byCategory = trip?.budget_state?.by_category;
     if (byCategory) {
       return [
-        { label: "Flights",    value: byCategory.flights    ?? 0, color: "#f472b6" },
-        { label: "Lodging",    value: byCategory.lodging    ?? 0, color: "#3b82f6" },
-        { label: "Activities", value: byCategory.activities ?? 0, color: "#a78bfa" },
-        { label: "Meals",      value: byCategory.meals      ?? 0, color: "#fbbf24" },
-        { label: "Transport",  value: byCategory.transport  ?? 0, color: "#34d399" },
+        { label: "Flights", value: byCategory.flights ?? 0, color: BUDGET_COLORS.Flights },
+        { label: "Lodging", value: byCategory.lodging ?? 0, color: BUDGET_COLORS.Lodging },
+        { label: "Activities", value: byCategory.activities ?? 0, color: BUDGET_COLORS.Activities },
+        { label: "Meals", value: byCategory.meals ?? 0, color: BUDGET_COLORS.Meals },
+        { label: "Transport", value: byCategory.transport ?? 0, color: BUDGET_COLORS.Transport },
       ].filter((s) => s.value > 0);
     }
     // Derive from fetched data — convert all costs to the trip's budget currency
     const bc = trip?.budget_currency ?? "INR";
-    const toCurrency = (amount: number, from: string | null | undefined): number =>
-      convertToBudgetCurrency(amount, from ?? bc, bc);
-    const sumConverted = (subset: typeof items) =>
-      subset.reduce((s, i) => s + toCurrency(i.est_cost ?? 0, i.est_cost_currency), 0);
-    const hotelCost = selectedHotel?.price_total != null
-      ? toCurrency(selectedHotel.price_total, selectedHotel.price_currency)
-      : sumConverted(items.filter((i) => i.item_type === "lodging"));
-    const lodging    = hotelCost;
+    const toCurrency = (amount: number, from: string | null | undefined): number => convertToBudgetCurrency(amount, from ?? bc, bc);
+    const sumConverted = (subset: typeof items) => subset.reduce((s, i) => s + toCurrency(i.est_cost ?? 0, i.est_cost_currency), 0);
+    const hotelCost =
+      selectedHotel?.price_total != null
+        ? toCurrency(selectedHotel.price_total, selectedHotel.price_currency)
+        : sumConverted(items.filter((i) => i.item_type === "lodging"));
+    const lodging = hotelCost;
     const activities = sumConverted(items.filter((i) => i.item_type === "activity"));
-    const meals      = sumConverted(items.filter((i) => i.item_type === "meal"));
-    const transport  = sumConverted(items.filter((i) => i.item_type === "transport"));
-    const flightCost = selectedFlight != null
-      ? toCurrency(selectedFlight.price_total, selectedFlight.price_currency)
-      : 0;
+    const meals = sumConverted(items.filter((i) => i.item_type === "meal"));
+    const transport = sumConverted(items.filter((i) => i.item_type === "transport"));
+    const flightCost = selectedFlight != null ? toCurrency(selectedFlight.price_total, selectedFlight.price_currency) : 0;
     return [
-      { label: "Flights",    value: flightCost, color: "#f472b6" },
-      { label: "Lodging",    value: lodging,    color: "#3b82f6" },
-      { label: "Activities", value: activities, color: "#a78bfa" },
-      { label: "Meals",      value: meals,      color: "#fbbf24" },
-      { label: "Transport",  value: transport,  color: "#34d399" },
+      { label: "Flights", value: flightCost, color: BUDGET_COLORS.Flights },
+      { label: "Lodging", value: lodging, color: BUDGET_COLORS.Lodging },
+      { label: "Activities", value: activities, color: BUDGET_COLORS.Activities },
+      { label: "Meals", value: meals, color: BUDGET_COLORS.Meals },
+      { label: "Transport", value: transport, color: BUDGET_COLORS.Transport },
     ].filter((s) => s.value > 0);
   })();
 
   const budgetDerivedTotal = budgetSlices.reduce((s, d) => s + d.value, 0);
   const budgetDeviationPct: number | null =
     trip?.budget_state?.deviation_pct ??
-    (trip?.budget_total && budgetDerivedTotal > 0
-      ? ((budgetDerivedTotal - trip.budget_total) / trip.budget_total) * 100
-      : null);
+    (trip?.budget_total && budgetDerivedTotal > 0 ? ((budgetDerivedTotal - trip.budget_total) / trip.budget_total) * 100 : null);
   const budgetCurrency = trip?.budget_state?.currency ?? trip?.budget_currency ?? "INR";
-  const budgetStateTotal =
-    trip?.budget_state?.total_planned ?? (budgetDerivedTotal > 0 ? budgetDerivedTotal : null);
+  const budgetStateTotal = trip?.budget_state?.total_planned ?? (budgetDerivedTotal > 0 ? budgetDerivedTotal : null);
+  // Major categories with no real price were excluded from total_planned, so "% vs
+  // budget" would be misleading. Backend sends missing_categories; legacy trips
+  // (generated before that field existed) fall back to inferring from zero values.
+  const budgetMissing: string[] =
+    trip?.budget_state?.missing_categories ??
+    (trip?.budget_state?.by_category
+      ? (["flights", "lodging"] as const).filter((k) => !((trip.budget_state?.by_category?.[k] ?? 0) > 0))
+      : []);
 
   const displayEvents = tripEvents.filter((ev) => ev.approval_status !== "rejected");
-  const eventCategories = [
-    "All",
-    ...Array.from(new Set(displayEvents.map((ev) => ev.category).filter(Boolean))),
-  ];
-  const filteredEvents =
-    eventCategory === "All"
-      ? displayEvents
-      : displayEvents.filter((ev) => ev.category === eventCategory);
+  const eventCategories = ["All", ...Array.from(new Set(displayEvents.map((ev) => ev.category).filter(Boolean)))];
+  const filteredEvents = eventCategory === "All" ? displayEvents : displayEvents.filter((ev) => ev.category === eventCategory);
+
+  const showMapTab = trip?.latitude != null && (pinnedItems.length > 0 || selectedHotel?.latitude != null);
 
   // ── Early returns ─────────────────────────────────────────────────────────────
 
@@ -1437,10 +452,10 @@ export default function TripDetailPage() {
 
   if (tripLoading) {
     return (
-      <div className="min-h-screen bg-space-900 flex items-center justify-center">
+      <div className="min-h-screen bg-paper flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-8 h-8 text-electric-400 animate-spin" />
-          <p className="text-slate-500 text-sm">Loading trip…</p>
+          <Loader2 className="w-8 h-8 text-accent animate-spin" />
+          <p className="text-ink-400 text-sm">Loading trip…</p>
         </div>
       </div>
     );
@@ -1448,50 +463,34 @@ export default function TripDetailPage() {
 
   if (!trip) {
     return (
-      <div className="min-h-screen bg-space-900 flex flex-col items-center justify-center gap-4">
-        <AlertCircle className="w-12 h-12 text-coral-400" />
-        <p className="text-slate-400 text-sm">Trip not found.</p>
+      <div className="min-h-screen bg-paper flex flex-col items-center justify-center gap-4">
+        <AlertCircle className="w-12 h-12 text-danger" />
+        <p className="text-ink-400 text-sm">Trip not found.</p>
         <Link href="/trips">
-          <button className="btn-primary text-sm py-2.5 px-5">Back to trips</button>
+          <Button size="sm">Back to trips</Button>
         </Link>
       </div>
     );
   }
 
-  const statusCfg = STATUS_CONFIG[trip.status] ?? STATUS_CONFIG.planned;
-  const StatusIcon = statusCfg.icon as React.ComponentType<{ className?: string }>;
-  const gradient = destGradient(trip.destination_city);
-
   // ── State A: Generating ────────────────────────────────────────────────────────
 
   if (trip.status === "generating") {
     return (
-      <div className="min-h-screen bg-space-900">
+      <div className="min-h-screen bg-paper">
         <NavBar />
-
-        {/* Ambient glow */}
-        <div className="fixed inset-0 pointer-events-none">
-          <div className="absolute top-32 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-electric-500/5 rounded-full blur-3xl" />
-        </div>
-
         <main className="relative z-10 max-w-2xl mx-auto px-4 pt-28 pb-16">
-          <Link
-            href="/trips"
-            className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors mb-8"
-          >
+          <Link href="/trips" className="inline-flex items-center gap-1.5 text-xs text-ink-400 hover:text-ink-900 transition-colors mb-8">
             <ChevronRight className="w-3 h-3 rotate-180" />
             My trips
           </Link>
 
           <div className="mb-6 flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-white flex-1">{trip.title}</h1>
-            <span className={`status-badge border ${statusCfg.color}`}>
-              <StatusIcon className="w-3 h-3 animate-spin" />
-              {statusCfg.label}
-            </span>
+            <h1 className="font-display text-2xl font-medium text-ink-900 flex-1">{trip.title}</h1>
+            <StatusBadge status={trip.status} />
           </div>
 
-          <AgentPipeline tripId={tripId} />
+          <AgentProgress tripId={tripId as string} />
         </main>
       </div>
     );
@@ -1501,58 +500,41 @@ export default function TripDetailPage() {
 
   if (trip.status === "awaiting_approval" && pendingApprovals.length > 0) {
     return (
-      <div className="min-h-screen bg-space-900">
+      <div className="min-h-screen bg-paper">
         <NavBar />
 
-        {/* Ambient coral glow */}
-        <div className="fixed inset-0 pointer-events-none">
-          <div className="absolute top-24 left-1/2 -translate-x-1/2 w-[500px] h-[200px] bg-coral-500/5 rounded-full blur-3xl" />
-        </div>
-
         {/* Sticky approval banner */}
-        <div className="sticky top-16 z-40 border-b border-coral-500/20 bg-coral-500/10 backdrop-blur-glass">
+        <div className="sticky top-16 z-40 border-b border-danger/20 bg-danger-tint">
           <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
-            <AlertCircle className="w-4 h-4 text-coral-400 shrink-0" />
-            <p className="text-sm text-coral-600 font-medium flex-1">
-              {pendingApprovals.length} change{pendingApprovals.length !== 1 ? "s" : ""} need
-              {pendingApprovals.length === 1 ? "s" : ""} your review
+            <AlertCircle className="w-4 h-4 text-danger shrink-0" />
+            <p className="text-sm text-danger font-medium flex-1">
+              {pendingApprovals.length} change{pendingApprovals.length !== 1 ? "s" : ""} need{pendingApprovals.length === 1 ? "s" : ""} your
+              review
             </p>
-            <span className="text-xs text-coral-500">Scroll down to review</span>
+            <span className="text-xs text-danger/80">Scroll down to review</span>
           </div>
         </div>
 
         <main className="relative z-10 max-w-2xl mx-auto px-4 pt-8 pb-24">
-          <Link
-            href="/trips"
-            className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors mb-6"
-          >
+          <Link href="/trips" className="inline-flex items-center gap-1.5 text-xs text-ink-400 hover:text-ink-900 transition-colors mb-6">
             <ChevronRight className="w-3 h-3 rotate-180" />
             My trips
           </Link>
 
           <div className="mb-8 flex items-center gap-3">
             <div className="flex-1 min-w-0">
-              <h1 className="text-2xl font-bold text-white truncate">{trip.title}</h1>
-              <p className="text-sm text-slate-500 mt-0.5">
+              <h1 className="font-display text-2xl font-medium text-ink-900 truncate">{trip.title}</h1>
+              <p className="text-sm text-ink-400 mt-0.5">
                 {trip.destination_city}
-                {trip.destination_country ? `, ${trip.destination_country}` : ""} ·{" "}
-                {nights} night{nights !== 1 ? "s" : ""}
+                {trip.destination_country ? `, ${trip.destination_country}` : ""} · {nights} night{nights !== 1 ? "s" : ""}
               </p>
             </div>
-            <span className={`status-badge border ${statusCfg.color} shrink-0`}>
-              <StatusIcon className="w-3 h-3" />
-              {statusCfg.label}
-            </span>
+            <StatusBadge status={trip.status} className="shrink-0" />
           </div>
 
           <div className="space-y-3">
             {pendingApprovals.map((a, i) => (
-              <motion.div
-                key={a.id}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.07 }}
-              >
+              <motion.div key={a.id} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }}>
                 <ApprovalCard approval={a} onDecision={handleDecision} />
               </motion.div>
             ))}
@@ -1565,1111 +547,153 @@ export default function TripDetailPage() {
   // ── State C: Planned / Default ─────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-space-900">
+    <div className="min-h-screen bg-paper">
       <NavBar />
 
-      {/* Ambient background glows */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute top-0 left-1/4 w-96 h-72 bg-electric-500/4 rounded-full blur-3xl" />
-        <div className="absolute top-48 right-1/4 w-64 h-48 bg-purple-600/4 rounded-full blur-3xl" />
-      </div>
+      <TripHero
+        trip={trip}
+        weatherDays={weatherDays}
+        onShare={handleShare}
+        shareLoading={shareLoading}
+        shareCopied={shareCopied}
+        calendarOpen={calendarOpen}
+        onToggleCalendar={() => setCalendarOpen((v) => !v)}
+        onGoogleCalendar={handleGoogleCalendar}
+        onDownloadIcs={handleDownloadIcs}
+        icsLoading={icsLoading}
+        onEdit={() => setEditOpen(true)}
+        onDeleteClick={() => setDeleteConfirm(true)}
+      />
 
-      {/* ── Hero Banner ────────────────────────────────────────────────────── */}
-      <div className="relative h-56 overflow-hidden">
-        {/* Parallax background layer */}
-        <motion.div
-          style={{
-            y: heroBgY,
-            ...(trip.cover_image_url ? {
-              backgroundImage: `url(${trip.cover_image_url})`,
-              backgroundSize: "cover",
-              backgroundPosition: "center",
-            } : {}),
-          }}
-          className={`absolute -top-24 inset-x-0 bottom-0 ${!trip.cover_image_url ? `bg-gradient-to-br ${gradient}` : ""}`}
-        />
-        {/* Overlay — heavier when photo is present for text legibility */}
-        {trip.cover_image_url
-          ? <div className="absolute inset-0 bg-gradient-to-t from-ink-900/90 via-ink-900/45 to-ink-900/10" />
-          : <>
-              <div className="absolute inset-0 opacity-15" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")` }} />
-              <div className="absolute inset-0 bg-gradient-to-t from-ink-900/65 via-ink-900/10 to-transparent" />
-            </>
-        }
-
-        {/* Hero content */}
-        <div className="relative z-10 h-full flex flex-col justify-end px-4 pb-5 max-w-7xl mx-auto">
-          {/* Breadcrumb */}
-          <Link
-            href="/trips"
-            className="absolute top-5 left-4 inline-flex items-center gap-1.5 text-xs text-white/60 hover:text-white transition-colors"
-          >
-            <ChevronRight className="w-3 h-3 rotate-180" />
-            My trips
-          </Link>
-
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <div className="flex items-center gap-3 mb-1">
-                <MapPin className="w-4 h-4 text-white/70" />
-                <span className="text-white/70 text-xs font-medium uppercase tracking-widest">
-                  {trip.destination_country ?? ""}
-                </span>
-              </div>
-              <h1 className="text-3xl lg:text-4xl font-bold text-white leading-tight">
-                {trip.destination_city}
-              </h1>
-            </div>
-
-            <div className="flex flex-col gap-2 lg:items-end">
-              {/* Trip meta pills */}
-              <div className="flex flex-wrap gap-2">
-                <div className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20">
-                  <Calendar className="w-3 h-3" />
-                  {new Date(trip.start_date + "T00:00:00").toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                  })}{" "}
-                  –{" "}
-                  {new Date(trip.end_date + "T00:00:00").toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric",
-                  })}
-                </div>
-                <div className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20">
-                  <Users className="w-3 h-3" />
-                  {trip.num_travelers} traveler{trip.num_travelers !== 1 ? "s" : ""}
-                </div>
-                {trip.budget_total && (
-                  <div className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20">
-                    <DollarSign className="w-3 h-3" />
-                    {trip.budget_currency} {trip.budget_total.toLocaleString()}
-                  </div>
-                )}
-                <span className={`status-badge border ${statusCfg.color}`}>
-                  <StatusIcon
-                    className={`w-3 h-3 ${trip.status === "generating" ? "animate-spin" : ""}`}
-                  />
-                  {statusCfg.label}
-                </span>
-                <button
-                  onClick={handleShare}
-                  disabled={shareLoading}
-                  className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20 hover:bg-white/15 transition-colors disabled:opacity-50"
-                  title="Copy share link"
-                >
-                  {shareLoading ? (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                  ) : shareCopied ? (
-                    <Check className="w-3 h-3 text-emerald-400" />
-                  ) : (
-                    <Share2 className="w-3 h-3" />
-                  )}
-                  {shareCopied ? "Copied!" : "Share"}
-                </button>
-
-                {/* Calendar export */}
-                <div className="relative">
-                  <button
-                    onClick={() => setCalendarOpen((v) => !v)}
-                    className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20 hover:bg-white/15 transition-colors"
-                    title="Export to calendar"
-                  >
-                    <CalendarPlus className="w-3 h-3" />
-                    Calendar
-                  </button>
-                  <AnimatePresence>
-                    {calendarOpen && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 6, scale: 0.96 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 6, scale: 0.96 }}
-                        transition={{ duration: 0.15 }}
-                        className="absolute top-full mt-2 left-0 w-44 glass-card py-1 z-20"
-                      >
-                        <button
-                          onClick={handleGoogleCalendar}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:bg-ink-900/[0.04] transition-colors"
-                        >
-                          <CalendarDays className="w-3.5 h-3.5 text-electric-400 shrink-0" />
-                          Google Calendar
-                        </button>
-                        <button
-                          onClick={handleDownloadIcs}
-                          disabled={icsLoading}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:bg-ink-900/[0.04] transition-colors disabled:opacity-50"
-                        >
-                          {icsLoading
-                            ? <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-                            : <Download className="w-3.5 h-3.5 text-gold-400 shrink-0" />
-                          }
-                          Download .ics
-                        </button>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
-                {/* Edit trip */}
-                <button
-                  onClick={() => setEditOpen(true)}
-                  className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20 hover:bg-white/15 transition-colors"
-                  title="Edit trip"
-                >
-                  <Pencil className="w-3 h-3" />
-                  Edit
-                </button>
-
-                {/* Delete trip */}
-                <button
-                  onClick={() => setDeleteConfirm(true)}
-                  className="flex items-center gap-1.5 text-xs text-white/80 bg-black/25 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20 hover:bg-coral-500/25 hover:text-white hover:border-coral-400 transition-colors"
-                  title="Delete trip"
-                >
-                  <Trash2 className="w-3 h-3" />
-                  Delete
-                </button>
-              </div>
-
-              {/* Weather timeline strip */}
-              {weatherDays.length > 0 && (
-                <div className="mt-1">
-                  <WeatherTimeline days={weatherDays} heroStyle={true} />
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Planning status / generate banner ──────────────────────────────── */}
+      {/* Planning status / generate banner */}
       {(trip.status === "planning" || trip.status === "failed") && (
         <div className="max-w-7xl mx-auto px-4 pt-6">
-          <div className="glass-card p-6 flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-5">
-            <div className="w-12 h-12 rounded-2xl bg-electric-gradient flex items-center justify-center shrink-0 shadow-electric">
-              <Sparkles className="w-6 h-6 text-white" />
+          <Card className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-5">
+            <div className="w-12 h-12 rounded-xl bg-sunset flex items-center justify-center shrink-0 shadow-glow">
+              <Sparkles className="w-6 h-6 text-[#1F1206]" />
             </div>
             <div className="flex-1 min-w-0">
               {trip.status === "failed" ? (
                 <>
-                  <p className="text-sm font-semibold text-coral-400 mb-0.5">Generation failed</p>
-                  {generateError && <p className="text-xs text-slate-500">{generateError}</p>}
+                  <p className="text-sm font-medium text-danger mb-0.5">Generation failed</p>
+                  {generateError && <p className="text-xs text-ink-400">{generateError}</p>}
                 </>
               ) : (
                 <>
-                  <p className="text-sm font-semibold text-slate-200 mb-0.5">No itinerary yet</p>
-                  <p className="text-xs text-slate-500">
-                    Let TravelOS AI agents plan everything for you.
-                  </p>
+                  <p className="text-sm font-medium text-ink-900 mb-0.5">No itinerary yet</p>
+                  <p className="text-xs text-ink-400">Let TravelOS AI agents plan everything for you.</p>
                 </>
               )}
             </div>
-            <motion.button
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
-              onClick={handleGenerate}
-              disabled={generating}
-              className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto whitespace-nowrap disabled:opacity-50"
-            >
-              {generating ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Sparkles className="w-4 h-4" />
-              )}
+            <Button onClick={handleGenerate} loading={generating} iconLeft={Sparkles} className="w-full sm:w-auto whitespace-nowrap">
               {generating ? "Queuing…" : trip.status === "failed" ? "Try again" : "Generate itinerary"}
-            </motion.button>
-          </div>
+            </Button>
+          </Card>
         </div>
       )}
 
-      {/* ── Main layout (3-col at xl, 4-col at 2xl with concierge) ──────── */}
+      {/* Main layout */}
       <div className="max-w-7xl mx-auto px-4 pt-8 pb-32">
         <div className="flex gap-6 lg:gap-8 relative">
+          <SectionNav
+            days={dayNumbers}
+            activeDay={activeDay}
+            onSelectDay={scrollToDay}
+            showHotelsLink={hotels.length > 0}
+            showBudgetLink={budgetSlices.length > 0}
+            showEventsLink={trip.status === "planned"}
+            showPackingLink={!!trip.packing_list}
+          />
 
-          {/* ── LEFT SIDEBAR: Day navigation ─────────────────────────────── */}
-          {dayNumbers.length > 0 && (
-            <div className="hidden lg:block w-[220px] shrink-0">
-              <div className="sticky top-24">
-                <DayNav days={dayNumbers} activeDay={activeDay} onSelect={scrollToDay} />
-
-                {/* Quick links */}
-                <div className="mt-6 space-y-1">
-                  <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-2 px-2">
-                    Jump to
-                  </p>
-                  {hotels.length > 0 && (
-                    <button
-                      onClick={() =>
-                        document
-                          .getElementById("hotels-section")
-                          ?.scrollIntoView({ behavior: "smooth" })
-                      }
-                      className="w-full text-left px-3 py-2 rounded-xl text-sm text-slate-500 hover:text-slate-300 hover:bg-ink-900/[0.04] transition-all flex items-center gap-2"
-                    >
-                      <Hotel className="w-3 h-3" />
-                      Hotels
-                    </button>
-                  )}
-                  {budgetSlices.length > 0 && (
-                    <button
-                      onClick={() =>
-                        document
-                          .getElementById("budget-section")
-                          ?.scrollIntoView({ behavior: "smooth" })
-                      }
-                      className="w-full text-left px-3 py-2 rounded-xl text-sm text-slate-500 hover:text-slate-300 hover:bg-ink-900/[0.04] transition-all flex items-center gap-2"
-                    >
-                      <Wallet className="w-3 h-3" />
-                      Budget
-                    </button>
-                  )}
-                  {trip.status === "planned" && (
-                    <button
-                      onClick={() =>
-                        document
-                          .getElementById("events-section")
-                          ?.scrollIntoView({ behavior: "smooth" })
-                      }
-                      className="w-full text-left px-3 py-2 rounded-xl text-sm text-slate-500 hover:text-slate-300 hover:bg-ink-900/[0.04] transition-all flex items-center gap-2"
-                    >
-                      <CalendarDays className="w-3 h-3" />
-                      Events
-                    </button>
-                  )}
-                  {trip?.packing_list && (
-                    <button
-                      onClick={() =>
-                        document
-                          .getElementById("packing-section")
-                          ?.scrollIntoView({ behavior: "smooth" })
-                      }
-                      className="w-full text-left px-3 py-2 rounded-xl text-sm text-slate-500 hover:text-slate-300 hover:bg-ink-900/[0.04] transition-all flex items-center gap-2"
-                    >
-                      <Luggage className="w-3 h-3" />
-                      Packing
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── CENTER: Main content ──────────────────────────────────────── */}
+          {/* Center: main content */}
           <div className="flex-1 min-w-0 space-y-8">
-
-            {/* Budget Overview */}
             {budgetSlices.length > 0 && (
-              <motion.section
-                id="budget-section"
-                initial={{ opacity: 0, y: 24 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-              >
-                <div className="flex items-center gap-2 mb-4">
-                  <Wallet className="w-4 h-4 text-gold-400" />
-                  <h2 className="text-sm font-semibold text-slate-200 uppercase tracking-widest">
-                    Budget Breakdown
-                  </h2>
-                  {budgetDeviationPct != null && (
-                    <span
-                      className={`ml-auto text-xs px-2.5 py-1 rounded-full font-medium border ${
-                        Math.abs(budgetDeviationPct) < 5
-                          ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
-                          : budgetDeviationPct > 0
-                          ? "text-coral-400 bg-coral-500/10 border-coral-500/20"
-                          : "text-gold-400 bg-gold-500/10 border-gold-500/20"
-                      }`}
-                    >
-                      {budgetDeviationPct > 0 ? "+" : ""}
-                      {budgetDeviationPct.toFixed(1)}% vs budget
-                    </span>
-                  )}
-                </div>
-                <div className="glass-card p-6 space-y-6">
-                  {/* Donut chart */}
-                  <DonutChart
-                    slices={budgetSlices}
-                    currency={budgetCurrency}
-                  />
-
-                  {/* Category bar chart */}
-                  <div className="space-y-3 pt-4 border-t border-white/[0.05]">
-                    {(() => {
-                      const total = budgetSlices.reduce((s, d) => s + d.value, 0);
-                      return budgetSlices.map((slice) => {
-                        const pct = total > 0 ? (slice.value / total) * 100 : 0;
-                        return (
-                          <div key={slice.label}>
-                            <div className="flex items-center justify-between text-xs mb-1.5">
-                              <span className="text-slate-400 flex items-center gap-2">
-                                <span
-                                  className="w-2 h-2 rounded-full shrink-0"
-                                  style={{ background: slice.color }}
-                                />
-                                {slice.label}
-                              </span>
-                              <span className="text-slate-300 font-medium tabular-nums">
-                                {budgetCurrency}{" "}
-                                {slice.value.toLocaleString()}
-                                <span className="text-slate-600 ml-1.5">
-                                  ({pct.toFixed(0)}%)
-                                </span>
-                              </span>
-                            </div>
-                            <div className="h-1.5 rounded-full overflow-hidden bg-white/[0.05]">
-                              <motion.div
-                                className="h-full rounded-full"
-                                style={{ background: slice.color }}
-                                initial={{ width: 0 }}
-                                animate={{ width: `${pct}%` }}
-                                transition={{ duration: 0.6, delay: 0.1 }}
-                              />
-                            </div>
-                          </div>
-                        );
-                      });
-                    })()}
-                  </div>
-
-                  {/* Total vs budget progress */}
-                  {trip.budget_total != null && budgetStateTotal != null && (
-                    <div className="pt-4 border-t border-white/[0.05]">
-                      <div className="flex items-center justify-between text-xs mb-2">
-                        <span className="text-slate-500">Estimated spend vs. budget</span>
-                        <span
-                          className={`font-semibold tabular-nums ${
-                            (budgetDeviationPct ?? 0) > 0
-                              ? "text-coral-400"
-                              : "text-emerald-400"
-                          }`}
-                        >
-                          {budgetCurrency}{" "}
-                          {budgetStateTotal.toLocaleString()} /{" "}
-                          {trip.budget_total.toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="relative h-2 rounded-full overflow-hidden bg-white/[0.05]">
-                        <motion.div
-                          className={`h-full rounded-full ${
-                            (budgetDeviationPct ?? 0) > 0
-                              ? "bg-coral-500"
-                              : "bg-emerald-500"
-                          }`}
-                          initial={{ width: 0 }}
-                          animate={{
-                            width: `${Math.min(100, (budgetStateTotal / trip.budget_total) * 100)}%`,
-                          }}
-                          transition={{ duration: 0.8, ease: "easeOut" }}
-                        />
-                      </div>
-                      <p className="text-[10px] text-slate-600 mt-1.5">
-                        {(budgetDeviationPct ?? 0) > 0
-                          ? `${budgetCurrency} ${Math.abs(trip.budget_total - budgetStateTotal).toLocaleString()} over budget`
-                          : `${budgetCurrency} ${Math.abs(trip.budget_total - budgetStateTotal).toLocaleString()} remaining`}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </motion.section>
+              <BudgetPanel
+                slices={budgetSlices}
+                currency={budgetCurrency}
+                deviationPct={budgetDeviationPct}
+                budgetTotal={trip.budget_total}
+                stateTotal={budgetStateTotal}
+                missingCategories={budgetMissing}
+              />
             )}
 
-            {/* Itinerary Day Sections */}
-            {dayNumbers.length > 0 && (
-              <section>
-                <div className="flex items-center gap-2 mb-4">
-                  <Calendar className="w-4 h-4 text-electric-400" />
-                  <h2 className="text-sm font-semibold text-slate-200 uppercase tracking-widest">
-                    Itinerary
-                  </h2>
-                  {trip.status === "planned" && (
-                    <button
-                      onClick={handleGenerate}
-                      disabled={generating}
-                      className="ml-auto text-xs text-slate-500 hover:text-electric-400 transition-colors"
-                    >
-                      Regenerate
-                    </button>
-                  )}
-                </div>
+            <ItinerarySection
+              dayNumbers={dayNumbers}
+              itemsByDay={itemsByDay}
+              weatherDays={weatherDays}
+              budgetCurrency={trip.budget_currency}
+              tripStatus={trip.status}
+              onRegenerate={handleGenerate}
+              regenerating={generating}
+              setDaySectionRef={setDaySectionRef}
+              onAskConcierge={handleAskConcierge}
+              replaceTarget={replaceTarget}
+              replaceTitle={replaceTitle}
+              setReplaceTitle={setReplaceTitle}
+              replaceLoading={replaceLoading}
+              onReplaceTargetToggle={(itemId) => {
+                setReplaceTitle("");
+                setReplaceTarget(replaceTarget === itemId ? null : itemId);
+              }}
+              onReplaceSubmit={handleReplace}
+              onReplaceCancel={() => setReplaceTarget(null)}
+            />
+            {dayNumbers.length === 0 && <EmptyItineraryState tripStatus={trip.status} />}
 
-                <div className="space-y-4">
-                  {dayNumbers.map((day, idx) => {
-                    const dayItems = [...(itemsByDay[day] ?? [])].sort(
-                      (a, b) => a.sort_order - b.sort_order,
-                    );
-                    const dayWeather = weatherDays[day - 1];
-
-                    return (
-                      <motion.div
-                        key={day}
-                        ref={setDaySectionRef(day)}
-                        data-day={day}
-                        initial={{ opacity: 0, y: 20 }}
-                        whileInView={{ opacity: 1, y: 0 }}
-                        viewport={{ once: true, margin: "-60px" }}
-                        transition={{ delay: idx * 0.05, duration: 0.4 }}
-                        className="glass-card overflow-hidden"
-                      >
-                        {/* Day header */}
-                        <div className="flex items-center justify-between px-5 py-4 border-b border-ink-900/8">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-xl bg-electric-500/15 border border-electric-500/30 flex items-center justify-center">
-                              <span className="text-xs font-bold text-electric-400">{day}</span>
-                            </div>
-                            <div>
-                              <p className="text-sm font-semibold text-slate-200">Day {day}</p>
-                              {dayItems[0]?.item_date && (
-                                <p className="text-xs text-slate-500">
-                                  {new Date(
-                                    dayItems[0].item_date + "T00:00:00",
-                                  ).toLocaleDateString("en-US", {
-                                    weekday: "short",
-                                    month: "short",
-                                    day: "numeric",
-                                  })}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-
-                          {dayWeather && (
-                            <div className="flex items-center gap-2 text-xs text-slate-500">
-                              <WeatherIcon
-                                code={dayWeather.condition_code}
-                                adverse={dayWeather.is_adverse}
-                              />
-                              <span>
-                                {Math.round(dayWeather.temp_min_c)}–
-                                {Math.round(dayWeather.temp_max_c)}°C
-                              </span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Activity timeline */}
-                        <div className="px-5 py-4 space-y-0">
-                          {dayItems.map((item, itemIdx) => {
-                            const typeInfo =
-                              ITEM_ICONS[item.item_type] ?? ITEM_ICONS.activity;
-                            const ItemIcon = typeInfo.icon as React.ComponentType<{ className?: string; strokeWidth?: number }>;
-                            const isLast = itemIdx === dayItems.length - 1;
-
-                            return (
-                              <motion.div
-                                key={item.id}
-                                whileHover={{ x: 3 }}
-                                transition={{ duration: 0.15 }}
-                              >
-                                <div className="flex gap-4 py-3">
-                                  {/* Timeline line + icon */}
-                                  <div className="flex flex-col items-center shrink-0">
-                                    <div
-                                      className={`w-7 h-7 rounded-lg flex items-center justify-center border ${typeInfo.color} bg-current/10`}
-                                      style={{ borderColor: "currentColor", opacity: 1 }}
-                                    >
-                                      <ItemIcon
-                                        className={`w-3.5 h-3.5 ${typeInfo.color}`}
-                                        strokeWidth={2}
-                                      />
-                                    </div>
-                                    {!isLast && (
-                                      <div className="w-px flex-1 bg-ink-900/[0.05] mt-1.5 min-h-[16px]" />
-                                    )}
-                                  </div>
-
-                                  {/* Content */}
-                                  <div className="flex-1 min-w-0 pb-1">
-                                    <div className="flex items-start justify-between gap-2">
-                                      <div className="min-w-0">
-                                        {item.start_time && (
-                                          <p className="text-[10px] text-slate-600 font-mono mb-0.5">
-                                            {item.start_time}
-                                          </p>
-                                        )}
-                                        <p className="text-sm font-medium text-slate-200 leading-snug">
-                                          {item.title}
-                                        </p>
-                                        {item.address && (
-                                          <p className="text-xs text-slate-500 truncate mt-0.5 flex items-center gap-1">
-                                            <MapPin className="w-2.5 h-2.5 shrink-0" />
-                                            {item.address}
-                                          </p>
-                                        )}
-                                        {item.description && (
-                                          <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">
-                                            {item.description}
-                                          </p>
-                                        )}
-                                      </div>
-
-                                      <div className="flex flex-col items-end gap-1.5 shrink-0">
-                                        {item.est_cost != null && (() => {
-                                          const bc = trip?.budget_currency ?? "INR";
-                                          const cv = convertToBudgetCurrency(
-                                            item.est_cost,
-                                            item.est_cost_currency ?? bc,
-                                            bc,
-                                          );
-                                          return (
-                                            <span className="text-xs font-semibold text-gold-400 tabular-nums whitespace-nowrap">
-                                              {bc} {Math.round(cv).toLocaleString("en-IN")}
-                                            </span>
-                                          );
-                                        })()}
-                                        <button
-                                          onClick={() => {
-                                            setReplaceTitle("");
-                                            setReplaceTarget(
-                                              replaceTarget === item.id ? null : item.id,
-                                            );
-                                          }}
-                                          className="text-[10px] text-slate-600 hover:text-electric-400 transition-colors px-2 py-0.5 rounded-lg hover:bg-electric-500/10"
-                                        >
-                                          Replace
-                                        </button>
-                                      </div>
-                                    </div>
-
-                                    {/* Replace form */}
-                                    <AnimatePresence>
-                                      {replaceTarget === item.id && (
-                                        <motion.div
-                                          initial={{ opacity: 0, height: 0 }}
-                                          animate={{ opacity: 1, height: "auto" }}
-                                          exit={{ opacity: 0, height: 0 }}
-                                          className="mt-2 flex gap-2 items-center overflow-hidden"
-                                        >
-                                          <input
-                                            autoFocus
-                                            type="text"
-                                            value={replaceTitle}
-                                            onChange={(e) => setReplaceTitle(e.target.value)}
-                                            onKeyDown={(e) => {
-                                              if (e.key === "Enter") handleReplace(item.id);
-                                              if (e.key === "Escape") setReplaceTarget(null);
-                                            }}
-                                            placeholder="Replacement activity name…"
-                                            disabled={replaceLoading}
-                                            className="input-dark text-xs py-2 flex-1"
-                                          />
-                                          <button
-                                            onClick={() => handleReplace(item.id)}
-                                            disabled={replaceLoading || !replaceTitle.trim()}
-                                            className="text-xs bg-electric-500/15 text-electric-400 border border-electric-500/30 px-3 py-2 rounded-xl hover:bg-electric-500/25 transition-colors disabled:opacity-40 whitespace-nowrap"
-                                          >
-                                            {replaceLoading ? "…" : "Submit"}
-                                          </button>
-                                          <button
-                                            onClick={() => setReplaceTarget(null)}
-                                            className="text-slate-500 hover:text-slate-300 text-xs"
-                                          >
-                                            <X className="w-4 h-4" />
-                                          </button>
-                                        </motion.div>
-                                      )}
-                                    </AnimatePresence>
-
-                                    {/* Conflict warning */}
-                                    {item.conflict_warning && (
-                                      <div className="mt-2 flex items-start gap-1.5 text-xs text-gold-400 bg-gold-500/8 border border-gold-500/20 rounded-xl px-3 py-2">
-                                        <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                                        <span>{item.conflict_warning}</span>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              </motion.div>
-                            );
-                          })}
-                        </div>
-
-                        {/* Ask concierge chip */}
-                        <div className="px-5 pb-4">
-                          <motion.button
-                            whileHover={{ scale: 1.02, x: 2 }}
-                            whileTap={{ scale: 0.97 }}
-                            onClick={() => { setSidebarTab("concierge"); setChatOpen(true); }}
-                            className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-electric-400 transition-colors py-1.5 px-3 rounded-full border border-ink-900/10 hover:border-electric-500/30 hover:bg-electric-500/8"
-                          >
-                            <Compass className="w-3 h-3" />
-                            Ask Concierge about Day {day} →
-                          </motion.button>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              </section>
-            )}
-
-            {/* Empty itinerary state */}
-            {trip.status !== "planning" && trip.status !== "failed" && dayNumbers.length === 0 && (
-              <div className="glass-card p-10 text-center">
-                <Loader2 className="w-8 h-8 text-electric-400 animate-spin mx-auto mb-3" />
-                <p className="text-slate-500 text-sm">
-                  {trip.status === "generating"
-                    ? "Building your itinerary…"
-                    : "No items yet. Items will appear here once the agents finish."}
-                </p>
-              </div>
-            )}
-
-            {/* Hotels Section */}
             {hotels.length > 0 && (
-              <motion.section
-                id="hotels-section"
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.4 }}
-              >
-                <div className="flex items-center gap-2 mb-4">
-                  <Hotel className="w-4 h-4 text-coral-400" />
-                  <h2 className="text-sm font-semibold text-slate-200 uppercase tracking-widest">
-                    Hotels
-                  </h2>
-                </div>
-
-                <div className="space-y-3">
-                  {/* Selected hotel — prominent */}
-                  {selectedHotel && (
-                    <div className="glass-card p-5 border-electric-500/30 shadow-electric-sm">
-                      <div className="flex items-start justify-between gap-4 mb-3">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-[10px] font-semibold text-electric-400 bg-electric-500/10 border border-electric-500/20 px-2 py-0.5 rounded-full">
-                              Selected
-                            </span>
-                            {selectedHotel.refundable != null && (
-                              <span
-                                className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${
-                                  selectedHotel.refundable
-                                    ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
-                                    : "text-coral-400 bg-coral-500/10 border-coral-500/20"
-                                }`}
-                              >
-                                {selectedHotel.refundable ? "Refundable" : "Non-refundable"}
-                              </span>
-                            )}
-                          </div>
-                          <p className="font-bold text-slate-100 text-base leading-snug">
-                            {selectedHotel.name}
-                          </p>
-                          {selectedHotel.star_rating != null && (
-                            <div className="flex items-center gap-1 mt-0.5">
-                              {Array.from({ length: 5 }).map((_, i) => (
-                                <Star
-                                  key={i}
-                                  className={`w-3 h-3 ${
-                                    i < Math.round(selectedHotel.star_rating!)
-                                      ? "text-gold-400 fill-gold-400"
-                                      : "text-slate-700"
-                                  }`}
-                                />
-                              ))}
-                              <span className="text-xs text-slate-500 ml-1">
-                                {selectedHotel.star_rating.toFixed(1)}
-                              </span>
-                            </div>
-                          )}
-                          {selectedHotel.address && (
-                            <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
-                              <MapPin className="w-3 h-3 shrink-0" />
-                              {selectedHotel.address}
-                            </p>
-                          )}
-                          {selectedHotel.meal_plan && (
-                            <span className="inline-block mt-2 text-[10px] text-slate-500 bg-ink-900/[0.04] border border-ink-900/10 px-2 py-0.5 rounded-full">
-                              {selectedHotel.meal_plan}
-                            </span>
-                          )}
-                        </div>
-
-                        {(selectedHotel.price_per_night != null ||
-                          selectedHotel.price_total != null) && (
-                          <div className="text-right shrink-0">
-                            {selectedHotel.price_per_night != null && (
-                              <p className="text-lg font-bold text-slate-100 tabular-nums">
-                                {selectedHotel.price_currency ?? ""}{" "}
-                                {selectedHotel.price_per_night.toLocaleString()}
-                                <span className="text-xs font-normal text-slate-500">/night</span>
-                              </p>
-                            )}
-                            {selectedHotel.price_total != null && (
-                              <p className="text-xs text-slate-500 tabular-nums mt-0.5">
-                                {selectedHotel.price_currency ?? ""}{" "}
-                                {selectedHotel.price_total.toLocaleString()} total
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Other hotel candidates */}
-                  {otherHotels.map((hotel, hidx) => (
-                    <motion.div
-                      key={hotel.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      whileInView={{ opacity: 1, y: 0 }}
-                      viewport={{ once: true }}
-                      transition={{ delay: hidx * 0.07, duration: 0.35 }}
-                      whileHover={{ y: -2 }}
-                      className="glass-card p-4"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-0.5">
-                            <p className="font-medium text-slate-300 text-sm">{hotel.name}</p>
-                          </div>
-                          {hotel.star_rating != null && (
-                            <div className="flex items-center gap-0.5 mt-0.5">
-                              {Array.from({ length: 5 }).map((_, i) => (
-                                <Star
-                                  key={i}
-                                  className={`w-2.5 h-2.5 ${
-                                    i < Math.round(hotel.star_rating!)
-                                      ? "text-gold-400 fill-gold-400"
-                                      : "text-slate-700"
-                                  }`}
-                                />
-                              ))}
-                            </div>
-                          )}
-                          {hotel.address && (
-                            <p className="text-xs text-slate-600 truncate mt-0.5">{hotel.address}</p>
-                          )}
-                          <div className="flex items-center gap-2 mt-1.5">
-                            {hotel.meal_plan && (
-                              <span className="text-[10px] text-slate-600 bg-ink-900/[0.03] border border-ink-900/8 px-1.5 py-0.5 rounded-full">
-                                {hotel.meal_plan}
-                              </span>
-                            )}
-                            {hotel.refundable != null && (
-                              <span
-                                className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                                  hotel.refundable
-                                    ? "text-emerald-500 bg-emerald-500/8"
-                                    : "text-coral-500 bg-coral-500/8"
-                                }`}
-                              >
-                                {hotel.refundable ? "Refundable" : "Non-refundable"}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="text-right shrink-0 flex flex-col items-end gap-2">
-                          <div>
-                            {hotel.price_per_night != null ? (
-                              <>
-                                <p className="text-sm font-semibold text-slate-300 tabular-nums">
-                                  {hotel.price_currency ?? ""} {hotel.price_per_night.toLocaleString()}
-                                  <span className="text-[10px] font-normal text-slate-600">/night</span>
-                                </p>
-                                {hotel.price_total != null && (
-                                  <p className="text-[10px] text-slate-600 tabular-nums">
-                                    {hotel.price_currency ?? ""} {hotel.price_total.toLocaleString()} total
-                                  </p>
-                                )}
-                              </>
-                            ) : (
-                              <p className="text-[11px] text-slate-500 italic">Price on request</p>
-                            )}
-                          </div>
-                          <motion.button
-                            whileTap={{ scale: 0.96 }}
-                            onClick={async () => {
-                              const updated = await api.selectHotel(tripId, hotel.id);
-                              queryClient.setQueryData(["hotels", tripId], updated);
-                            }}
-                            className="text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-electric-500/10 text-electric-400 border border-electric-500/20 hover:bg-electric-500/20 transition-colors whitespace-nowrap"
-                          >
-                            Set as hotel
-                          </motion.button>
-                        </div>
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              </motion.section>
+              <HotelsPanel
+                selectedHotel={selectedHotel}
+                otherHotels={otherHotels}
+                onSelectHotel={async (hotelId) => {
+                  const updated = await api.selectHotel(tripId as string, hotelId);
+                  queryClient.setQueryData(["hotels", tripId], updated);
+                }}
+              />
             )}
 
-            {/* ── Flights ──────────────────────────────────────────────── */}
             {trip.status !== "planning" && (
-              <motion.section
-                id="flights-section"
-                initial={{ opacity: 0, y: 24 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4 }}
-                className="glass-card p-5"
-              >
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center shadow-sm">
-                    <ArrowRight className="w-3.5 h-3.5 text-white" />
-                  </div>
-                  <h2 className="text-sm font-semibold text-slate-200">Flight Prices</h2>
-                </div>
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (flightOrigin.trim().length === 3) setFlightSearch(flightOrigin.trim().toUpperCase());
-                  }}
-                  className="flex gap-2 mb-4"
-                >
-                  <input
-                    type="text"
-                    value={flightOrigin}
-                    onChange={(e) => setFlightOrigin(e.target.value.toUpperCase().slice(0, 3))}
-                    placeholder="Your airport (e.g. DEL)"
-                    maxLength={3}
-                    className="input-dark text-xs py-2 flex-1 uppercase tracking-widest font-mono"
-                  />
-                  <button
-                    type="submit"
-                    disabled={flightOrigin.length !== 3 || flightsFetching}
-                    className="px-4 py-2 rounded-xl bg-electric-gradient text-white text-xs font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity shadow-electric-sm shrink-0"
-                  >
-                    {flightsFetching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Search"}
-                  </button>
-                </form>
-
-                {flightSearch && !flightsFetching && flights.length === 0 && (
-                  <p className="text-xs text-slate-500 text-center py-4">
-                    No flights found from {flightSearch} — check your airport code or try again later.
-                  </p>
-                )}
-
-                {flights.length > 0 && (
-                  <div className="space-y-2">
-                    {flights.map((f, i) => {
-                      const isSelected =
-                        selectedFlight != null &&
-                        selectedFlight.origin === f.origin &&
-                        selectedFlight.destination === f.destination &&
-                        selectedFlight.airline === f.airline &&
-                        selectedFlight.price_total === f.price_total;
-                      return (
-                        <div
-                          key={i}
-                          className={`glass-light rounded-xl p-3 border transition-all ${
-                            isSelected
-                              ? "border-pink-500/40 shadow-[0_0_0_1px_rgba(244,114,182,0.2)]"
-                              : "border-ink-900/10 hover:border-sky-500/20"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-0.5">
-                                {isSelected && (
-                                  <span className="text-[9px] font-semibold text-pink-400 bg-pink-500/10 border border-pink-500/20 px-1.5 py-0.5 rounded-full">
-                                    Selected
-                                  </span>
-                                )}
-                                <span className="font-mono text-xs font-bold text-slate-200">{f.origin}</span>
-                                <ArrowRight className="w-3 h-3 text-slate-500 shrink-0" />
-                                <span className="font-mono text-xs font-bold text-slate-200">{f.destination}</span>
-                                <span className="text-[9px] text-slate-500 bg-ink-900/[0.06] px-1.5 py-0.5 rounded-full">{f.airline}</span>
-                              </div>
-                              <div className="text-[10px] text-slate-500">
-                                {f.duration_outbound}
-                                {f.stops_outbound === 0 ? " · nonstop" : ` · ${f.stops_outbound} stop`}
-                                {f.duration_return && (
-                                  <span> · return {f.duration_return}{f.stops_return === 0 ? " nonstop" : ""}</span>
-                                )}
-                                <span className="ml-2 text-electric-400/60">{f.cabin.toLowerCase()}</span>
-                              </div>
-                            </div>
-                            <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
-                              <div>
-                                <p className="text-sm font-bold text-slate-100">
-                                  {f.price_currency} {f.price_total.toLocaleString()}
-                                </p>
-                                <p className="text-[9px] text-slate-500">per person</p>
-                              </div>
-                              <motion.button
-                                whileTap={{ scale: 0.96 }}
-                                onClick={() => setSelectedFlight(isSelected ? null : f)}
-                                className={`text-[10px] font-semibold px-2.5 py-1 rounded-lg border transition-colors whitespace-nowrap ${
-                                  isSelected
-                                    ? "bg-pink-500/10 text-pink-400 border-pink-500/20 hover:bg-pink-500/20"
-                                    : "bg-electric-500/10 text-electric-400 border-electric-500/20 hover:bg-electric-500/20"
-                                }`}
-                              >
-                                {isSelected ? "Deselect" : "Add to budget"}
-                              </motion.button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </motion.section>
+              <FlightsPanel
+                flightOrigin={flightOrigin}
+                setFlightOrigin={setFlightOrigin}
+                flightSearch={flightSearch}
+                onSearch={() => {
+                  if (flightOrigin.trim().length === 3) setFlightSearch(flightOrigin.trim().toUpperCase());
+                }}
+                flights={flights}
+                flightsFetching={flightsFetching}
+                selectedFlight={selectedFlight}
+                setSelectedFlight={setSelectedFlight}
+              />
             )}
 
-            {/* Local Events */}
             {(trip.status === "planned" || trip.status === "awaiting_approval") && (
-              <motion.section
-                id="events-section"
-                initial={{ opacity: 0, y: 24 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.1 }}
-                className="glass-card p-5"
-              >
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shadow-sm">
-                    <CalendarDays className="w-3.5 h-3.5 text-white" />
-                  </div>
-                  <h2 className="text-sm font-semibold text-slate-200">Local Events &amp; Shows</h2>
-                  {displayEvents.length > 0 && (
-                    <span className="ml-auto text-[10px] text-slate-500 font-medium">
-                      {filteredEvents.length}/{displayEvents.length} events
-                    </span>
-                  )}
-                </div>
-
-                {/* Category filter tabs */}
-                {eventCategories.length > 1 && (
-                  <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide mb-4">
-                    {eventCategories.map((cat) => (
-                      <button
-                        key={cat}
-                        onClick={() => setEventCategory(cat)}
-                        className={`shrink-0 text-[10px] font-semibold px-3 py-1.5 rounded-full border transition-all ${
-                          eventCategory === cat
-                            ? "bg-purple-500/20 border-purple-500/40 text-purple-300"
-                            : "bg-ink-900/[0.04] border-ink-900/10 text-slate-500 hover:text-slate-300 hover:border-ink-900/15"
-                        }`}
-                      >
-                        {cat}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {filteredEvents.length > 0 ? (
-                  <div className="space-y-3">
-                    {filteredEvents.map((ev) => (
-                      <div key={ev.id} className="glass-light rounded-xl p-3 border border-ink-900/10 hover:border-purple-500/20 transition-all">
-                        <div className="flex items-start gap-3">
-                          {ev.image_url && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={ev.image_url} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0" />
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                              <p className="text-xs font-semibold text-slate-200 truncate">{ev.event_name}</p>
-                              <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ${
-                                ev.source === "ticketmaster"
-                                  ? "bg-blue-500/15 text-blue-400 border border-blue-500/20"
-                                  : "bg-orange-500/15 text-orange-400 border border-orange-500/20"
-                              }`}>
-                                {ev.source === "ticketmaster" ? "Ticketmaster" : "Eventbrite"}
-                              </span>
-                            </div>
-                            <p className="text-[10px] text-slate-500 mb-1">
-                              {ev.venue_name}
-                              {ev.event_date && ` · ${new Date(ev.event_date).toLocaleDateString("en", { month: "short", day: "numeric" })}`}
-                              {ev.start_time && ` · ${ev.start_time.slice(0, 5)}`}
-                            </p>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {ev.category && (
-                                <span className="text-[9px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded-full border border-purple-500/15">
-                                  {ev.category}
-                                </span>
-                              )}
-                              {ev.price_min != null && (
-                                <span className="text-[9px] text-slate-400">
-                                  {ev.price_currency ?? ""}{" "}
-                                  {ev.price_min === 0 ? "Free" : `from ${ev.price_min}`}
-                                </span>
-                              )}
-                              {ev.url && (
-                                <a
-                                  href={ev.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-[9px] text-purple-400 hover:text-purple-300 transition-colors ml-auto"
-                                >
-                                  Tickets →
-                                </a>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        {ev.summary && (
-                          <p className="text-[10px] text-slate-500 mt-2 leading-relaxed border-t border-ink-900/10 pt-2">
-                            {ev.summary}
-                          </p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 px-4">
-                    <div className="w-10 h-10 rounded-full bg-purple-500/10 border border-purple-500/20 flex items-center justify-center mx-auto mb-3">
-                      <CalendarDays className="w-5 h-5 text-purple-400" />
-                    </div>
-                    <p className="text-sm text-slate-400 font-medium mb-1">
-                      {eventCategory === "All"
-                        ? "No events found for your dates"
-                        : `No ${eventCategory} events found`}
-                    </p>
-                    <p className="text-xs text-slate-600 leading-relaxed max-w-xs mx-auto">
-                      The events agent searches Ticketmaster and Eventbrite for concerts, comedy shows, theatre, sports and more during your trip.
-                    </p>
-                  </div>
-                )}
-              </motion.section>
+              <EventsPanel
+                events={filteredEvents}
+                totalCount={displayEvents.length}
+                categories={eventCategories}
+                activeCategory={eventCategory}
+                onCategoryChange={setEventCategory}
+              />
             )}
 
-            {/* Packing List */}
-            <PackingListPanel packingList={trip.packing_list} />
-
+            <PackingList packingList={trip.packing_list} />
           </div>
 
-          {/* ── RIGHT SIDEBAR — Map / AI Concierge tab toggle ─────────────── */}
+          {/* Right sidebar — Map / AI Concierge */}
           <div className="hidden xl:flex flex-col w-[320px] shrink-0">
             <div className="sticky top-24 flex flex-col gap-3" style={{ height: "calc(100vh - 7rem)" }}>
+              <Tabs
+                tabs={[
+                  { id: "concierge", label: "AI Concierge", icon: Compass },
+                  ...(showMapTab ? [{ id: "map", label: "Map", icon: MapPin }] : []),
+                ]}
+                active={sidebarTab}
+                onChange={(id) => setSidebarTab(id as "concierge" | "map")}
+                className="shrink-0"
+              />
 
-              {/* Tab toggle */}
-              <div className="flex items-center gap-1 p-1 rounded-2xl bg-space-700 border border-white/[0.10] shrink-0">
-                <button
-                  onClick={() => setSidebarTab("concierge")}
-                  className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-                    sidebarTab === "concierge"
-                      ? "bg-electric-gradient text-white shadow-electric-sm"
-                      : "bg-purple-500/10 text-slate-400 hover:bg-purple-500/20 hover:text-white"
-                  }`}
-                >
-                  <Compass className="w-3 h-3" />
-                  AI Concierge
-                  {sidebarTab === "concierge" && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 ml-0.5" />}
-                </button>
-                {trip.latitude != null && (pinnedItems.length > 0 || selectedHotel?.latitude != null) && (
-                  <button
-                    onClick={() => setSidebarTab("map")}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-                      sidebarTab === "map"
-                        ? "bg-gradient-to-r from-emerald-500 to-teal-400 text-white shadow-lg"
-                        : "bg-emerald-500/10 text-slate-400 hover:bg-emerald-500/20 hover:text-white"
-                    }`}
-                  >
-                    <MapPin className="w-3 h-3" />
-                    Map
-                    {sidebarTab === "map" && pinnedItems.length > 0 && (
-                      <span className="text-[9px] text-white/70 font-normal">{pinnedItems.length}</span>
-                    )}
-                  </button>
-                )}
-              </div>
-
-              {/* Tab content */}
               <AnimatePresence mode="wait">
-
-                {/* ── Concierge ── */}
                 {sidebarTab === "concierge" && (
                   <motion.div
                     key="concierge-sidebar"
@@ -2677,146 +701,21 @@ export default function TripDetailPage() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -6 }}
                     transition={{ duration: 0.18 }}
-                    className="flex-1 min-h-0 rounded-2xl border border-electric-500/30 overflow-hidden flex flex-col bg-gradient-to-br from-[#dbeeff] via-[#edf6ff] to-[#f5faff] shadow-glass"
+                    className="flex-1 min-h-0 flex flex-col"
                   >
-                    {/* Concierge header */}
-                    <div className="relative flex items-center gap-3 px-4 py-3.5 border-b border-electric-500/20 shrink-0 bg-gradient-to-r from-electric-500/15 via-electric-400/8 to-transparent">
-                      <div className="relative w-8 h-8 rounded-xl bg-electric-gradient flex items-center justify-center shadow-electric-sm shrink-0">
-                        <Compass className="w-3.5 h-3.5 text-white" />
-                        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 border-2 border-[#dbeeff]">
-                          <span className="absolute inset-0 rounded-full bg-emerald-500 animate-ping opacity-60" />
-                        </span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-ink-900">AI Concierge</p>
-                        <p className="text-[10px] text-emerald-600 font-medium">{trip.destination_city} specialist</p>
-                      </div>
-                    </div>
-
-                    {/* Messages */}
-                    <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 scrollbar-hide">
-                      {chatMessages.length === 0 && (
-                        <div className="flex flex-col items-center px-2 py-8">
-                          <div className="relative w-14 h-14 mb-4 shrink-0">
-                            <div className="absolute inset-0 rounded-full bg-electric-500/30 blur-xl animate-pulse" />
-                            <div className="absolute inset-0 rounded-full border border-electric-500/30 animate-ping" style={{ animationDuration: "3s" }} />
-                            <div className="absolute inset-3 rounded-full bg-electric-500/20 flex items-center justify-center border border-electric-500/40">
-                              <Compass className="w-6 h-6 text-electric-500" />
-                            </div>
-                          </div>
-                          <h3 className="text-sm font-bold text-ink-900 mb-1 text-center">Your {trip.destination_city} Guide</h3>
-                          <p className="text-[11px] text-ink-500 text-center leading-relaxed mb-5 max-w-[200px]">
-                            Real-time advice on restaurants, hidden spots, logistics and more
-                          </p>
-                          <div className="w-full space-y-2">
-                            {[
-                              { q: `Best restaurants in ${trip.destination_city}?`, icon: "🍽" },
-                              { q: "What should I pack?", icon: "🧳" },
-                              { q: "Local transport tips", icon: "🚇" },
-                            ].map(({ q, icon }) => (
-                              <motion.button
-                                key={q}
-                                whileHover={{ x: 2 }}
-                                whileTap={{ scale: 0.98 }}
-                                onClick={() => {
-                                  setChatMessages((prev) => [...prev, { role: "user", text: q }]);
-                                  setChatLoading(true);
-                                  sendMessage(q).finally(() => setChatLoading(false));
-                                }}
-                                className="w-full flex items-center gap-3 text-left px-3.5 py-2.5 rounded-xl text-xs bg-white/70 border border-electric-500/20 text-ink-700 hover:bg-white hover:border-electric-500/40 hover:text-ink-900 transition-all group shadow-soft"
-                              >
-                                <span className="text-sm leading-none">{icon}</span>
-                                <span className="flex-1">{q}</span>
-                                <ChevronRight className="w-3 h-3 text-electric-400 group-hover:text-electric-600 transition-colors" />
-                              </motion.button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {chatMessages.map((msg, i) => (
-                        <motion.div
-                          key={i}
-                          initial={{ opacity: 0, y: 8, scale: 0.97 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          transition={{ type: "spring", damping: 28, stiffness: 380 }}
-                        >
-                          {msg.role === "assistant" ? (
-                            <div className="flex items-start gap-2.5">
-                              <div className="w-7 h-7 rounded-xl bg-electric-gradient flex items-center justify-center shrink-0 mt-0.5 shadow-electric-sm">
-                                <Compass className="w-3 h-3 text-white" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="bg-white/80 border border-electric-500/15 text-ink-700 text-xs px-3.5 py-2.5 rounded-2xl rounded-tl-sm leading-relaxed shadow-soft">
-                                  {msg.text}
-                                </div>
-                                {msg.sources && msg.sources.length > 0 && (
-                                  <div className="flex flex-wrap gap-1 mt-1.5">
-                                    {msg.sources.slice(0, 4).map((s, j) => (
-                                      <span key={j} className="text-[10px] bg-electric-500/10 text-electric-600 px-2 py-0.5 rounded-full border border-electric-500/20">
-                                        {s.name}
-                                      </span>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex justify-end">
-                              <div className="bg-electric-gradient text-white text-xs px-3.5 py-2.5 rounded-2xl rounded-br-sm shadow-electric-sm max-w-[85%] leading-relaxed">
-                                {msg.text}
-                              </div>
-                            </div>
-                          )}
-                        </motion.div>
-                      ))}
-                      {chatLoading && (
-                        <div className="flex items-start gap-2.5">
-                          <div className="w-7 h-7 rounded-xl bg-electric-gradient flex items-center justify-center shrink-0 shadow-electric-sm">
-                            <Compass className="w-3 h-3 text-white" />
-                          </div>
-                          <div className="bg-white/80 border border-electric-500/15 px-4 py-3 rounded-2xl rounded-tl-sm shadow-soft">
-                            <div className="flex gap-1.5 items-center h-3">
-                              {[0, 1, 2].map((i) => (
-                                <motion.div
-                                  key={i}
-                                  className="w-1.5 h-1.5 bg-electric-500 rounded-full"
-                                  animate={{ y: [-3, 0, -3] }}
-                                  transition={{ repeat: Infinity, duration: 0.9, delay: i * 0.18, ease: "easeInOut" }}
-                                />
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                      <div ref={chatEndRef} />
-                    </div>
-
-                    {/* Input */}
-                    <div className="px-4 py-3 border-t border-electric-500/20 shrink-0 bg-white/40">
-                      <form onSubmit={handleChatSubmit} className="flex gap-2 items-center">
-                        <input
-                          type="text"
-                          value={chatInput}
-                          onChange={(e) => setChatInput(e.target.value)}
-                          disabled={chatLoading}
-                          placeholder={`Ask about ${trip.destination_city}…`}
-                          className="flex-1 bg-white/80 border border-electric-500/25 focus:border-electric-500/60 rounded-xl px-3.5 py-2.5 text-xs text-ink-900 placeholder:text-ink-400 outline-none transition-all shadow-soft"
-                        />
-                        <motion.button
-                          type="submit"
-                          disabled={chatLoading || !chatInput.trim()}
-                          whileHover={{ scale: 1.06 }}
-                          whileTap={{ scale: 0.94 }}
-                          className="w-9 h-9 rounded-xl bg-electric-gradient text-white flex items-center justify-center disabled:opacity-40 shadow-electric-sm shrink-0"
-                        >
-                          <Send className="w-3.5 h-3.5" />
-                        </motion.button>
-                      </form>
-                    </div>
+                    <ConciergeThread
+                      destinationCity={trip.destination_city}
+                      messages={chatMessages}
+                      input={chatInput}
+                      onInputChange={setChatInput}
+                      onSubmit={handleChatSubmit}
+                      loading={chatLoading}
+                      chatEndRef={chatEndRef}
+                      onSuggestionClick={askSuggestion}
+                    />
                   </motion.div>
                 )}
 
-                {/* ── Map ── */}
                 {sidebarTab === "map" && (
                   <motion.div
                     key="map-sidebar"
@@ -2824,64 +723,24 @@ export default function TripDetailPage() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -6 }}
                     transition={{ duration: 0.18 }}
-                    className="flex-1 min-h-0 rounded-2xl overflow-hidden border border-sky-200/70 flex flex-col bg-gradient-to-br from-sky-50 via-blue-50/30 to-white shadow-glass"
+                    className="flex-1 min-h-0 flex flex-col"
                   >
-                    {/* Map header */}
-                    <div className="flex items-center gap-2.5 px-4 py-3 border-b border-sky-200/60 shrink-0 bg-gradient-to-r from-electric-500/10 to-transparent">
-                      <div className="w-6 h-6 rounded-lg bg-electric-500/20 border border-electric-500/30 flex items-center justify-center shrink-0">
-                        <MapPin className="w-3 h-3 text-electric-500" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-bold text-ink-900">{trip.destination_city}</p>
-                        <p className="text-[10px] text-ink-500">{pinnedItems.length} places mapped</p>
-                      </div>
-                      {selectedHotel && (
-                        <span className="text-[10px] text-amber-600 bg-amber-100 border border-amber-300/50 px-2 py-0.5 rounded-full font-medium shrink-0">🏨</span>
-                      )}
-                    </div>
-
-                    {/* Map */}
-                    <div className="flex-1 min-h-0">
-                      {trip.latitude != null && trip.longitude != null && (
-                        <TripMap
-                          items={pinnedItems}
-                          centerLat={trip.latitude}
-                          centerLng={trip.longitude}
-                          hotel={
-                            selectedHotel?.latitude != null && selectedHotel?.longitude != null
-                              ? { lat: selectedHotel.latitude, lng: selectedHotel.longitude, name: selectedHotel.name }
-                              : null
-                          }
-                          height="100%"
-                        />
-                      )}
-                    </div>
-
-                    {/* Legend */}
-                    <div className="flex items-center gap-3 px-4 py-2.5 border-t border-sky-200/60 shrink-0 bg-white/50">
-                      {[
-                        { color: "#f87171", label: "Activity" },
-                        { color: "#fbbf24", label: "Meal" },
-                        { color: "#34d399", label: "Transport" },
-                        { color: "#f59e0b", label: "Hotel" },
-                      ].map(({ color, label }) => (
-                        <div key={label} className="flex items-center gap-1">
-                          <div className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
-                          <span className="text-[9px] text-slate-600">{label}</span>
-                        </div>
-                      ))}
-                    </div>
+                    <MapCard
+                      destinationCity={trip.destination_city}
+                      pinnedItems={pinnedItems}
+                      centerLat={trip.latitude}
+                      centerLng={trip.longitude}
+                      selectedHotel={selectedHotel}
+                    />
                   </motion.div>
                 )}
-
               </AnimatePresence>
             </div>
           </div>
-
         </div>
       </div>
 
-      {/* ── Floating Concierge (mobile only, xl:hidden) ───────────────────── */}
+      {/* Floating Concierge (mobile only) */}
       <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3 xl:hidden">
         <AnimatePresence>
           {chatOpen && (
@@ -2889,209 +748,65 @@ export default function TripDetailPage() {
               initial={{ opacity: 0, y: 20, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 20, scale: 0.95 }}
-              transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-              className="w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border border-electric-500/30 overflow-hidden flex flex-col bg-gradient-to-br from-[#dbeeff] via-[#edf6ff] to-[#f5faff] shadow-2xl"
+              transition={{ duration: 0.25, ease: EASE }}
+              className="relative w-[360px] max-w-[calc(100vw-2rem)] flex flex-col shadow-overlay rounded-xl"
               style={{ height: "50vh", maxHeight: "480px" }}
             >
-              {/* Header */}
-              <div className="relative flex items-center gap-3 px-4 py-3.5 border-b border-electric-500/20 shrink-0 bg-gradient-to-r from-electric-500/15 via-electric-400/8 to-transparent">
-                <div className="relative w-8 h-8 rounded-xl bg-electric-gradient flex items-center justify-center shadow-electric-sm shrink-0">
-                  <Compass className="w-3.5 h-3.5 text-white" />
-                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 border-2 border-[#dbeeff]" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-ink-900">AI Concierge</p>
-                  <p className="text-[10px] text-emerald-600 font-medium">{trip.destination_city} specialist</p>
-                </div>
-                <button onClick={() => setChatOpen(false)} className="text-ink-400 hover:text-ink-900 transition-colors p-1">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Messages */}
-              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 scrollbar-hide">
-                {chatMessages.length === 0 && (
-                  <div className="flex flex-col items-center py-6">
-                    <div className="relative w-12 h-12 mb-3 shrink-0">
-                      <div className="absolute inset-0 rounded-full bg-electric-500/30 blur-lg animate-pulse" />
-                      <div className="absolute inset-2 rounded-full bg-electric-500/20 flex items-center justify-center border border-electric-500/40">
-                        <Compass className="w-5 h-5 text-electric-500" />
-                      </div>
-                    </div>
-                    <p className="text-sm font-bold text-ink-900 mb-1 text-center">Your {trip.destination_city} Guide</p>
-                    <p className="text-[11px] text-ink-500 text-center mb-4 leading-relaxed">Ask anything about your trip</p>
-                    <div className="w-full space-y-1.5">
-                      {[
-                        { q: `Best restaurants in ${trip.destination_city}?`, icon: "🍽" },
-                        { q: "What should I pack?", icon: "🧳" },
-                        { q: "Local transport tips", icon: "🚇" },
-                      ].map(({ q, icon }) => (
-                        <button
-                          key={q}
-                          onClick={() => {
-                            setChatMessages((prev) => [...prev, { role: "user", text: q }]);
-                            setChatLoading(true);
-                            sendMessage(q).finally(() => setChatLoading(false));
-                          }}
-                          className="w-full flex items-center gap-2.5 text-left px-3 py-2 rounded-xl text-xs bg-white/70 border border-electric-500/20 text-ink-700 hover:bg-white hover:border-electric-500/40 hover:text-ink-900 transition-all group shadow-soft"
-                        >
-                          <span className="text-sm leading-none">{icon}</span>
-                          <span className="flex-1">{q}</span>
-                          <ChevronRight className="w-3 h-3 text-electric-400 group-hover:text-electric-600 shrink-0" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {chatMessages.map((msg, i) => (
-                  <motion.div
-                    key={i}
-                    initial={{ opacity: 0, y: 8, scale: 0.97 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    transition={{ type: "spring", damping: 28, stiffness: 380 }}
-                  >
-                    {msg.role === "assistant" ? (
-                      <div className="flex items-start gap-2">
-                        <div className="w-6 h-6 rounded-lg bg-electric-gradient flex items-center justify-center shrink-0 mt-0.5 shadow-electric-sm">
-                          <Compass className="w-2.5 h-2.5 text-white" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="bg-white/80 border border-electric-500/15 text-ink-700 text-xs px-3 py-2.5 rounded-2xl rounded-tl-sm leading-relaxed shadow-soft">
-                            {msg.text}
-                          </div>
-                          {msg.sources && msg.sources.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-1.5">
-                              {msg.sources.slice(0, 4).map((s, j) => (
-                                <span key={j} className="text-[10px] bg-ink-900/[0.04] text-slate-500 px-2 py-0.5 rounded-full border border-ink-900/10">{s.name}</span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex justify-end">
-                        <div className="bg-electric-gradient text-white text-xs px-3 py-2.5 rounded-2xl rounded-br-sm shadow-electric-sm max-w-[85%] leading-relaxed">
-                          {msg.text}
-                        </div>
-                      </div>
-                    )}
-                  </motion.div>
-                ))}
-                {chatLoading && (
-                  <div className="flex items-start gap-2">
-                    <div className="w-6 h-6 rounded-lg bg-electric-gradient flex items-center justify-center shrink-0 shadow-electric-sm">
-                      <Compass className="w-2.5 h-2.5 text-white" />
-                    </div>
-                    <div className="bg-white/80 border border-electric-500/15 px-3.5 py-3 rounded-2xl rounded-tl-sm shadow-soft">
-                      <div className="flex gap-1.5 items-center h-3">
-                        {[0, 1, 2].map((i) => (
-                          <motion.div key={i} className="w-1.5 h-1.5 bg-electric-500 rounded-full"
-                            animate={{ y: [-3, 0, -3] }}
-                            transition={{ repeat: Infinity, duration: 0.9, delay: i * 0.18, ease: "easeInOut" }} />
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-                <div ref={chatEndRef} />
-              </div>
-
-              {/* Input */}
-              <div className="px-3 py-3 border-t border-electric-500/20 shrink-0 bg-white/40">
-                <form onSubmit={handleChatSubmit} className="flex gap-2 items-center">
-                  <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)}
-                    disabled={chatLoading} placeholder={`Ask about ${trip.destination_city}…`}
-                    className="flex-1 bg-white/80 border border-electric-500/25 focus:border-electric-500/60 rounded-xl px-3 py-2.5 text-xs text-ink-900 placeholder:text-ink-400 outline-none transition-all shadow-soft" />
-                  <motion.button type="submit" disabled={chatLoading || !chatInput.trim()}
-                    whileHover={{ scale: 1.06 }} whileTap={{ scale: 0.94 }}
-                    className="w-9 h-9 rounded-xl bg-electric-gradient text-white flex items-center justify-center disabled:opacity-40 shadow-electric-sm shrink-0">
-                    <Send className="w-3.5 h-3.5" />
-                  </motion.button>
-                </form>
-              </div>
+              <button
+                onClick={() => setChatOpen(false)}
+                className="absolute top-3 right-3 z-10 text-ink-400 hover:text-ink-900 bg-surface-raised border border-ink-900/10 rounded-full p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <ConciergeThread
+                destinationCity={trip.destination_city}
+                messages={chatMessages}
+                input={chatInput}
+                onInputChange={setChatInput}
+                onSubmit={handleChatSubmit}
+                loading={chatLoading}
+                chatEndRef={chatEndRef}
+                onSuggestionClick={askSuggestion}
+              />
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Mobile FAB button */}
         <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
+          whileTap={{ y: 1 }}
           onClick={() => setChatOpen((v) => !v)}
-          className={`flex items-center gap-2 px-5 py-3 rounded-2xl font-semibold text-sm text-white shadow-lg transition-all ${
-            chatOpen ? "bg-ink-900 border border-ink-700 text-white" : `bg-electric-gradient shadow-electric ${pendingApprovals.length > 0 ? "animate-pulse-glow" : ""}`
+          className={`flex items-center gap-2 px-5 py-3 rounded-xl font-medium text-sm transition-shadow ${
+            chatOpen ? "bg-surface-raised text-ink-900 border border-ink-900/10 shadow-lift" : "bg-sunset text-[#1F1206] shadow-glow"
           }`}
         >
           <Compass className="w-4 h-4" />
           {chatOpen ? "Close" : "Ask AI"}
-          {!chatOpen && pendingApprovals.length > 0 && <span className="w-2 h-2 rounded-full bg-coral-400" />}
+          {!chatOpen && pendingApprovals.length > 0 && <span className="w-2 h-2 rounded-full bg-danger" />}
         </motion.button>
       </div>
 
-      {/* ── Edit Trip Modal ──────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {editOpen && trip && (
-          <EditTripModal
-            trip={trip}
-            onClose={() => setEditOpen(false)}
-            onSave={handleEditSave}
-          />
-        )}
-      </AnimatePresence>
+      <EditTripModal open={editOpen} trip={trip} onClose={() => setEditOpen(false)} onSave={handleEditSave} />
 
-      {/* ── Delete Confirmation Modal ────────────────────────────────────── */}
-      <AnimatePresence>
-        {deleteConfirm && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink-900/40 backdrop-blur-sm"
-            onClick={() => setDeleteConfirm(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 8 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 8 }}
-              transition={{ type: "spring", damping: 28, stiffness: 340 }}
-              className="glass-card p-6 w-full max-w-sm"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-start gap-3 mb-5">
-                <div className="p-2 rounded-xl bg-coral-500/10 border border-coral-500/20 shrink-0">
-                  <Trash2 className="w-4 h-4 text-coral-400" />
-                </div>
-                <div>
-                  <h2 className="text-base font-semibold text-slate-100 mb-1">Delete trip?</h2>
-                  <p className="text-sm text-slate-400">
-                    This will permanently remove{" "}
-                    <span className="text-slate-200">{trip?.title}</span> and all its itinerary
-                    data. This cannot be undone.
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setDeleteConfirm(false)}
-                  className="flex-1 py-2.5 rounded-xl text-sm text-slate-400 border border-ink-900/10 hover:bg-ink-900/[0.04] transition-colors"
-                >
-                  Cancel
-                </button>
-                <motion.button
-                  whileTap={{ scale: 0.97 }}
-                  onClick={handleDelete}
-                  disabled={deleting}
-                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-coral-500 text-white hover:bg-coral-600 transition-colors disabled:opacity-50"
-                >
-                  {deleting ? "Deleting…" : "Delete"}
-                </motion.button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <Modal
+        open={deleteConfirm}
+        onClose={() => setDeleteConfirm(false)}
+        width="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDeleteConfirm(false)}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={handleDelete} loading={deleting}>
+              Delete
+            </Button>
+          </>
+        }
+      >
+        <h3 className="font-display text-base font-medium text-ink-900 mb-1">Delete trip?</h3>
+        <p className="text-sm text-ink-400">
+          This will permanently remove <span className="text-ink-900">{trip.title}</span> and all its itinerary data. This cannot be undone.
+        </p>
+      </Modal>
     </div>
   );
 }
-
-

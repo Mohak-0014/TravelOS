@@ -1,22 +1,30 @@
 import type { Metadata } from "next";
-import { Fraunces, Plus_Jakarta_Sans } from "next/font/google";
+import { Fraunces, Instrument_Sans, Spline_Sans_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 
-// Warm editorial display serif for headlines
+// Editorial display serif for headlines — trimmed to the weights actually used
 const fraunces = Fraunces({
   subsets: ["latin"],
   variable: "--font-fraunces",
-  weight: ["400", "500", "600", "700", "900"],
+  weight: ["400", "500", "600"],
   style: ["normal", "italic"],
   display: "swap",
 });
 
-// Friendly geometric sans for UI / body
-const jakarta = Plus_Jakarta_Sans({
+// Quiet, precise grotesk for UI / body
+const instrument = Instrument_Sans({
   subsets: ["latin"],
-  variable: "--font-jakarta",
-  weight: ["400", "500", "600", "700", "800"],
+  variable: "--font-instrument",
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
+});
+
+// True mono for data: prices, dates, IATA codes, coordinates
+const splineMono = Spline_Sans_Mono({
+  subsets: ["latin"],
+  variable: "--font-spline-mono",
+  weight: ["400", "500", "600"],
   display: "swap",
 });
 
@@ -32,9 +40,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${fraunces.variable} ${jakarta.variable} antialiased bg-space-900 text-slate-100`}
-      >
+      <body className={`${fraunces.variable} ${instrument.variable} ${splineMono.variable} antialiased bg-paper text-ink-900`}>
         <Providers>{children}</Providers>
       </body>
     </html>

@@ -11,7 +11,6 @@ import {
   Sparkles,
   ArrowRight,
   ArrowLeft,
-  Loader2,
   Globe2,
   CheckCircle2,
   Zap,
@@ -20,27 +19,27 @@ import {
 import { api, ApiError } from "@/lib/api";
 import type { TripOut } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
+import { flightOriginKey } from "@/lib/constants";
 import NavBar from "@/components/ui/NavBar";
+import { Card } from "@/components/ui/Card";
+import { Chip } from "@/components/ui/Chip";
+import { Input } from "@/components/ui/Input";
+import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
+import { EASE } from "@/lib/motion";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const QUICK_DESTINATIONS = [
-  { label: "Tokyo", emoji: "🗾" },
-  { label: "Rome", emoji: "🏛️" },
-  { label: "Paris", emoji: "🗼" },
-  { label: "Bali", emoji: "🌴" },
-  { label: "New York", emoji: "🗽" },
-  { label: "Barcelona", emoji: "🎨" },
-];
+const QUICK_DESTINATIONS = ["Tokyo", "Rome", "Paris", "Bali", "New York", "Barcelona"];
 
 const BUDGET_CURRENCY = "INR";
 
 const PIPELINE_STEPS = [
-  { icon: Sparkles,   text: "Travel Style agent reads your preferences" },
-  { icon: MapPin,     text: "Itinerary Planner clusters attractions into walking zones" },
-  { icon: Globe2,     text: "Hotel Agent finds options matching your budget tier" },
+  { icon: Sparkles, text: "Travel Style agent reads your preferences" },
+  { icon: MapPin, text: "Itinerary Planner clusters attractions into walking zones" },
+  { icon: Globe2, text: "Hotel Agent finds options matching your budget tier" },
   { icon: IndianRupee, text: "Budget Optimizer checks spend vs. your budget" },
-  { icon: Zap,        text: "Events Agent checks what's on during your trip" },
+  { icon: Zap, text: "Events Agent checks what's on during your trip" },
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -51,12 +50,7 @@ function calcNights(start: string, end: string): number | null {
   return diff > 0 ? Math.round(diff) : null;
 }
 
-function calcBudgetTier(
-  budget: string,
-  travelers: number,
-  start: string,
-  end: string,
-): string | null {
+function calcBudgetTier(budget: string, travelers: number, start: string, end: string): string | null {
   const nights = calcNights(start, end);
   const total = parseFloat(budget);
   if (!budget || isNaN(total) || !nights || nights <= 0 || travelers <= 0) return null;
@@ -66,33 +60,24 @@ function calcBudgetTier(
   return "Luxury Seeker";
 }
 
-function tierColor(tier: string | null) {
-  if (tier === "Budget Explorer")
-    return "text-emerald-400 border-emerald-500/30 bg-emerald-500/10";
-  if (tier === "Balanced Traveler") return "text-gold-400 border-gold-500/30 bg-gold-500/10";
-  if (tier === "Luxury Seeker") return "text-coral-400 border-coral-500/30 bg-coral-500/10";
-  return "";
+function tierTone(tier: string | null): "success" | "warning" | "info" | "neutral" {
+  if (tier === "Budget Explorer") return "success";
+  if (tier === "Balanced Traveler") return "warning";
+  if (tier === "Luxury Seeker") return "info";
+  return "neutral";
 }
 
 // ── Step animation variants ───────────────────────────────────────────────────
 
 const stepVariants = (direction: number) => ({
   initial: { opacity: 0, x: direction * 50 },
-  animate: {
-    opacity: 1,
-    x: 0,
-    transition: { duration: 0.35, ease: [0.22, 1, 0.36, 1] as const },
-  },
-  exit: {
-    opacity: 0,
-    x: -direction * 50,
-    transition: { duration: 0.25, ease: [0.22, 1, 0.36, 1] as const },
-  },
+  animate: { opacity: 1, x: 0, transition: { duration: 0.35, ease: EASE } },
+  exit: { opacity: 0, x: -direction * 50, transition: { duration: 0.25, ease: EASE } },
 });
 
-// ── Progress bar ──────────────────────────────────────────────────────────────
+// ── Step indicator (numbered circles + connecting track) ─────────────────────
 
-function ProgressBar({ step, total }: { step: number; total: number }) {
+function StepIndicator({ step, total }: { step: number; total: number }) {
   const labels = ["Destination", "Dates", "Travelers & Budget", "Launch"];
   return (
     <div className="w-full max-w-xl mx-auto mb-10">
@@ -103,38 +88,21 @@ function ProgressBar({ step, total }: { step: number; total: number }) {
           return (
             <div key={label} className="flex flex-col items-center gap-1.5">
               <motion.div
-                animate={{
-                  scale: current ? 1.15 : 1,
-                  backgroundColor: done
-                    ? "#2dd4bf"
-                    : current
-                      ? "rgba(45,212,191,0.15)"
-                      : "rgba(255,255,255,0.06)",
-                  borderColor:
-                    done || current ? "#2dd4bf" : "rgba(255,255,255,0.1)",
-                }}
+                animate={{ scale: current ? 1.15 : 1 }}
                 transition={{ duration: 0.3 }}
-                className="w-8 h-8 rounded-full border-2 flex items-center justify-center"
+                className={`w-8 h-8 rounded-full border-2 flex items-center justify-center ${
+                  done ? "bg-sunset border-accent" : current ? "bg-accent-tint border-accent" : "bg-surface border-ink-900/10"
+                }`}
               >
                 {done ? (
-                  <CheckCircle2 className="w-4 h-4 text-[#0b1437]" />
+                  <CheckCircle2 className="w-4 h-4 text-[#1F1206]" />
                 ) : (
-                  <span
-                    className={`text-xs font-bold ${
-                      current ? "text-electric-400" : "text-slate-600"
-                    }`}
-                  >
-                    {i + 1}
-                  </span>
+                  <span className={`text-xs font-mono font-medium ${current ? "text-accent" : "text-ink-300"}`}>{i + 1}</span>
                 )}
               </motion.div>
               <span
                 className={`text-xs font-medium hidden sm:block text-center max-w-[72px] leading-tight ${
-                  current
-                    ? "text-electric-400"
-                    : done
-                      ? "text-slate-400"
-                      : "text-slate-600"
+                  current ? "text-accent" : done ? "text-ink-600" : "text-ink-300"
                 }`}
               >
                 {label}
@@ -145,12 +113,9 @@ function ProgressBar({ step, total }: { step: number; total: number }) {
       </div>
 
       {/* Connecting track */}
-      <div className="relative h-px bg-ink-900/[0.05] rounded-full mx-4 mt-1 hidden sm:block">
+      <div className="relative h-px bg-ink-900/10 rounded-full mx-4 mt-1 hidden sm:block">
         <motion.div
-          className="absolute left-0 top-0 h-full rounded-full"
-          style={{
-            background: "linear-gradient(135deg, #2dd4bf 0%, #8b5cf6 100%)",
-          }}
+          className="absolute left-0 top-0 h-full rounded-full bg-sunset"
           animate={{ width: `${(step / (total - 1)) * 100}%` }}
           transition={{ duration: 0.4, ease: "easeInOut" }}
         />
@@ -172,13 +137,9 @@ function StepDestination({
 }) {
   return (
     <div className="text-center">
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.05 }}
-      >
-        <div className="inline-flex w-14 h-14 rounded-2xl bg-electric-gradient items-center justify-center shadow-electric mb-5 animate-float-slow">
-          <Globe2 className="w-7 h-7 text-[#0b1437]" />
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
+        <div className="inline-flex w-14 h-14 rounded-2xl bg-sunset items-center justify-center mb-5 shadow-glow">
+          <Globe2 className="w-7 h-7 text-[#1F1206]" />
         </div>
       </motion.div>
 
@@ -186,7 +147,7 @@ function StepDestination({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.1 }}
-        className="text-slate-500 text-sm font-semibold uppercase tracking-widest mb-2"
+        className="font-mono text-ink-400 text-xs font-medium uppercase tracking-wider mb-2"
       >
         Step 1 of 4
       </motion.p>
@@ -194,19 +155,14 @@ function StepDestination({
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.15 }}
-        className="text-5xl font-bold gradient-text mb-10"
+        className="font-display text-5xl font-medium text-ink-900 mb-10"
       >
         Where to?
       </motion.h1>
 
       {/* Big destination input */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-        className="relative mb-8"
-      >
-        <MapPin className="absolute left-0 top-1/2 -translate-y-1/2 w-6 h-6 text-electric-400 pointer-events-none" />
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="relative mb-8">
+        <MapPin className="absolute left-0 top-1/2 -translate-y-1/2 w-6 h-6 text-accent pointer-events-none" />
         <input
           type="text"
           autoFocus
@@ -216,56 +172,35 @@ function StepDestination({
           onKeyDown={(e) => {
             if (e.key === "Enter" && destination.trim()) onNext();
           }}
-          className="w-full pl-10 pr-4 py-4 text-4xl font-light bg-transparent border-b-2 border-ink-900/10 focus:border-electric-500 focus:outline-none text-slate-100 placeholder-slate-700 transition-colors duration-300"
-          style={{ caretColor: "#2dd4bf" }}
+          className="w-full pl-10 pr-4 py-4 text-4xl font-light bg-transparent border-b-2 border-ink-900/10 focus:border-accent focus:outline-none text-ink-900 placeholder-ink-300 transition-colors duration-300"
+          style={{ caretColor: "#FF9E64" }}
         />
       </motion.div>
 
       {/* Quick-pick pills */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.3 }}
-        className="mb-10"
-      >
-        <p className="text-xs text-slate-600 uppercase tracking-widest font-semibold mb-4">
-          Popular destinations
-        </p>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="mb-10">
+        <p className="font-mono text-xs text-ink-300 uppercase tracking-wider mb-4">Popular destinations</p>
         <div className="flex flex-wrap justify-center gap-2">
-          {QUICK_DESTINATIONS.map(({ label, emoji }, i) => (
-            <motion.button
+          {QUICK_DESTINATIONS.map((label, i) => (
+            <motion.div
               key={label}
               initial={{ opacity: 0, scale: 0.85 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.35 + i * 0.05 }}
-              whileHover={{ scale: 1.06, y: -2 }}
-              whileTap={{ scale: 0.96 }}
-              onClick={() => setDestination(label)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-medium transition-all duration-200 ${
-                destination === label
-                  ? "border-electric-500/60 bg-electric-500/15 text-electric-400 shadow-electric-sm"
-                  : "border-ink-900/10 bg-ink-900/[0.03] text-slate-400 hover:border-ink-900/15 hover:text-slate-200 hover:bg-ink-900/[0.05]"
-              }`}
             >
-              <span>{emoji}</span>
-              {label}
-            </motion.button>
+              <Chip selected={destination === label} onClick={() => setDestination(label)}>
+                {label}
+              </Chip>
+            </motion.div>
           ))}
         </div>
       </motion.div>
 
       {/* Next button */}
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}>
-        <motion.button
-          whileHover={destination.trim() ? { scale: 1.04, y: -2 } : {}}
-          whileTap={destination.trim() ? { scale: 0.97 } : {}}
-          onClick={onNext}
-          disabled={!destination.trim()}
-          className="btn-primary flex items-center gap-2 mx-auto disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none"
-        >
+        <Button onClick={onNext} disabled={!destination.trim()} iconRight={ArrowRight} className="mx-auto">
           Continue
-          <ArrowRight className="w-4 h-4" />
-        </motion.button>
+        </Button>
       </motion.div>
     </div>
   );
@@ -294,12 +229,9 @@ function StepDates({
 
   return (
     <div className="text-center">
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-      >
-        <div className="inline-flex w-14 h-14 rounded-2xl bg-electric-gradient items-center justify-center shadow-electric mb-5">
-          <Calendar className="w-7 h-7 text-[#0b1437]" />
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+        <div className="inline-flex w-14 h-14 rounded-2xl bg-sunset items-center justify-center mb-5 shadow-glow">
+          <Calendar className="w-7 h-7 text-[#1F1206]" />
         </div>
       </motion.div>
 
@@ -307,7 +239,7 @@ function StepDates({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.05 }}
-        className="text-slate-500 text-sm font-semibold uppercase tracking-widest mb-2"
+        className="font-mono text-ink-400 text-xs font-medium uppercase tracking-wider mb-2"
       >
         Step 2 of 4
       </motion.p>
@@ -315,7 +247,7 @@ function StepDates({
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
-        className="text-4xl font-bold gradient-text mb-10"
+        className="font-display text-4xl font-medium text-ink-900 mb-10"
       >
         When are you going?
       </motion.h1>
@@ -328,10 +260,8 @@ function StepDates({
         className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 text-left"
       >
         <div>
-          <label className="block text-xs font-semibold text-slate-500 uppercase tracking-widest mb-2">
-            Departure
-          </label>
-          <input
+          <label className="block font-mono text-xs font-medium text-ink-400 uppercase tracking-wider mb-2">Departure</label>
+          <Input
             type="date"
             value={startDate}
             min={today}
@@ -339,19 +269,17 @@ function StepDates({
               setStartDate(e.target.value);
               if (endDate && e.target.value >= endDate) setEndDate("");
             }}
-            className="input-dark text-slate-100 [color-scheme:dark] cursor-pointer"
+            className="cursor-pointer"
           />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-slate-500 uppercase tracking-widest mb-2">
-            Return
-          </label>
-          <input
+          <label className="block font-mono text-xs font-medium text-ink-400 uppercase tracking-wider mb-2">Return</label>
+          <Input
             type="date"
             value={endDate}
             min={startDate || today}
             onChange={(e) => setEndDate(e.target.value)}
-            className="input-dark text-slate-100 [color-scheme:dark] cursor-pointer"
+            className="cursor-pointer"
           />
         </div>
       </motion.div>
@@ -364,27 +292,24 @@ function StepDates({
             initial={{ opacity: 0, scale: 0.85 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.85 }}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-electric-500/15 border border-electric-500/30 text-electric-400 text-sm font-semibold mb-6"
+            className="inline-block mb-6"
           >
-            <Calendar className="w-4 h-4" />
-            {nights} night{nights !== 1 ? "s" : ""}
+            <Badge tone="accent" icon={Calendar}>
+              {nights} night{nights !== 1 ? "s" : ""}
+            </Badge>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Travel tip */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.25 }}
-        className="glass-light rounded-xl p-4 mb-8 flex items-start gap-3 text-left"
-      >
-        <Zap className="w-4 h-4 text-gold-400 shrink-0 mt-0.5" />
-        <p className="text-sm text-slate-400 leading-relaxed">
-          <span className="text-gold-400 font-semibold">Planning ahead?</span>{" "}
-          We&rsquo;ll automatically fetch weather forecasts for your travel window and adapt your
-          itinerary for any adverse conditions.
-        </p>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.25 }}>
+        <Card padding="sm" className="mb-8 flex items-start gap-3 text-left">
+          <Zap className="w-4 h-4 text-accent shrink-0 mt-0.5" />
+          <p className="text-sm text-ink-600 leading-relaxed">
+            <span className="text-ink-900 font-medium">Planning ahead?</span> We&rsquo;ll automatically fetch weather forecasts for your
+            travel window and adapt your itinerary for any adverse conditions.
+          </p>
+        </Card>
       </motion.div>
 
       {/* Navigation */}
@@ -394,25 +319,12 @@ function StepDates({
         transition={{ delay: 0.3 }}
         className="flex items-center justify-between"
       >
-        <motion.button
-          whileHover={{ scale: 1.03, x: -2 }}
-          whileTap={{ scale: 0.97 }}
-          onClick={onBack}
-          className="btn-ghost flex items-center gap-2"
-        >
-          <ArrowLeft className="w-4 h-4" />
+        <Button variant="ghost" onClick={onBack} iconLeft={ArrowLeft}>
           Back
-        </motion.button>
-        <motion.button
-          whileHover={canNext ? { scale: 1.04, y: -2 } : {}}
-          whileTap={canNext ? { scale: 0.97 } : {}}
-          onClick={onNext}
-          disabled={!canNext}
-          className="btn-primary flex items-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none"
-        >
+        </Button>
+        <Button onClick={onNext} disabled={!canNext} iconRight={ArrowRight}>
           Continue
-          <ArrowRight className="w-4 h-4" />
-        </motion.button>
+        </Button>
       </motion.div>
     </div>
   );
@@ -450,8 +362,8 @@ function StepTravelersBudget({
   return (
     <div className="text-center">
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
-        <div className="inline-flex w-14 h-14 rounded-2xl bg-electric-gradient items-center justify-center shadow-electric mb-5">
-          <Users className="w-7 h-7 text-[#0b1437]" />
+        <div className="inline-flex w-14 h-14 rounded-2xl bg-sunset items-center justify-center mb-5 shadow-glow">
+          <Users className="w-7 h-7 text-[#1F1206]" />
         </div>
       </motion.div>
 
@@ -459,7 +371,7 @@ function StepTravelersBudget({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.05 }}
-        className="text-slate-500 text-sm font-semibold uppercase tracking-widest mb-2"
+        className="font-mono text-ink-400 text-xs font-medium uppercase tracking-wider mb-2"
       >
         Step 3 of 4
       </motion.p>
@@ -467,144 +379,129 @@ function StepTravelersBudget({
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
-        className="text-4xl font-bold gradient-text mb-10"
+        className="font-display text-4xl font-medium text-ink-900 mb-10"
       >
         Who&rsquo;s coming?
       </motion.h1>
 
       {/* Traveler count */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.15 }}
-        className="glass-light rounded-2xl p-6 mb-5 text-left"
-      >
-        <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-5">
-          Number of travelers
-        </p>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-5">
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={() => setTravelers(Math.max(1, travelers - 1))}
-              disabled={travelers <= 1}
-              className="w-11 h-11 rounded-full glass border border-ink-900/10 text-slate-200 text-xl font-light flex items-center justify-center hover:border-electric-500/40 hover:text-electric-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-            >
-              −
-            </motion.button>
-
-            <div className="text-center min-w-[4rem]">
-              <motion.p
-                key={travelers}
-                initial={{ scale: 0.7, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                className="text-5xl font-bold text-slate-100"
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+        <Card className="mb-5 text-left">
+          <p className="font-mono text-xs font-medium text-ink-400 uppercase tracking-wider mb-5">Number of travelers</p>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-5">
+              <button
+                onClick={() => setTravelers(Math.max(1, travelers - 1))}
+                disabled={travelers <= 1}
+                className="w-11 h-11 rounded-full border border-ink-900/10 text-ink-600 text-xl font-light flex items-center justify-center hover:border-accent/40 hover:text-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
-                {travelers}
-              </motion.p>
-              <p className="text-xs text-slate-500 mt-1">
-                {travelers === 1 ? "solo traveler" : "travelers"}
-              </p>
+                −
+              </button>
+
+              <div className="text-center min-w-[4rem]">
+                <motion.p
+                  key={travelers}
+                  initial={{ scale: 0.7, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="font-mono text-5xl font-medium text-ink-900"
+                >
+                  {travelers}
+                </motion.p>
+                <p className="text-xs text-ink-400 mt-1">{travelers === 1 ? "solo traveler" : "travelers"}</p>
+              </div>
+
+              <button
+                onClick={() => setTravelers(Math.min(12, travelers + 1))}
+                disabled={travelers >= 12}
+                className="w-11 h-11 rounded-full border border-ink-900/10 text-ink-600 text-xl font-light flex items-center justify-center hover:border-accent/40 hover:text-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                +
+              </button>
             </div>
 
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={() => setTravelers(Math.min(12, travelers + 1))}
-              disabled={travelers >= 12}
-              className="w-11 h-11 rounded-full glass border border-ink-900/10 text-slate-200 text-xl font-light flex items-center justify-center hover:border-electric-500/40 hover:text-electric-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-            >
-              +
-            </motion.button>
+            {/* Pax visual dots */}
+            <div className="hidden sm:flex flex-wrap gap-1.5 max-w-[120px] justify-end">
+              {Array.from({ length: Math.min(travelers, 12) }).map((_, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ delay: i * 0.04 }}
+                  className="w-4 h-4 rounded-full bg-accent/60"
+                />
+              ))}
+            </div>
           </div>
-
-          {/* Pax visual dots */}
-          <div className="hidden sm:flex flex-wrap gap-1.5 max-w-[120px] justify-end">
-            {Array.from({ length: Math.min(travelers, 12) }).map((_, i) => (
-              <motion.div
-                key={i}
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ delay: i * 0.04 }}
-                className="w-4 h-4 rounded-full bg-electric-500/60"
-              />
-            ))}
-          </div>
-        </div>
+        </Card>
       </motion.div>
 
       {/* Budget */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-        className="glass-light rounded-2xl p-6 mb-8 text-left"
-      >
-        <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-5">
-          Total trip budget{" "}
-          <span className="normal-case text-slate-700 font-normal">(optional)</span>
-        </p>
-        <div className="flex gap-3">
-          <div className="relative flex-1">
-            <IndianRupee className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
-            <input
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+        <Card className="mb-8 text-left">
+          <p className="font-mono text-xs font-medium text-ink-400 uppercase tracking-wider mb-5">
+            Total trip budget <span className="normal-case text-ink-300 font-normal">(optional)</span>
+          </p>
+          <div className="flex gap-3">
+            <Input
+              icon={IndianRupee}
               type="number"
               min="0"
               placeholder="150000"
               value={budget}
               onChange={(e) => setBudget(e.target.value)}
-              className="input-dark pl-10 text-slate-100"
+              className="flex-1"
             />
+            <div className="h-10 w-20 shrink-0 rounded-lg border border-ink-900/10 bg-ink-100 flex items-center justify-center font-mono text-sm font-medium text-ink-600 select-none">
+              INR
+            </div>
           </div>
-          <div className="input-dark w-20 shrink-0 flex items-center justify-center text-sm font-semibold text-gold-400 tracking-wide select-none">
-            INR
-          </div>
-        </div>
 
-        {/* Budget tier badge */}
-        <AnimatePresence mode="wait">
-          {tier && (
-            <motion.div
-              key={tier}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              className={`inline-flex items-center gap-2 mt-4 px-3 py-1.5 rounded-full border text-xs font-semibold ${tierColor(tier)}`}
-            >
-              <Sparkles className="w-3 h-3" />
-              {tier}
-            </motion.div>
-          )}
-        </AnimatePresence>
+          {/* Budget tier badge */}
+          <AnimatePresence mode="wait">
+            {tier && (
+              <motion.div
+                key={tier}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                className="inline-block mt-4"
+              >
+                <Badge tone={tierTone(tier)} icon={Sparkles}>
+                  {tier}
+                </Badge>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </Card>
       </motion.div>
 
       {/* Departure airport */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.25 }}
-        className="glass-light rounded-2xl p-6 mb-8 text-left"
-      >
-        <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-5">
-          Departure Airport{" "}
-          <span className="normal-case text-slate-700 font-normal">(optional — for flight budget)</span>
-        </p>
-        <div className="relative">
-          <PlaneTakeoff className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
-          <input
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}>
+        <Card className="mb-8 text-left">
+          <p className="font-mono text-xs font-medium text-ink-400 uppercase tracking-wider mb-5">
+            Departure Airport <span className="normal-case text-ink-300 font-normal">(optional — for flight budget)</span>
+          </p>
+          <Input
+            icon={PlaneTakeoff}
             type="text"
             placeholder="IATA code — DEL, JFK, LHR…"
             value={flightOrigin}
-            onChange={(e) => setFlightOrigin(e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 3))}
+            onChange={(e) =>
+              setFlightOrigin(
+                e.target.value
+                  .toUpperCase()
+                  .replace(/[^A-Z]/g, "")
+                  .slice(0, 3),
+              )
+            }
             maxLength={3}
-            className="input-dark pl-10 text-slate-100 uppercase tracking-widest font-mono placeholder:normal-case placeholder:tracking-normal placeholder:font-sans"
+            className="uppercase tracking-widest font-mono placeholder:normal-case placeholder:tracking-normal placeholder:font-sans"
           />
-        </div>
-        <p className="text-xs text-slate-600 mt-3 flex items-start gap-1.5">
-          <Zap className="w-3.5 h-3.5 text-gold-400 shrink-0 mt-0.5" />
-          Flight costs will be fetched and factored into your budget breakdown.
-        </p>
+          <p className="text-xs text-ink-400 mt-3 flex items-start gap-1.5">
+            <Zap className="w-3.5 h-3.5 text-accent shrink-0 mt-0.5" />
+            Flight costs will be fetched and factored into your budget breakdown.
+          </p>
+        </Card>
       </motion.div>
 
       {/* Navigation */}
@@ -614,24 +511,12 @@ function StepTravelersBudget({
         transition={{ delay: 0.3 }}
         className="flex items-center justify-between"
       >
-        <motion.button
-          whileHover={{ scale: 1.03, x: -2 }}
-          whileTap={{ scale: 0.97 }}
-          onClick={onBack}
-          className="btn-ghost flex items-center gap-2"
-        >
-          <ArrowLeft className="w-4 h-4" />
+        <Button variant="ghost" onClick={onBack} iconLeft={ArrowLeft}>
           Back
-        </motion.button>
-        <motion.button
-          whileHover={{ scale: 1.04, y: -2 }}
-          whileTap={{ scale: 0.97 }}
-          onClick={onNext}
-          className="btn-primary flex items-center gap-2"
-        >
+        </Button>
+        <Button onClick={onNext} iconRight={ArrowRight}>
           Continue
-          <ArrowRight className="w-4 h-4" />
-        </motion.button>
+        </Button>
       </motion.div>
     </div>
   );
@@ -668,19 +553,13 @@ function StepLaunch({
   const tier = calcBudgetTier(budget, travelers, startDate, endDate);
 
   const formatDate = (d: string) =>
-    d
-      ? new Date(d).toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-        })
-      : "—";
+    d ? new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
 
   return (
     <div className="text-center">
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
-        <div className="inline-flex w-14 h-14 rounded-2xl bg-electric-gradient items-center justify-center shadow-electric mb-5 animate-pulse-glow">
-          <Sparkles className="w-7 h-7 text-[#0b1437]" />
+        <div className="inline-flex w-14 h-14 rounded-2xl bg-sunset items-center justify-center mb-5 shadow-glow">
+          <Sparkles className="w-7 h-7 text-[#1F1206]" />
         </div>
       </motion.div>
 
@@ -688,7 +567,7 @@ function StepLaunch({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.05 }}
-        className="text-slate-500 text-sm font-semibold uppercase tracking-widest mb-2"
+        className="font-mono text-ink-400 text-xs font-medium uppercase tracking-wider mb-2"
       >
         Step 4 of 4
       </motion.p>
@@ -696,122 +575,103 @@ function StepLaunch({
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
-        className="text-4xl font-bold gradient-text mb-8"
+        className="font-display text-4xl font-medium text-ink-900 mb-8"
       >
         Ready to launch?
       </motion.h1>
 
       {/* Summary card */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.15 }}
-        className="glass-light rounded-2xl p-6 mb-5 text-left"
-      >
-        <div className="flex items-center gap-2 mb-4">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-widest">
-            Trip summary
-          </span>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <p className="text-xs text-slate-600 mb-1 flex items-center gap-1">
-              <MapPin className="w-3 h-3" /> Destination
-            </p>
-            <p className="text-xl font-bold text-slate-100">{destination}</p>
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+        <Card className="mb-5 text-left">
+          <div className="flex items-center gap-2 mb-4">
+            <CheckCircle2 className="w-4 h-4 text-success" />
+            <span className="font-mono text-xs font-medium text-ink-400 uppercase tracking-wider">Trip summary</span>
           </div>
 
-          <div>
-            <p className="text-xs text-slate-600 mb-1 flex items-center gap-1">
-              <Users className="w-3 h-3" /> Travelers
-            </p>
-            <p className="text-xl font-bold text-slate-100">
-              {travelers}{" "}
-              <span className="text-sm font-normal text-slate-400">
-                {travelers === 1 ? "person" : "people"}
-              </span>
-            </p>
-          </div>
-
-          <div>
-            <p className="text-xs text-slate-600 mb-1 flex items-center gap-1">
-              <Calendar className="w-3 h-3" /> Dates
-            </p>
-            <p className="text-sm font-semibold text-slate-200">
-              {formatDate(startDate)} – {formatDate(endDate)}
-            </p>
-            {nights !== null && (
-              <p className="text-xs text-slate-500 mt-0.5">{nights} nights</p>
-            )}
-          </div>
-
-          <div>
-            <p className="text-xs text-slate-600 mb-1 flex items-center gap-1">
-              <IndianRupee className="w-3 h-3" /> Budget
-            </p>
-            {budget ? (
-              <>
-                <p className="text-sm font-semibold text-slate-200">
-                  {currency} {parseFloat(budget).toLocaleString()}
-                </p>
-                {tier && (
-                  <p
-                    className={`text-xs mt-0.5 font-medium ${tierColor(tier).split(" ")[0]}`}
-                  >
-                    {tier}
-                  </p>
-                )}
-              </>
-            ) : (
-              <p className="text-sm text-slate-500 italic">Not set</p>
-            )}
-          </div>
-
-          <div>
-            <p className="text-xs text-slate-600 mb-1 flex items-center gap-1">
-              <PlaneTakeoff className="w-3 h-3" /> Flying from
-            </p>
-            {flightOrigin.length === 3 ? (
-              <p className="text-xl font-bold text-slate-100 font-mono tracking-widest">
-                {flightOrigin}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs text-ink-400 mb-1 flex items-center gap-1">
+                <MapPin className="w-3 h-3" /> Destination
               </p>
-            ) : (
-              <p className="text-sm text-slate-500 italic">Not set</p>
-            )}
+              <p className="text-xl font-medium text-ink-900">{destination}</p>
+            </div>
+
+            <div>
+              <p className="text-xs text-ink-400 mb-1 flex items-center gap-1">
+                <Users className="w-3 h-3" /> Travelers
+              </p>
+              <p className="text-xl font-medium text-ink-900">
+                {travelers} <span className="text-sm font-normal text-ink-400">{travelers === 1 ? "person" : "people"}</span>
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs text-ink-400 mb-1 flex items-center gap-1">
+                <Calendar className="w-3 h-3" /> Dates
+              </p>
+              <p className="text-sm font-medium text-ink-900 font-mono">
+                {formatDate(startDate)} – {formatDate(endDate)}
+              </p>
+              {nights !== null && <p className="text-xs text-ink-400 mt-0.5">{nights} nights</p>}
+            </div>
+
+            <div>
+              <p className="text-xs text-ink-400 mb-1 flex items-center gap-1">
+                <IndianRupee className="w-3 h-3" /> Budget
+              </p>
+              {budget ? (
+                <>
+                  <p className="text-sm font-medium text-ink-900 font-mono">
+                    {currency} {parseFloat(budget).toLocaleString()}
+                  </p>
+                  {tier && (
+                    <Badge tone={tierTone(tier)} className="mt-1">
+                      {tier}
+                    </Badge>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-ink-300 italic">Not set</p>
+              )}
+            </div>
+
+            <div>
+              <p className="text-xs text-ink-400 mb-1 flex items-center gap-1">
+                <PlaneTakeoff className="w-3 h-3" /> Flying from
+              </p>
+              {flightOrigin.length === 3 ? (
+                <p className="text-xl font-medium text-ink-900 font-mono tracking-widest">{flightOrigin}</p>
+              ) : (
+                <p className="text-sm text-ink-300 italic">Not set</p>
+              )}
+            </div>
           </div>
-        </div>
+        </Card>
       </motion.div>
 
       {/* Agent pipeline */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-        className="glass-light rounded-2xl p-6 mb-6 text-left"
-      >
-        <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-4">
-          What happens when you click Start Planning
-        </p>
-        <div className="space-y-3">
-          {PIPELINE_STEPS.map(({ icon: Icon, text }, i) => (
-            <motion.div
-              key={text}
-              initial={{ opacity: 0, x: -12 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.25 + i * 0.07 }}
-              className="flex items-center gap-3"
-            >
-              <div className="w-7 h-7 rounded-lg bg-electric-500/15 border border-electric-500/25 flex items-center justify-center shrink-0">
-                <Icon className="w-3.5 h-3.5 text-electric-400" />
-              </div>
-              <p className="text-sm text-slate-400 leading-snug">
-                <span className="text-electric-400 font-semibold">✦</span> {text}
-              </p>
-            </motion.div>
-          ))}
-        </div>
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+        <Card className="mb-6 text-left">
+          <p className="font-mono text-xs font-medium text-ink-400 uppercase tracking-wider mb-4">
+            What happens when you click Start Planning
+          </p>
+          <div className="space-y-3">
+            {PIPELINE_STEPS.map(({ icon: Icon, text }, i) => (
+              <motion.div
+                key={text}
+                initial={{ opacity: 0, x: -12 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.25 + i * 0.07 }}
+                className="flex items-center gap-3"
+              >
+                <div className="w-7 h-7 rounded-lg bg-accent-tint flex items-center justify-center shrink-0">
+                  <Icon className="w-3.5 h-3.5 text-accent" />
+                </div>
+                <p className="text-sm text-ink-600 leading-snug">{text}</p>
+              </motion.div>
+            ))}
+          </div>
+        </Card>
       </motion.div>
 
       {/* Error */}
@@ -821,7 +681,7 @@ function StepLaunch({
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
-            className="mb-5 px-4 py-3 rounded-xl bg-coral-500/10 border border-coral-500/30 text-coral-400 text-sm text-left"
+            className="mb-5 px-4 py-3 rounded-lg bg-danger-tint text-danger text-sm text-left"
           >
             {error}
           </motion.div>
@@ -835,36 +695,13 @@ function StepLaunch({
         transition={{ delay: 0.5 }}
         className="flex items-center justify-between"
       >
-        <motion.button
-          whileHover={{ scale: 1.03, x: -2 }}
-          whileTap={{ scale: 0.97 }}
-          onClick={onBack}
-          disabled={isSubmitting}
-          className="btn-ghost flex items-center gap-2 disabled:opacity-50"
-        >
-          <ArrowLeft className="w-4 h-4" />
+        <Button variant="ghost" onClick={onBack} disabled={isSubmitting} iconLeft={ArrowLeft}>
           Back
-        </motion.button>
+        </Button>
 
-        <motion.button
-          whileHover={!isSubmitting ? { scale: 1.04, y: -2 } : {}}
-          whileTap={!isSubmitting ? { scale: 0.97 } : {}}
-          onClick={onSubmit}
-          disabled={isSubmitting}
-          className="btn-primary flex items-center gap-3 text-base px-8 py-3 disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          {isSubmitting ? (
-            <>
-              <Loader2 className="w-5 h-5 animate-spin" />
-              Building your trip...
-            </>
-          ) : (
-            <>
-              <Sparkles className="w-5 h-5" />
-              ✦ Start Planning
-            </>
-          )}
-        </motion.button>
+        <Button onClick={onSubmit} loading={isSubmitting} iconLeft={Sparkles} size="lg">
+          {isSubmitting ? "Building your trip…" : "Start Planning"}
+        </Button>
       </motion.div>
     </div>
   );
@@ -876,21 +713,21 @@ export default function NewTripPage() {
   const router = useRouter();
   const { token, _hasHydrated } = useAuthStore();
 
-  const [step, setStep]           = useState(0);
+  const [step, setStep] = useState(0);
   const [direction, setDirection] = useState(1);
 
   // Form state
-  const [destination, setDestination]   = useState("");
-  const [startDate, setStartDate]       = useState("");
-  const [endDate, setEndDate]           = useState("");
-  const [travelers, setTravelers]       = useState(1);
-  const [budget, setBudget]             = useState("");
-  const [currency, setCurrency]         = useState(BUDGET_CURRENCY);
+  const [destination, setDestination] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [travelers, setTravelers] = useState(1);
+  const [budget, setBudget] = useState("");
+  const [currency, setCurrency] = useState(BUDGET_CURRENCY);
   const [flightOrigin, setFlightOrigin] = useState("");
 
   // Submit state
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError]               = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // Auth guard
   useEffect(() => {
@@ -925,16 +762,13 @@ export default function NewTripPage() {
         flight_origin: flightOrigin.trim().length === 3 ? flightOrigin.trim().toUpperCase() : null,
       });
       if (flightOrigin.trim().length === 3) {
-        sessionStorage.setItem(`flight_origin_${trip.id}`, flightOrigin.trim().toUpperCase());
+        sessionStorage.setItem(flightOriginKey(trip.id), flightOrigin.trim().toUpperCase());
       }
       router.push(`/trips/${trip.id}`);
     } catch (err) {
       if (err instanceof ApiError) {
         const detail = err.detail as { detail?: string; message?: string } | string | null;
-        const msg =
-          typeof detail === "string"
-            ? detail
-            : detail?.detail ?? detail?.message ?? "Something went wrong. Please try again.";
+        const msg = typeof detail === "string" ? detail : (detail?.detail ?? detail?.message ?? "Something went wrong. Please try again.");
         setError(msg);
       } else {
         setError("Something went wrong. Please try again.");
@@ -946,52 +780,25 @@ export default function NewTripPage() {
   const variants = stepVariants(direction);
 
   return (
-    <div className="relative min-h-screen bg-space-900 overflow-x-hidden">
-      {/* Ambient background glow */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute top-0 left-1/4 w-[500px] h-[500px] rounded-full bg-electric-500/6 blur-[120px]" />
-        <div className="absolute bottom-0 right-1/4 w-[400px] h-[400px] rounded-full bg-purple-600/6 blur-[120px]" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full bg-electric-600/4 blur-[160px]" />
-      </div>
-
+    <div className="relative min-h-screen bg-paper overflow-x-hidden">
       <NavBar />
 
       <main className="relative z-10 min-h-screen flex flex-col items-center justify-center px-4 pt-20 pb-16">
         <div className="w-full max-w-xl">
           {/* Progress indicator */}
-          <ProgressBar step={step} total={4} />
+          <StepIndicator step={step} total={4} />
 
           {/* Step card */}
-          <div className="glass-card p-8 sm:p-10 relative overflow-hidden">
-            {/* Inner corner glows */}
-            <div className="pointer-events-none absolute -top-20 -right-20 w-48 h-48 rounded-full bg-electric-500/8 blur-3xl" />
-            <div className="pointer-events-none absolute -bottom-20 -left-20 w-48 h-48 rounded-full bg-purple-600/6 blur-3xl" />
-
+          <Card className="p-8 sm:p-10">
             <AnimatePresence mode="wait" initial={false}>
               {step === 0 && (
-                <motion.div
-                  key="step-0"
-                  variants={variants}
-                  initial="initial"
-                  animate="animate"
-                  exit="exit"
-                >
-                  <StepDestination
-                    destination={destination}
-                    setDestination={setDestination}
-                    onNext={goNext}
-                  />
+                <motion.div key="step-0" variants={variants} initial="initial" animate="animate" exit="exit">
+                  <StepDestination destination={destination} setDestination={setDestination} onNext={goNext} />
                 </motion.div>
               )}
 
               {step === 1 && (
-                <motion.div
-                  key="step-1"
-                  variants={variants}
-                  initial="initial"
-                  animate="animate"
-                  exit="exit"
-                >
+                <motion.div key="step-1" variants={variants} initial="initial" animate="animate" exit="exit">
                   <StepDates
                     startDate={startDate}
                     setStartDate={setStartDate}
@@ -1004,13 +811,7 @@ export default function NewTripPage() {
               )}
 
               {step === 2 && (
-                <motion.div
-                  key="step-2"
-                  variants={variants}
-                  initial="initial"
-                  animate="animate"
-                  exit="exit"
-                >
+                <motion.div key="step-2" variants={variants} initial="initial" animate="animate" exit="exit">
                   <StepTravelersBudget
                     travelers={travelers}
                     setTravelers={setTravelers}
@@ -1029,13 +830,7 @@ export default function NewTripPage() {
               )}
 
               {step === 3 && (
-                <motion.div
-                  key="step-3"
-                  variants={variants}
-                  initial="initial"
-                  animate="animate"
-                  exit="exit"
-                >
+                <motion.div key="step-3" variants={variants} initial="initial" animate="animate" exit="exit">
                   <StepLaunch
                     destination={destination}
                     startDate={startDate}
@@ -1052,14 +847,14 @@ export default function NewTripPage() {
                 </motion.div>
               )}
             </AnimatePresence>
-          </div>
+          </Card>
 
           {/* Footer hint */}
           <motion.p
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.6 }}
-            className="text-center text-xs text-slate-700 mt-6"
+            className="text-center text-xs text-ink-300 mt-6"
           >
             Powered by multi-agent AI — hotels, weather, events, and budget auto-optimized.
           </motion.p>
