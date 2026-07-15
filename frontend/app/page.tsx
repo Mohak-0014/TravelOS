@@ -2,421 +2,384 @@
 
 import { useRef } from "react";
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import { motion, useScroll, useTransform } from "framer-motion";
-import { Plane, ArrowRight, ArrowDown, Star, Globe2 } from "lucide-react";
-import DaySky from "@/components/travel/DaySky";
-import AirplaneBanner from "@/components/travel/AirplaneBanner";
-import DestinationShowcase, { DESTINATIONS } from "@/components/travel/DestinationsScroll";
+import {
+  ArrowRight,
+  Compass,
+  MapPin,
+  Hotel,
+  Wallet,
+  Ticket,
+  CloudSun,
+  CheckCircle2,
+  Brain,
+  ChevronDown,
+  type LucideIcon,
+} from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { RouteDash } from "@/components/ui/RouteDash";
+import { SectionHeader } from "@/components/ui/SectionHeader";
+import { Globe } from "@/components/ui/Globe";
+import { TiltCard } from "@/components/ui/TiltCard";
+import { DestinationScroll, DESTINATIONS } from "@/components/travel/DestinationScroll";
+import { fadeUp, stagger, viewportOnce, wordReveal, EASE } from "@/lib/motion";
 
-// 3D globe touches WebGL/window — load client-only.
-const WorldGlobe = dynamic(() => import("@/components/travel/WorldGlobe"), {
-  ssr: false,
-  loading: () => (
-    <div className="flex aspect-square w-full max-w-[560px] items-center justify-center">
-      <div className="h-10 w-10 animate-spin rounded-full border-2 border-electric-500/30 border-t-electric-400" />
-    </div>
-  ),
-});
+// ── Hero photography ──────────────────────────────────────────────────────────
+// Public Unsplash CDN. The hero paints a midnight gradient underneath, so a
+// slow connection (or offline dev) shows a designed fallback, never a hole.
+
+const HERO_PHOTO = "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?q=80&w=2400&auto=format&fit=crop";
 
 // ── Agent pipeline data ───────────────────────────────────────────────────────
 
-const AGENTS = [
-  { emoji: "🧭", name: "Travel Style", desc: "Learns your pace, taste, and style", color: "from-electric-400 to-electric-600", glow: "rgba(45,212,191,0.3)" },
-  { emoji: "🗺️", name: "Itinerary", desc: "Clusters attractions into walkable zones", color: "from-gold-400 to-gold-500", glow: "rgba(251,191,36,0.3)" },
-  { emoji: "🏨", name: "Hotel Agent", desc: "Ranks hotels by your luxury tier + budget", color: "from-coral-400 to-coral-500", glow: "rgba(249,115,22,0.3)" },
-  { emoji: "💸", name: "Budget", desc: "Catches overspend. Suggests upgrades.", color: "from-emerald-400 to-emerald-500", glow: "rgba(52,211,153,0.3)" },
-  { emoji: "🎭", name: "Local Events", desc: "Finds what's on during your trip", color: "from-purple-400 to-purple-600", glow: "rgba(167,139,250,0.3)" },
-  { emoji: "🌤️", name: "Weather", desc: "Replans around rain before you notice", color: "from-electric-400 to-electric-500", glow: "rgba(45,212,191,0.3)" },
-  { emoji: "✅", name: "Approval Gate", desc: "You review, you decide — AI proposes, not imposes", color: "from-emerald-400 to-electric-400", glow: "rgba(52,211,153,0.3)" },
-  { emoji: "🧳", name: "Memory", desc: "Every trip makes the next one better", color: "from-gold-400 to-coral-400", glow: "rgba(251,191,36,0.3)" },
+const AGENTS: { name: string; desc: string; icon: LucideIcon }[] = [
+  { name: "Travel Style", desc: "Learns your pace, taste, and style", icon: Compass },
+  { name: "Itinerary", desc: "Clusters attractions into walkable zones", icon: MapPin },
+  { name: "Hotel Agent", desc: "Ranks hotels by your luxury tier and budget", icon: Hotel },
+  { name: "Budget", desc: "Catches overspend. Suggests upgrades.", icon: Wallet },
+  { name: "Local Events", desc: "Finds what's on during your trip", icon: Ticket },
+  { name: "Weather", desc: "Replans around rain before you notice", icon: CloudSun },
+  { name: "Approval Gate", desc: "You review, you decide — AI proposes, not imposes", icon: CheckCircle2 },
+  { name: "Memory", desc: "Every trip makes the next one better", icon: Brain },
 ];
 
 // ── Feature highlights ────────────────────────────────────────────────────────
 
-const FEATURES = [
-  { icon: "🎯", title: "Personalization", desc: "Remembers you love rooftop bars. Knows you hate museums before noon. Gets sharper with every trip.", color: "from-electric-400 to-electric-600", border: "hover:border-electric-500/40", glow: "hover:shadow-[0_24px_50px_rgba(14,165,233,0.18)]" },
-  { icon: "⚡", title: "Live Adaptation", desc: "Rain forecast on Day 3? We've already moved the outdoor activity indoors. No notification needed.", color: "from-gold-400 to-gold-500", border: "hover:border-gold-400/40", glow: "hover:shadow-[0_24px_50px_rgba(251,191,36,0.18)]" },
-  { icon: "💡", title: "Budget Intelligence", desc: "Over by 22%? Here's what to swap. Under by 30%? Here's an upgrade that fits perfectly.", color: "from-coral-400 to-coral-500", border: "hover:border-coral-500/40", glow: "hover:shadow-[0_24px_50px_rgba(244,63,94,0.18)]" },
+const FEATURES: { title: string; desc: string; icon: LucideIcon }[] = [
+  {
+    title: "Personalization",
+    desc: "Remembers you love rooftop bars. Knows you hate museums before noon. Gets sharper with every trip.",
+    icon: Brain,
+  },
+  {
+    title: "Live Adaptation",
+    desc: "Rain forecast on Day 3? We've already moved the outdoor activity indoors. No notification needed.",
+    icon: CloudSun,
+  },
+  {
+    title: "Budget Intelligence",
+    desc: "Over by 22%? Here's what to swap. Under by 30%? Here's an upgrade that fits perfectly.",
+    icon: Wallet,
+  },
 ];
 
-// ── Tokyo demo data ───────────────────────────────────────────────────────────
-
-const DEMO_DAYS = [
-  { day: 1, title: "Shibuya", icon: "🏙️", desc: "Crossing & street food", color: "from-electric-400 to-electric-600" },
-  { day: 2, title: "Harajuku", icon: "🎌", desc: "Takeshita St & Meiji", color: "from-purple-400 to-gold-400" },
-  { day: 3, title: "Asakusa", icon: "⛩️", desc: "Senso-ji & craft market", color: "from-gold-400 to-coral-500" },
-];
-
-// ── Scroll-linked flight path (plane flies across the agent pipeline) ──────────
-
-function AnimatedFlightLine() {
-  const ref = useRef<HTMLDivElement>(null);
-  const { scrollYProgress } = useScroll({ target: ref, offset: ["start end", "end start"] });
-  const dist = useTransform(scrollYProgress, [0.15, 0.85], ["0%", "100%"]);
-  const dash = useTransform(scrollYProgress, [0.15, 0.85], [0, 1]);
-
-  return (
-    <div ref={ref} className="hidden lg:block absolute top-9 left-0 right-0 pointer-events-none" style={{ zIndex: 0 }}>
-      <div className="relative mx-16 route-dash h-0.5" />
-      <motion.div
-        className="absolute left-16 right-16 top-0 h-0.5 origin-left rounded-full"
-        style={{ scaleX: dash, background: "linear-gradient(90deg,#2dd4bf,#7c3aed,#fbbf24)" }}
-      />
-      <motion.div className="absolute top-0" style={{ left: dist }}>
-        <Plane className="w-6 h-6 text-gold-400 -translate-x-1/2 -translate-y-1/2 rotate-90 drop-shadow-[0_4px_8px_rgba(0,0,0,0.4)]" fill="#fbbf24" />
-      </motion.div>
-    </div>
-  );
-}
-
-// ── Budget ring ───────────────────────────────────────────────────────────────
-
-function BudgetRing() {
-  const size = 100;
-  const stroke = 8;
-  const r = (size - stroke) / 2;
-  const circ = 2 * Math.PI * r;
-  const offset = circ * (1 - 0.73);
-
-  return (
-    <div className="relative inline-flex items-center justify-center">
-      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
-        <circle cx={50} cy={50} r={r} fill="none" stroke="rgba(231,238,255,0.1)" strokeWidth={stroke} />
-        <circle cx={50} cy={50} r={r} fill="none" stroke="url(#budgetGrad)" strokeWidth={stroke} strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round" />
-        <defs>
-          <linearGradient id="budgetGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#2dd4bf" />
-            <stop offset="100%" stopColor="#fbbf24" />
-          </linearGradient>
-        </defs>
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-        <span className="text-sm font-bold text-gold-400">73%</span>
-        <span className="text-[9px] text-slate-500 leading-tight">used</span>
-      </div>
-    </div>
-  );
-}
+const GLOBE_MARKERS = DESTINATIONS.map((d) => {
+  const [lat, lng] = d.coords.split(" ").map((part) => {
+    const sign = part.includes("S") || part.includes("W") ? -1 : 1;
+    return sign * parseFloat(part);
+  });
+  return { location: [lat, lng] as [number, number], size: 0.1 };
+});
 
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
 }
 
+// Masked word-by-word reveal for the hero headline.
+function RevealWords({ text, className }: { text: string; className?: string }) {
+  return (
+    <span className={className}>
+      {text.split(" ").map((word, i) => (
+        <span key={i} className="inline-block overflow-hidden align-bottom pb-[0.12em] -mb-[0.12em]">
+          <motion.span variants={wordReveal} className="inline-block">
+            {word}
+          </motion.span>
+          {" "}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function LandingPage() {
-  const heroRef = useRef<HTMLDivElement>(null);
-  const { scrollYProgress: heroScroll } = useScroll({ target: heroRef, offset: ["start start", "end start"] });
-  const skyY = useTransform(heroScroll, [0, 1], [0, 140]);
-  const contentY = useTransform(heroScroll, [0, 1], [0, 60]);
-  const heroFade = useTransform(heroScroll, [0, 0.7], [1, 0]);
+  const heroRef = useRef<HTMLElement>(null);
+  const { scrollYProgress } = useScroll({ target: heroRef, offset: ["start start", "end start"] });
+  // Photo drifts slower than the page; content drifts up and fades — classic cinematic parallax.
+  const photoY = useTransform(scrollYProgress, [0, 1], ["0%", "18%"]);
+  const contentY = useTransform(scrollYProgress, [0, 1], ["0%", "-12%"]);
+  const contentOpacity = useTransform(scrollYProgress, [0, 0.7], [1, 0]);
 
   return (
-    <div className="relative bg-space-900 overflow-x-clip">
-
-      {/* ════════════════ SECTION 1 — HERO ════════════════ */}
-      <section ref={heroRef} className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden">
-        <motion.div style={{ y: skyY }} className="absolute inset-0">
-          <DaySky />
+    <div className="relative bg-paper">
+      {/* ════════════════ HERO — full-bleed cinematic ════════════════ */}
+      <section ref={heroRef} className="relative h-[100svh] min-h-[640px] overflow-hidden">
+        {/* Fallback: midnight sky with a warm horizon ember — visible until the photo paints */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(120% 65% at 50% 100%, rgba(255,125,80,0.22) 0%, rgba(255,125,80,0.05) 35%, transparent 60%), linear-gradient(180deg, #0B0F14 0%, #101825 55%, #1A1E28 100%)",
+          }}
+        />
+        {/* Photo layer — Ken Burns drift + scroll parallax */}
+        <motion.div style={{ y: photoY }} className="absolute inset-[-6%]">
+          <div className="absolute inset-0 kenburns bg-cover bg-center" style={{ backgroundImage: `url(${HERO_PHOTO})` }} />
         </motion.div>
+        {/* Scrims: darken for legibility, then dissolve into the page background */}
+        <div className="absolute inset-0 bg-black/35" />
+        <div className="absolute inset-x-0 bottom-0 h-64 bg-fade-b" />
+        <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-black/50 to-transparent" />
 
-        {/* the title plane towing its banner */}
-        <AirplaneBanner />
+        {/* Floating mono coordinates — quiet atlas details in the corners */}
+        <span className="hidden md:block absolute top-24 left-8 font-mono text-[10px] tracking-widest text-white/35 z-10">
+          27.99°N 86.93°E
+        </span>
+        <span className="hidden md:block absolute bottom-28 right-8 font-mono text-[10px] tracking-widest text-white/35 z-10">
+          ALT 8,848M · FL360
+        </span>
 
-        {/* Overlay text */}
-        <motion.div style={{ y: contentY, opacity: heroFade }} className="relative z-10 text-center px-4 max-w-4xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-            className="mb-6"
-          >
-            <span className="inline-flex items-center gap-2 text-xs font-semibold px-4 py-2 rounded-full glass electric-border text-electric-600 uppercase tracking-widest">
-              <span className="w-1.5 h-1.5 rounded-full bg-gold-400 animate-pulse-glow" />
-              AI-Powered · Always Learning
-            </span>
-          </motion.div>
-
-          <motion.h1
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.12, duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-            className="font-display text-5xl md:text-7xl font-medium leading-[1.04] tracking-tight mb-6"
-          >
-            <span className="text-slate-100">Where to </span>
-            <span className="gradient-text italic">next?</span>
-            <br />
-            <span className="text-slate-100">We&apos;ll handle the rest.</span>
-          </motion.h1>
-
-          <motion.p
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.22, duration: 0.5 }}
-            className="text-lg md:text-xl text-slate-400 mb-10 max-w-2xl mx-auto leading-relaxed"
-          >
-            Tell us where. Eight AI agents plan every detail —{" "}
-            <span className="text-slate-200 font-medium">and get smarter every trip.</span>
-          </motion.p>
-
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.32, duration: 0.5 }}
-            className="flex items-center justify-center gap-4 flex-wrap"
-          >
-            <Link href="/login">
-              <motion.button whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }} className="btn-primary flex items-center gap-2 text-base px-7 py-3.5">
-                Start Planning
-                <ArrowRight className="w-5 h-5" />
-              </motion.button>
-            </Link>
-
-            <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={() => scrollToSection("destinations")} className="btn-ghost flex items-center gap-2 text-sm px-6 py-3.5">
-              Find your inspiration
-              <ArrowDown className="w-4 h-4" />
-            </motion.button>
-          </motion.div>
-        </motion.div>
-
-        {/* Scroll hint */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.2 }} className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 z-10">
-          <div className="w-px h-8 bg-gradient-to-b from-transparent to-gold-400/60 animate-float-slow" />
-          <div className="w-1.5 h-1.5 rounded-full bg-gold-400/60" />
-        </motion.div>
-      </section>
-
-      {/* ════════════════ SECTION 2 — DESTINATION SHOWCASE (horizontal scroll) ════════════════ */}
-      <DestinationShowcase />
-
-      {/* ════════════════ SECTION 3 — INTERACTIVE GLOBE ════════════════ */}
-      <section className="relative py-24 px-4 overflow-hidden bg-space-900">
-        <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-px bg-gradient-to-r from-transparent via-electric-500/25 to-transparent" />
-        </div>
-
-        <div className="max-w-6xl mx-auto">
-          <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.55 }} className="text-center mb-10">
-            <p className="text-xs font-semibold text-electric-400 uppercase tracking-[0.2em] mb-4 flex items-center justify-center gap-2">
-              <Globe2 className="w-3.5 h-3.5" /> Plan Anywhere
-            </p>
-            <h2 className="font-display text-4xl md:text-5xl font-medium text-slate-100 mb-4">
-              Where will you go <span className="gradient-text italic">first?</span>
-            </h2>
-            <p className="text-slate-400 text-lg max-w-2xl mx-auto">
-              Spin the globe and plan a trip to absolutely anywhere — a world capital, a quiet
-              coastline, a town only you have heard of.
-            </p>
-          </motion.div>
-
-          <motion.div initial={{ opacity: 0, scale: 0.94 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true, margin: "-60px" }} transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}>
-            <WorldGlobe />
-          </motion.div>
-
-          <p className="mt-8 mb-3 text-center text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-            A few favorites to spark ideas
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-2.5">
-            {DESTINATIONS.map((d) => (
-              <span
-                key={d.id}
-                className="rounded-full px-3.5 py-1.5 text-xs font-medium"
-                style={{ background: `${d.accent}1a`, color: d.accent, border: `1px solid ${d.accent}33` }}
-              >
-                {d.name}
+        {/* Content */}
+        <motion.div
+          style={{ y: contentY, opacity: contentOpacity }}
+          className="relative z-10 h-full flex flex-col items-center justify-center px-4 text-center"
+        >
+          <motion.div variants={stagger(0.12)} initial="hidden" animate="show" className="max-w-4xl mx-auto">
+            <motion.div variants={fadeUp} className="mb-8">
+              <span className="glass inline-flex items-center gap-2 font-mono text-[11px] font-medium px-4 py-2 rounded-full text-white/85 uppercase tracking-wider">
+                <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+                AI-Powered · Always Learning
               </span>
-            ))}
-            <Link
-              href="/login"
-              className="rounded-full border border-gold-400/40 bg-gold-400/10 px-3.5 py-1.5 text-xs font-semibold text-gold-300 transition-colors hover:bg-gold-400/20"
-            >
-              ✦ Anywhere else →
-            </Link>
-          </div>
+            </motion.div>
+
+            <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-medium leading-[1.02] tracking-tight text-white mb-8">
+              <RevealWords text="Where to" />
+              <span className="inline-block overflow-hidden align-bottom pb-[0.12em] -mb-[0.12em] pr-[0.1em]">
+                <motion.span variants={wordReveal} className="inline-block italic text-sunset pr-[0.06em]">
+                  next?
+                </motion.span>
+              </span>
+              <br />
+              <RevealWords text="We'll handle the rest." />
+            </h1>
+
+            <motion.p variants={fadeUp} className="text-lg md:text-xl text-white/75 mb-10 max-w-2xl mx-auto leading-relaxed">
+              Tell us where. Eight AI agents plan every detail — <span className="text-white font-medium">and get smarter every trip.</span>
+            </motion.p>
+
+            <motion.div variants={fadeUp} className="mb-12">
+              <RouteDash from="HERE" to="ANYWHERE" arc className="max-w-xs mx-auto [&_span]:text-white/60" />
+            </motion.div>
+
+            <motion.div variants={fadeUp} className="flex items-center justify-center gap-4 flex-wrap">
+              <Link href="/login">
+                <Button size="lg" iconRight={ArrowRight}>
+                  Start Planning
+                </Button>
+              </Link>
+              <Button
+                variant="ghost"
+                size="lg"
+                onClick={() => scrollToSection("how-it-works")}
+                className="text-white/80 hover:text-white hover:bg-white/10"
+              >
+                See how it works
+              </Button>
+            </motion.div>
+          </motion.div>
+        </motion.div>
+
+        {/* Scroll cue */}
+        <motion.button
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1.6, duration: 0.8 }}
+          onClick={() => scrollToSection("how-it-works")}
+          className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-1.5 text-white/50 hover:text-white/90 transition-colors"
+          aria-label="Scroll down"
+        >
+          <span className="font-mono text-[10px] uppercase tracking-[0.25em]">Scroll</span>
+          <motion.span animate={{ y: [0, 5, 0] }} transition={{ repeat: Infinity, duration: 1.8, ease: "easeInOut" }}>
+            <ChevronDown className="w-4 h-4" />
+          </motion.span>
+        </motion.button>
+      </section>
+
+      {/* ════════════════ MARQUEE — kinetic destination ticker ════════════════ */}
+      <section className="relative py-6 border-y border-ink-900/10 overflow-hidden" aria-hidden="true">
+        <div className="flex w-max animate-marquee gap-12">
+          {[...DESTINATIONS, ...DESTINATIONS].map((d, i) => (
+            <span key={`${d.id}-${i}`} className="flex items-center gap-12 shrink-0">
+              <span className="font-display italic text-xl text-ink-600">{d.name}</span>
+              <span className="font-mono text-[10px] tracking-widest text-ink-300">{d.coords}</span>
+              <span className="w-1 h-1 rounded-full bg-accent/60" />
+            </span>
+          ))}
         </div>
       </section>
 
-      {/* ════════════════ SECTION 4 — HOW IT WORKS ════════════════ */}
-      <section id="how-it-works" className="relative py-28 px-4 overflow-hidden bg-space-800">
-        <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-px bg-gradient-to-r from-transparent via-gold-500/25 to-transparent" />
-          <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[800px] h-px bg-gradient-to-r from-transparent via-electric-500/20 to-transparent" />
-        </div>
-
-        <div className="max-w-7xl mx-auto">
-          <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }} className="text-center mb-16">
-            <p className="text-xs font-semibold text-gold-400 uppercase tracking-[0.2em] mb-4">The Itinerary Engine</p>
-            <h2 className="font-display text-4xl md:text-5xl font-medium text-slate-100 mb-5">
-              8 Agents. <span className="gradient-text italic">One perfect trip.</span>
+      {/* ════════════════ HOW IT WORKS ════════════════ */}
+      <section id="how-it-works" className="relative py-28 px-4">
+        <div className="max-w-3xl mx-auto">
+          <motion.div initial="hidden" whileInView="show" viewport={viewportOnce} variants={fadeUp} className="mb-14">
+            <SectionHeader eyebrow="The Itinerary Engine" />
+            <h2 className="font-display text-4xl md:text-5xl font-medium text-ink-900 mb-4">
+              8 Agents. <span className="italic text-sunset">One perfect trip.</span>
             </h2>
-            <p className="text-slate-400 text-lg max-w-2xl mx-auto">
+            <p className="text-ink-400 text-lg max-w-xl">
               Your trip runs through a pipeline of specialised AI agents, each optimising a different dimension.
             </p>
           </motion.div>
 
-          <div className="relative">
-            <AnimatedFlightLine />
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 relative z-10">
-              {AGENTS.map((agent, i) => (
-                <motion.div
-                  key={agent.name}
-                  initial={{ opacity: 0, y: 24 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true, margin: "-40px" }}
-                  transition={{ delay: i * 0.07, duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-                  whileHover={{ y: -6 }}
-                  className="glass-card p-4 flex flex-col items-center text-center gap-3 cursor-default"
-                >
-                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${agent.color} flex items-center justify-center text-xl shadow-soft`}>{agent.emoji}</div>
-                  <div>
-                    <p className="text-[11px] font-bold text-slate-200 leading-tight">{agent.name}</p>
-                    <p className="text-[10px] text-slate-500 mt-1 leading-snug">{agent.desc}</p>
-                  </div>
-                  <div className="mt-auto w-5 h-5 rounded-full bg-space-700 border border-ink-900/10 flex items-center justify-center">
-                    <span className="text-[9px] font-bold text-slate-400">{i + 1}</span>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ════════════════ SECTION 5 — FEATURE HIGHLIGHTS ════════════════ */}
-      <section className="relative py-24 px-4 bg-space-900">
-        <div className="absolute inset-0 pointer-events-none overflow-hidden">
-          <div className="absolute top-1/2 left-1/4 w-96 h-96 rounded-full bg-purple-600/10 blur-[120px] -translate-y-1/2" />
-          <div className="absolute top-1/2 right-1/4 w-96 h-96 rounded-full bg-electric-500/10 blur-[120px] -translate-y-1/2" />
-        </div>
-
-        <div className="max-w-6xl mx-auto">
-          <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.55 }} className="text-center mb-14">
-            <p className="text-xs font-semibold text-gold-400 uppercase tracking-[0.2em] mb-4">What Makes It Different</p>
-            <h2 className="font-display text-4xl md:text-5xl font-medium text-slate-100">
-              Intelligence built <span className="gradient-text-gold italic">around you.</span>
-            </h2>
-          </motion.div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {FEATURES.map((f, i) => (
+          <motion.div initial="hidden" whileInView="show" viewport={viewportOnce} variants={stagger(0.06)}>
+            {AGENTS.map((agent, i) => (
               <motion.div
-                key={f.title}
-                initial={{ opacity: 0, y: 28 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, margin: "-60px" }}
-                transition={{ delay: i * 0.1, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-                whileHover={{ y: -4 }}
-                className={`glass-card p-7 transition-all duration-300 ${f.border} ${f.glow}`}
+                key={agent.name}
+                variants={fadeUp}
+                className="group flex items-start gap-5 py-5 border-t border-ink-900/10 last:border-b px-3 -mx-3 rounded-lg hover:bg-surface transition-colors duration-200"
               >
-                <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${f.color} flex items-center justify-center text-2xl mb-5 shadow-soft`}>{f.icon}</div>
-                <h3 className="text-lg font-bold text-slate-100 mb-3">{f.title}</h3>
-                <p className="text-slate-400 leading-relaxed text-sm">{f.desc}</p>
+                <span className="font-mono text-xs text-ink-300 group-hover:text-accent transition-colors pt-1 w-6 shrink-0">
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+                <div className="w-9 h-9 rounded-lg bg-accent-tint border border-accent/20 flex items-center justify-center shrink-0 group-hover:shadow-glow transition-shadow duration-300">
+                  <agent.icon className="w-4 h-4 text-accent" />
+                </div>
+                <div>
+                  <p className="font-medium text-ink-900">{agent.name}</p>
+                  <p className="text-sm text-ink-400 mt-0.5">{agent.desc}</p>
+                </div>
               </motion.div>
             ))}
-          </div>
+          </motion.div>
         </div>
       </section>
 
-      {/* ════════════════ SECTION 6 — DEMO + CTA ════════════════ */}
-      <section className="relative py-28 px-4 overflow-hidden bg-space-800">
-        <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] rounded-full bg-gold-500/6 blur-[160px]" />
+      {/* ════════════════ DESTINATION SHOWCASE (photo cards, 3D tilt) ════════════════ */}
+      <section className="relative py-24 border-t border-ink-900/10 overflow-hidden">
+        <div className="max-w-5xl mx-auto px-4 text-center mb-12">
+          <motion.div initial="hidden" whileInView="show" viewport={viewportOnce} variants={fadeUp}>
+            <SectionHeader eyebrow="Plan Anywhere" />
+            <h2 className="font-display text-3xl md:text-5xl font-medium text-ink-900">
+              Where will you go <span className="italic text-sunset">first?</span>
+            </h2>
+          </motion.div>
         </div>
 
-        <div className="max-w-5xl mx-auto">
-          <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.55 }} className="text-center mb-14">
-            <p className="text-xs font-semibold text-electric-400 uppercase tracking-[0.2em] mb-4">See It In Action</p>
-            <h2 className="font-display text-4xl md:text-5xl font-medium text-slate-100 mb-4">Tokyo · 5 days · ¥250,000</h2>
-            <p className="text-slate-400">A sample trip generated in seconds.</p>
+        <motion.div
+          initial={{ opacity: 0 }}
+          whileInView={{ opacity: 1 }}
+          viewport={viewportOnce}
+          transition={{ duration: 0.6 }}
+          className="max-w-5xl mx-auto"
+        >
+          <DestinationScroll />
+        </motion.div>
+        <p className="text-center font-mono text-xs text-ink-300 mt-3">← scroll or drag →</p>
+      </section>
+
+      {/* ════════════════ INTERACTIVE GLOBE ════════════════ */}
+      <section className="relative py-28 px-4 border-t border-ink-900/10 overflow-hidden">
+        {/* Warm bloom behind the globe */}
+        <div
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] rounded-full pointer-events-none"
+          style={{ background: "radial-gradient(circle, rgba(255,158,100,0.10) 0%, transparent 65%)" }}
+        />
+        <div className="max-w-3xl mx-auto text-center relative z-10">
+          <motion.div initial="hidden" whileInView="show" viewport={viewportOnce} variants={fadeUp} className="mb-4">
+            <SectionHeader eyebrow="Anywhere On Earth" />
+            <h2 className="font-display text-3xl md:text-5xl font-medium text-ink-900 mb-3">
+              Spin the globe. <span className="italic text-sunset">Pick a spot.</span>
+            </h2>
+            <p className="text-ink-400 max-w-md mx-auto">
+              Drag to rotate — every marker is a trip TravelOS can plan for you, start to finish.
+            </p>
+          </motion.div>
+        </div>
+
+        <motion.div
+          initial={{ opacity: 0, scale: 0.92 }}
+          whileInView={{ opacity: 1, scale: 1 }}
+          viewport={viewportOnce}
+          transition={{ duration: 0.7, ease: EASE }}
+          className="relative z-10 -mt-2"
+        >
+          <Globe markers={GLOBE_MARKERS} size={460} className="max-w-full" />
+        </motion.div>
+      </section>
+
+      {/* ════════════════ FEATURE HIGHLIGHTS ════════════════ */}
+      <section className="relative py-28 px-4 border-t border-ink-900/10">
+        <div className="max-w-6xl mx-auto">
+          <motion.div initial="hidden" whileInView="show" viewport={viewportOnce} variants={fadeUp} className="mb-14 text-center">
+            <SectionHeader eyebrow="What Makes It Different" />
+            <h2 className="font-display text-4xl md:text-5xl font-medium text-ink-900">Intelligence built around you.</h2>
           </motion.div>
 
-          <motion.div initial={{ opacity: 0, y: 32 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-60px" }} transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }} className="glass-card p-6 md:p-8 mb-12">
-            <div className="flex items-start justify-between gap-4 mb-8 flex-wrap">
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-2xl">🗾</span>
-                  <h3 className="font-display text-2xl font-semibold text-slate-100">Tokyo, Japan</h3>
-                  <span className="status-badge text-emerald-400 bg-emerald-400/15 border border-emerald-400/30">Ready</span>
-                </div>
-                <p className="text-slate-400 text-sm">Mar 15 – Mar 20, 2025 · 2 travelers</p>
-              </div>
-              <div className="flex items-center gap-4">
-                <BudgetRing />
-                <div>
-                  <p className="text-xs text-slate-500 mb-1">Budget</p>
-                  <p className="text-lg font-bold text-slate-100">¥182,400</p>
-                  <p className="text-xs text-slate-500">of ¥250,000</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-              {DEMO_DAYS.map((d, i) => (
-                <motion.div key={d.day} initial={{ opacity: 0, scale: 0.95 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }} transition={{ delay: 0.1 + i * 0.08, duration: 0.4 }} className="glass-light rounded-xl overflow-hidden">
-                  <div className={`h-1.5 bg-gradient-to-r ${d.color}`} />
-                  <div className="p-4">
-                    <p className="text-xs text-slate-500 mb-1 uppercase tracking-widest">Day {d.day}</p>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">{d.icon}</span>
-                      <div>
-                        <p className="text-sm font-bold text-slate-100">{d.title}</p>
-                        <p className="text-xs text-slate-500">{d.desc}</p>
-                      </div>
+          <motion.div
+            initial="hidden"
+            whileInView="show"
+            viewport={viewportOnce}
+            variants={stagger(0.08)}
+            className="grid grid-cols-1 md:grid-cols-3 gap-6"
+          >
+            {FEATURES.map((f) => (
+              <motion.div key={f.title} variants={fadeUp}>
+                <TiltCard intensity={4} glow>
+                  <div className="glass rounded-xl p-6 h-full hover:shadow-glow transition-shadow duration-300">
+                    <div className="w-10 h-10 rounded-lg bg-sunset flex items-center justify-center mb-4">
+                      <f.icon className="w-5 h-5 text-[#1F1206]" />
                     </div>
+                    <h3 className="font-display text-lg font-medium text-ink-900 mb-2">{f.title}</h3>
+                    <p className="text-ink-400 leading-relaxed text-sm">{f.desc}</p>
                   </div>
-                </motion.div>
-              ))}
-            </div>
-
-            <div className="glass-light rounded-xl px-5 py-3.5 flex items-center gap-3">
-              <span className="text-2xl">🏨</span>
-              <div>
-                <p className="text-sm font-bold text-slate-100">Park Hyatt Tokyo · 5★</p>
-                <p className="text-xs text-slate-500">¥45,000/night · Shinjuku · Breakfast included</p>
-              </div>
-              <div className="ml-auto flex items-center gap-1">
-                {[1, 2, 3, 4, 5].map((s) => (
-                  <Star key={s} className="w-3.5 h-3.5 text-gold-400" fill="#fbbf24" />
-                ))}
-              </div>
-            </div>
-          </motion.div>
-
-          <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-40px" }} transition={{ duration: 0.5 }} className="text-center">
-            <p className="text-slate-400 mb-6 text-lg">Ready to plan your trip?</p>
-            <Link href="/login">
-              <motion.button whileHover={{ scale: 1.05, y: -2 }} whileTap={{ scale: 0.97 }} className="btn-primary text-base px-10 py-4 flex items-center gap-2 mx-auto">
-                Get Started Free
-                <ArrowRight className="w-5 h-5" />
-              </motion.button>
-            </Link>
+                </TiltCard>
+              </motion.div>
+            ))}
           </motion.div>
         </div>
       </section>
 
-      {/* ════════════════ SECTION 7 — FOOTER ════════════════ */}
-      <footer className="relative border-t border-slate-800 py-12 px-4 bg-space-900">
+      {/* ════════════════ CTA ════════════════ */}
+      <section className="relative py-32 px-4 border-t border-ink-900/10 text-center overflow-hidden">
+        {/* Warm ember bloom */}
+        <div
+          className="absolute left-1/2 bottom-0 -translate-x-1/2 w-[900px] h-[500px] pointer-events-none"
+          style={{ background: "radial-gradient(60% 80% at 50% 100%, rgba(255,125,80,0.16) 0%, transparent 70%)" }}
+        />
+        <motion.div initial="hidden" whileInView="show" viewport={viewportOnce} variants={fadeUp} className="relative z-10">
+          <RouteDash from="HERE" to="ANYWHERE" className="max-w-[220px] mx-auto mb-8" />
+          <h2 className="font-display text-4xl md:text-6xl font-medium text-ink-900 mb-10 leading-tight">
+            Ready to plan your
+            <br />
+            <span className="italic text-sunset">next trip?</span>
+          </h2>
+          <Link href="/login">
+            <Button size="lg" iconRight={ArrowRight} className="mx-auto">
+              Get Started Free
+            </Button>
+          </Link>
+        </motion.div>
+      </section>
+
+      {/* ════════════════ FOOTER ════════════════ */}
+      <footer className="relative border-t border-ink-900/10 py-12 px-4">
         <div className="max-w-5xl mx-auto flex flex-col items-center gap-6 text-center">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-electric-gradient flex items-center justify-center shadow-electric-sm">
-              <Plane className="w-4 h-4 text-[#0b1437]" />
+            <div className="w-8 h-8 rounded-lg bg-sunset flex items-center justify-center">
+              <Compass className="w-4 h-4 text-[#1F1206]" />
             </div>
-            <span className="font-display font-semibold text-lg gradient-text tracking-wide">TravelOS</span>
+            <span className="font-display font-medium text-lg text-ink-900 tracking-wide">TravelOS</span>
           </div>
 
-          <p className="text-xs text-slate-500 font-mono">Built with LangGraph · FastAPI · Next.js 14</p>
+          <p className="text-xs font-mono text-ink-400">Built with LangGraph · FastAPI · Next.js 14</p>
 
-          <p className="text-xs text-slate-500 max-w-sm leading-relaxed">
+          <p className="text-xs text-ink-400 max-w-sm leading-relaxed">
             Not affiliated with any booking platform. All recommendations are AI-generated and grounded in real-time API data.
           </p>
 
           <div className="flex items-center gap-6">
-            <Link href="/login" className="text-xs text-slate-500 hover:text-gold-400 transition-colors">Sign In</Link>
-            <span className="text-slate-700">·</span>
-            <Link href="/trips" className="text-xs text-slate-500 hover:text-gold-400 transition-colors">My Trips</Link>
-            <span className="text-slate-700">·</span>
-            <Link href="/profile" className="text-xs text-slate-500 hover:text-gold-400 transition-colors">Profile</Link>
+            <Link href="/login" className="text-xs text-ink-400 hover:text-accent transition-colors">
+              Sign In
+            </Link>
+            <span className="text-ink-200">·</span>
+            <Link href="/trips" className="text-xs text-ink-400 hover:text-accent transition-colors">
+              My Trips
+            </Link>
+            <span className="text-ink-200">·</span>
+            <Link href="/profile" className="text-xs text-ink-400 hover:text-accent transition-colors">
+              Profile
+            </Link>
           </div>
         </div>
       </footer>

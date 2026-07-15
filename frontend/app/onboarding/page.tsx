@@ -3,99 +3,73 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  Compass, ArrowRight, ArrowLeft, Check, Loader2,
-  Zap, Coffee, Scale, Rocket, Wallet, Gem,
-  Landmark, Mountain, Utensils, Leaf, Moon,
-  Palette, BookOpen, Heart,
-  type LucideIcon,
-} from "lucide-react";
+import { Compass, ArrowRight, ArrowLeft, Check, Zap, Coffee, Scale, Rocket, Wallet, Gem, type LucideIcon } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
-import DaySky from "@/components/travel/DaySky";
+import { INTERESTS, FOOD_PREFS } from "@/lib/constants";
+import { Card } from "@/components/ui/Card";
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { Chip } from "@/components/ui/Chip";
+import { ProgressBar } from "@/components/ui/ProgressBar";
+import { slideX } from "@/lib/motion";
+import { cn } from "@/lib/ui";
 
 // ── Step config ───────────────────────────────────────────────────────────────
 
 type PaceId = "relaxed" | "moderate" | "packed";
 type LuxuryId = "budget" | "mid" | "luxury";
 
-const PACE_OPTIONS: { id: PaceId; label: string; sub: string; icon: LucideIcon; color: string }[] = [
-  {
-    id: "relaxed",
-    label: "Relaxed",
-    sub: "2–3 activities/day, plenty of downtime",
-    icon: Coffee,
-    color: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
-  },
-  {
-    id: "moderate",
-    label: "Moderate",
-    sub: "4 activities/day, balanced pace",
-    icon: Scale,
-    color: "border-electric-500/40 bg-electric-500/10 text-electric-400",
-  },
-  {
-    id: "packed",
-    label: "Packed",
-    sub: "5–6 activities/day, maximum exploration",
-    icon: Rocket,
-    color: "border-coral-500/40 bg-coral-500/10 text-coral-400",
-  },
+const PACE_OPTIONS: { id: PaceId; label: string; sub: string; icon: LucideIcon }[] = [
+  { id: "relaxed", label: "Relaxed", sub: "2–3 activities/day, plenty of downtime", icon: Coffee },
+  { id: "moderate", label: "Moderate", sub: "4 activities/day, balanced pace", icon: Scale },
+  { id: "packed", label: "Packed", sub: "5–6 activities/day, maximum exploration", icon: Rocket },
 ];
 
-const LUXURY_OPTIONS: { id: LuxuryId; label: string; sub: string; icon: LucideIcon; color: string }[] = [
-  {
-    id: "budget",
-    label: "Budget",
-    sub: "Hostels, street food, local transit",
-    icon: Wallet,
-    color: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
-  },
-  {
-    id: "mid",
-    label: "Mid-range",
-    sub: "3-star hotels, casual restaurants",
-    icon: Scale,
-    color: "border-electric-500/40 bg-electric-500/10 text-electric-400",
-  },
-  {
-    id: "luxury",
-    label: "Luxury",
-    sub: "5-star stays, fine dining, private tours",
-    icon: Gem,
-    color: "border-yellow-500/40 bg-yellow-500/10 text-yellow-400",
-  },
-];
-
-const INTERESTS: { id: string; label: string; icon: LucideIcon }[] = [
-  { id: "culture", label: "Culture", icon: Landmark },
-  { id: "adventure", label: "Adventure", icon: Mountain },
-  { id: "food", label: "Food & Drink", icon: Utensils },
-  { id: "nature", label: "Nature", icon: Leaf },
-  { id: "nightlife", label: "Nightlife", icon: Moon },
-  { id: "art", label: "Art & Museums", icon: Palette },
-  { id: "history", label: "History", icon: BookOpen },
-  { id: "wellness", label: "Wellness", icon: Heart },
-];
-
-const FOOD_PREFS: { id: string; label: string; emoji: string }[] = [
-  { id: "local_cuisine", label: "Local Cuisine", emoji: "🌍" },
-  { id: "street_food", label: "Street Food", emoji: "🌮" },
-  { id: "fine_dining", label: "Fine Dining", emoji: "🍽️" },
-  { id: "vegetarian", label: "Vegetarian", emoji: "🥦" },
-  { id: "vegan", label: "Vegan", emoji: "🌱" },
-  { id: "seafood", label: "Seafood", emoji: "🦞" },
-  { id: "halal", label: "Halal", emoji: "☪️" },
-  { id: "kosher", label: "Kosher", emoji: "✡️" },
+const LUXURY_OPTIONS: { id: LuxuryId; label: string; sub: string; icon: LucideIcon }[] = [
+  { id: "budget", label: "Budget", sub: "Hostels, street food, local transit", icon: Wallet },
+  { id: "mid", label: "Mid-range", sub: "3-star hotels, casual restaurants", icon: Scale },
+  { id: "luxury", label: "Luxury", sub: "5-star stays, fine dining, private tours", icon: Gem },
 ];
 
 const TOTAL_STEPS = 4;
 
-const slideVariants = {
-  enter: (dir: number) => ({ x: dir * 60, opacity: 0 }),
-  center: { x: 0, opacity: 1 },
-  exit: (dir: number) => ({ x: dir * -60, opacity: 0 }),
-};
+function OptionCard({
+  icon: Icon,
+  label,
+  sub,
+  selected,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  sub: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "w-full flex items-center gap-4 p-4 rounded-xl border text-left transition-colors duration-150",
+        selected ? "border-accent/50 bg-accent-tint shadow-glow" : "border-ink-900/10 bg-surface hover:border-ink-900/20",
+      )}
+    >
+      <div className={cn("p-2.5 rounded-lg", selected ? "bg-surface-raised" : "bg-ink-100")}>
+        <Icon className={cn("w-5 h-5", selected ? "text-accent" : "text-ink-400")} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className={cn("font-medium text-sm", selected ? "text-ink-900" : "text-ink-600")}>{label}</p>
+        <p className="text-xs text-ink-400 mt-0.5">{sub}</p>
+      </div>
+      {selected && (
+        <div className="w-5 h-5 rounded-full bg-sunset flex items-center justify-center shrink-0">
+          <Check className="w-3 h-3 text-[#1F1206]" />
+        </div>
+      )}
+    </button>
+  );
+}
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
@@ -118,12 +92,19 @@ export default function OnboardingPage() {
 
   const progress = ((step + 1) / TOTAL_STEPS) * 100;
 
-  function next() { setDir(1); setStep((s) => s + 1); }
-  function prev() { setDir(-1); setStep((s) => s - 1); }
+  function next() {
+    setDir(1);
+    setStep((s) => s + 1);
+  }
+  function prev() {
+    setDir(-1);
+    setStep((s) => s - 1);
+  }
 
   function toggleSet(set: Set<string>, id: string): Set<string> {
     const next = new Set(set);
-    if (next.has(id)) next.delete(id); else next.add(id);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
     return next;
   }
 
@@ -136,10 +117,8 @@ export default function OnboardingPage() {
         luxury_tier: luxuryTier,
         interests: Array.from(interests),
         food_prefs: Array.from(foodPrefs),
-        budget_behavior:
-          luxuryTier === "budget" ? "frugal" : luxuryTier === "luxury" ? "splurge" : "balanced",
-        walking_tolerance:
-          pace === "packed" ? "high" : pace === "relaxed" ? "low" : "medium",
+        budget_behavior: luxuryTier === "budget" ? "frugal" : luxuryTier === "luxury" ? "splurge" : "balanced",
+        walking_tolerance: pace === "packed" ? "high" : pace === "relaxed" ? "low" : "medium",
       });
       router.push("/trips");
     } catch (err) {
@@ -154,102 +133,49 @@ export default function OnboardingPage() {
     }
   }
 
-  const canContinue =
-    (step === 0 && pace !== null) ||
-    (step === 1 && luxuryTier !== null) ||
-    step >= 2;
+  const canContinue = (step === 0 && pace !== null) || (step === 1 && luxuryTier !== null) || step >= 2;
 
   return (
-    <div className="relative min-h-screen bg-space-900 flex flex-col items-center justify-center overflow-hidden px-4 py-12">
-      <DaySky showHorizon={false} />
-
-      {/* Glows */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute -top-40 -left-40 w-96 h-96 rounded-full bg-electric-500/8 blur-3xl animate-float-slow" />
-        <div className="absolute -bottom-40 -right-40 w-96 h-96 rounded-full bg-purple-600/8 blur-3xl animate-float-medium" />
-      </div>
-
+    <div className="relative min-h-screen bg-paper flex flex-col items-center justify-center px-4 py-12 overflow-hidden">
+      {/* Warm ambient bloom */}
+      <div
+        className="absolute left-1/2 top-0 -translate-x-1/2 w-[900px] h-[500px] pointer-events-none"
+        style={{ background: "radial-gradient(55% 70% at 50% 0%, rgba(255,158,100,0.08) 0%, transparent 70%)" }}
+      />
       <div className="relative z-10 w-full max-w-lg">
         {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -16 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-8"
-        >
-          <div className="inline-flex items-center gap-2 text-electric-400 bg-electric-500/10 border border-electric-500/20 px-4 py-1.5 rounded-full text-xs font-semibold mb-4 uppercase tracking-wider">
-            <Compass className="w-3.5 h-3.5" />
+        <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-8">
+          <Badge tone="accent" icon={Compass} className="mb-4">
             Travel DNA setup
-          </div>
-          <h1 className="font-display text-3xl font-semibold text-slate-100">Personalize your experience</h1>
-          <p className="text-slate-500 text-sm mt-1.5">
-            Your AI agents use this to plan every trip from day&nbsp;one.
-          </p>
+          </Badge>
+          <h1 className="font-display text-3xl font-medium text-ink-900">Personalize your experience</h1>
+          <p className="text-ink-400 text-sm mt-1.5">Your AI agents use this to plan every trip from day&nbsp;one.</p>
         </motion.div>
 
         {/* Progress */}
         <div className="mb-6">
-          <div className="flex justify-between text-xs text-slate-600 mb-2">
-            <span>Step {step + 1} of {TOTAL_STEPS}</span>
+          <div className="flex justify-between text-xs font-mono text-ink-400 mb-2">
+            <span>
+              Step {step + 1} of {TOTAL_STEPS}
+            </span>
             <span>{Math.round(progress)}%</span>
           </div>
-          <div className="h-1 rounded-full bg-ink-900/[0.04] overflow-hidden">
-            <motion.div
-              className="h-full rounded-full bg-electric-gradient"
-              animate={{ width: `${progress}%` }}
-              transition={{ duration: 0.4, ease: "easeInOut" }}
-            />
-          </div>
+          <ProgressBar value={progress} />
         </div>
 
         {/* Card */}
-        <div className="glass-card overflow-hidden" style={{ minHeight: 380 }}>
-          <AnimatePresence mode="wait" custom={dir}>
-            <motion.div
-              key={step}
-              custom={dir}
-              variants={slideVariants}
-              initial="enter"
-              animate="center"
-              exit="exit"
-              transition={{ duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
-              className="p-6"
-            >
+        <Card padding="none" className="overflow-hidden" style={{ minHeight: 380 }}>
+          <AnimatePresence mode="wait">
+            <motion.div key={step} variants={slideX(dir as 1 | -1)} initial="enter" animate="center" exit="exit" className="p-6">
               {/* ── Step 0: Pace ─────────────────────────────── */}
               {step === 0 && (
                 <>
-                  <h2 className="text-base font-bold text-slate-100 mb-0.5">How do you like to travel?</h2>
-                  <p className="text-xs text-slate-500 mb-5">Sets activities per day in your itinerary.</p>
+                  <h2 className="font-display text-lg font-medium text-ink-900 mb-0.5">How do you like to travel?</h2>
+                  <p className="text-xs text-ink-400 mb-5">Sets activities per day in your itinerary.</p>
                   <div className="space-y-3">
-                    {PACE_OPTIONS.map((opt) => {
-                      const Icon = opt.icon;
-                      const selected = pace === opt.id;
-                      return (
-                        <motion.button
-                          key={opt.id}
-                          onClick={() => setPace(opt.id)}
-                          whileHover={{ scale: 1.01 }}
-                          whileTap={{ scale: 0.98 }}
-                          className={`w-full flex items-center gap-4 p-4 rounded-xl border transition-all text-left ${
-                            selected
-                              ? opt.color
-                              : "border-ink-900/10 bg-ink-900/[0.03] hover:bg-ink-900/[0.05] hover:border-ink-900/15"
-                          }`}
-                        >
-                          <div className={`p-2.5 rounded-xl ${selected ? "bg-white/10 shadow-soft" : "bg-ink-900/[0.04]"}`}>
-                            <Icon className={`w-5 h-5 ${selected ? "" : "text-slate-400"}`} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className={`font-semibold text-sm ${selected ? "text-slate-100" : "text-slate-300"}`}>{opt.label}</p>
-                            <p className="text-xs text-slate-500 mt-0.5">{opt.sub}</p>
-                          </div>
-                          {selected && (
-                            <div className="w-5 h-5 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
-                              <Check className="w-3 h-3 text-[#0b1437]" />
-                            </div>
-                          )}
-                        </motion.button>
-                      );
-                    })}
+                    {PACE_OPTIONS.map((opt) => (
+                      <OptionCard key={opt.id} {...opt} selected={pace === opt.id} onClick={() => setPace(opt.id)} />
+                    ))}
                   </div>
                 </>
               )}
@@ -257,39 +183,12 @@ export default function OnboardingPage() {
               {/* ── Step 1: Luxury tier ───────────────────────── */}
               {step === 1 && (
                 <>
-                  <h2 className="text-base font-bold text-slate-100 mb-0.5">What&apos;s your travel style?</h2>
-                  <p className="text-xs text-slate-500 mb-5">Drives hotel tier, dining, and budget split.</p>
+                  <h2 className="font-display text-lg font-medium text-ink-900 mb-0.5">What&apos;s your travel style?</h2>
+                  <p className="text-xs text-ink-400 mb-5">Drives hotel tier, dining, and budget split.</p>
                   <div className="space-y-3">
-                    {LUXURY_OPTIONS.map((opt) => {
-                      const Icon = opt.icon;
-                      const selected = luxuryTier === opt.id;
-                      return (
-                        <motion.button
-                          key={opt.id}
-                          onClick={() => setLuxuryTier(opt.id)}
-                          whileHover={{ scale: 1.01 }}
-                          whileTap={{ scale: 0.98 }}
-                          className={`w-full flex items-center gap-4 p-4 rounded-xl border transition-all text-left ${
-                            selected
-                              ? opt.color
-                              : "border-ink-900/10 bg-ink-900/[0.03] hover:bg-ink-900/[0.05] hover:border-ink-900/15"
-                          }`}
-                        >
-                          <div className={`p-2.5 rounded-xl ${selected ? "bg-white/10 shadow-soft" : "bg-ink-900/[0.04]"}`}>
-                            <Icon className={`w-5 h-5 ${selected ? "" : "text-slate-400"}`} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className={`font-semibold text-sm ${selected ? "text-slate-100" : "text-slate-300"}`}>{opt.label}</p>
-                            <p className="text-xs text-slate-500 mt-0.5">{opt.sub}</p>
-                          </div>
-                          {selected && (
-                            <div className="w-5 h-5 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
-                              <Check className="w-3 h-3 text-[#0b1437]" />
-                            </div>
-                          )}
-                        </motion.button>
-                      );
-                    })}
+                    {LUXURY_OPTIONS.map((opt) => (
+                      <OptionCard key={opt.id} {...opt} selected={luxuryTier === opt.id} onClick={() => setLuxuryTier(opt.id)} />
+                    ))}
                   </div>
                 </>
               )}
@@ -297,30 +196,20 @@ export default function OnboardingPage() {
               {/* ── Step 2: Interests ─────────────────────────── */}
               {step === 2 && (
                 <>
-                  <h2 className="text-base font-bold text-slate-100 mb-0.5">What do you love?</h2>
-                  <p className="text-xs text-slate-500 mb-5">Pick as many as you like — we&apos;ll prioritize these.</p>
+                  <h2 className="font-display text-lg font-medium text-ink-900 mb-0.5">What do you love?</h2>
+                  <p className="text-xs text-ink-400 mb-5">Pick as many as you like — we&apos;ll prioritize these.</p>
                   <div className="grid grid-cols-2 gap-2">
-                    {INTERESTS.map((opt) => {
-                      const Icon = opt.icon;
-                      const selected = interests.has(opt.id);
-                      return (
-                        <motion.button
-                          key={opt.id}
-                          onClick={() => setInterests(toggleSet(interests, opt.id))}
-                          whileHover={{ scale: 1.02 }}
-                          whileTap={{ scale: 0.97 }}
-                          className={`flex items-center gap-2.5 p-3 rounded-xl border transition-all text-left ${
-                            selected
-                              ? "border-electric-500/50 bg-electric-500/15 text-slate-100"
-                              : "border-ink-900/10 bg-ink-900/[0.03] text-slate-400 hover:bg-ink-900/[0.05] hover:border-ink-900/15"
-                          }`}
-                        >
-                          <Icon className={`w-4 h-4 shrink-0 ${selected ? "text-electric-400" : ""}`} />
-                          <span className="text-sm font-medium">{opt.label}</span>
-                          {selected && <Check className="w-3 h-3 text-electric-400 ml-auto shrink-0" />}
-                        </motion.button>
-                      );
-                    })}
+                    {INTERESTS.map((opt) => (
+                      <Chip
+                        key={opt.id}
+                        icon={opt.icon}
+                        selected={interests.has(opt.id)}
+                        onClick={() => setInterests(toggleSet(interests, opt.id))}
+                        className="w-full justify-start"
+                      >
+                        {opt.label}
+                      </Chip>
+                    ))}
                   </div>
                 </>
               )}
@@ -328,33 +217,22 @@ export default function OnboardingPage() {
               {/* ── Step 3: Food prefs ────────────────────────── */}
               {step === 3 && (
                 <>
-                  <h2 className="text-base font-bold text-slate-100 mb-0.5">Food preferences</h2>
-                  <p className="text-xs text-slate-500 mb-5">We&apos;ll factor these into restaurant picks.</p>
+                  <h2 className="font-display text-lg font-medium text-ink-900 mb-0.5">Food preferences</h2>
+                  <p className="text-xs text-ink-400 mb-5">We&apos;ll factor these into restaurant picks.</p>
                   <div className="grid grid-cols-2 gap-2">
-                    {FOOD_PREFS.map((opt) => {
-                      const selected = foodPrefs.has(opt.id);
-                      return (
-                        <motion.button
-                          key={opt.id}
-                          onClick={() => setFoodPrefs(toggleSet(foodPrefs, opt.id))}
-                          whileHover={{ scale: 1.02 }}
-                          whileTap={{ scale: 0.97 }}
-                          className={`flex items-center gap-2.5 p-3 rounded-xl border transition-all text-left ${
-                            selected
-                              ? "border-gold-400/50 bg-gold-400/15 text-slate-100"
-                              : "border-ink-900/10 bg-ink-900/[0.03] text-slate-400 hover:bg-ink-900/[0.05] hover:border-ink-900/15"
-                          }`}
-                        >
-                          <span className="text-base shrink-0">{opt.emoji}</span>
-                          <span className="text-sm font-medium">{opt.label}</span>
-                          {selected && <Check className="w-3 h-3 text-gold-500 ml-auto shrink-0" />}
-                        </motion.button>
-                      );
-                    })}
+                    {FOOD_PREFS.map((opt) => (
+                      <Chip
+                        key={opt.id}
+                        icon={opt.icon}
+                        selected={foodPrefs.has(opt.id)}
+                        onClick={() => setFoodPrefs(toggleSet(foodPrefs, opt.id))}
+                        className="w-full justify-start"
+                      >
+                        {opt.label}
+                      </Chip>
+                    ))}
                   </div>
-                  {saveError && (
-                    <p className="text-xs text-coral-600 mt-4 text-center">{saveError}</p>
-                  )}
+                  {saveError && <p className="text-xs text-danger mt-4 text-center">{saveError}</p>}
                 </>
               )}
             </motion.div>
@@ -363,50 +241,27 @@ export default function OnboardingPage() {
           {/* Footer */}
           <div className="px-6 pb-6 flex items-center justify-between gap-3">
             {step > 0 ? (
-              <button
-                onClick={prev}
-                className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-200 transition-colors"
-              >
+              <button onClick={prev} className="flex items-center gap-1.5 text-sm text-ink-400 hover:text-ink-900 transition-colors">
                 <ArrowLeft className="w-4 h-4" />
                 Back
               </button>
             ) : (
-              <button
-                onClick={() => router.push("/trips")}
-                className="text-sm text-slate-600 hover:text-slate-400 transition-colors"
-              >
+              <button onClick={() => router.push("/trips")} className="text-sm text-ink-300 hover:text-ink-600 transition-colors">
                 Skip for now
               </button>
             )}
 
             {step < TOTAL_STEPS - 1 ? (
-              <motion.button
-                onClick={next}
-                disabled={!canContinue}
-                whileHover={canContinue ? { scale: 1.02 } : {}}
-                whileTap={canContinue ? { scale: 0.97 } : {}}
-                className="flex items-center gap-2 bg-electric-gradient text-[#0b1437] text-sm font-semibold px-5 py-2.5 rounded-xl shadow-electric disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
-              >
+              <Button onClick={next} disabled={!canContinue} iconRight={ArrowRight}>
                 Continue
-                <ArrowRight className="w-4 h-4" />
-              </motion.button>
+              </Button>
             ) : (
-              <motion.button
-                onClick={handleFinish}
-                disabled={saving}
-                whileHover={!saving ? { scale: 1.02 } : {}}
-                whileTap={!saving ? { scale: 0.97 } : {}}
-                className="flex items-center gap-2 bg-electric-gradient text-[#0b1437] text-sm font-semibold px-5 py-2.5 rounded-xl shadow-electric disabled:opacity-60 transition-opacity"
-              >
-                {saving ? (
-                  <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
-                ) : (
-                  <><Zap className="w-4 h-4" /> Start planning</>
-                )}
-              </motion.button>
+              <Button onClick={handleFinish} loading={saving} iconLeft={Zap}>
+                {saving ? "Saving…" : "Start planning"}
+              </Button>
             )}
           </div>
-        </div>
+        </Card>
 
         {/* Step dots */}
         <div className="flex justify-center gap-2 mt-5">
@@ -415,8 +270,7 @@ export default function OnboardingPage() {
               key={i}
               animate={{
                 width: i === step ? 20 : 6,
-                backgroundColor:
-                  i === step ? "#fbbf24" : i < step ? "#f59e0b" : "rgba(231,238,255,0.2)",
+                backgroundColor: i <= step ? "#FF9E64" : "rgba(255,255,255,0.14)",
               }}
               transition={{ duration: 0.3 }}
               className="h-1.5 rounded-full"

@@ -20,7 +20,9 @@ from backend.core.logging import get_logger
 from backend.db.base import AsyncSessionLocal
 from backend.db.models import ItineraryItem, Trip
 from backend.graphs.state import TravelOSState
+from backend.tools.currency import convert as _convert_currency
 from backend.tools.currency import destination_currency as _local_currency
+from backend.tools.currency import is_known_currency, typical_amount
 from backend.tools.destination_profile import DestinationProfile, compute_destination_profile
 from backend.tools.geocode import geocode
 from backend.tools.places import Attraction, search_attractions
@@ -520,13 +522,21 @@ async def _generate_itinerary(
         raw = str(response.content) if hasattr(response, "content") else str(response)
         items = _parse_items(raw, trip)
         if items:
-            # LLM was told to use local_currency amounts but often ignores this and
-            # emits the traveler's budget currency (e.g. INR for a Bali trip) or omits
-            # the field. Override unconditionally so e.g. IDR 30000 isn't treated as
-            # INR 30000 by the budget optimizer.
+            # The LLM is told to price in local_currency but sometimes declares a
+            # different currency (usually the traveler's budget currency). Trust the
+            # label it gave and CONVERT the amount into local_currency — relabeling
+            # without converting silently rescales the value by the full exchange
+            # rate (₹500 relabeled "EUR 500" becomes ₹45,500 downstream). Only when
+            # the label is missing or unknown do we assume the amount is local.
             for item in items:
-                if item.est_cost is not None:
-                    item.est_cost_currency = local_currency
+                if item.est_cost is None:
+                    continue
+                declared = (item.est_cost_currency or "").strip().upper()
+                if declared and declared != local_currency and is_known_currency(declared):
+                    item.est_cost = round(
+                        _convert_currency(item.est_cost, declared, local_currency), 2
+                    )
+                item.est_cost_currency = local_currency
             items = _assign_real_restaurants(items, restaurants)
             signature = set(profile.signature_categories) if profile else set()
             core = set(_CORE_CATEGORIES.get(profile.type, ())) if profile else set()
@@ -577,6 +587,11 @@ def _build_prompt(
             *(f"  • {issue}" for issue in replan_feedback),
             "",
         ]
+    # Prompt examples scaled to the local currency's real magnitude — a hardcoded
+    # figure reads as pocket change in IDR but as a luxury weekend in INR, and the
+    # LLM anchors its est_cost guesses to whatever magnitude the example shows.
+    meal_example = typical_amount(15, local_currency)
+    ticket_example = typical_amount(10, local_currency)
     parts += [
         f"**Trip**: {trip.destination_city}{country_part}",
         f"**Dates**: {trip.start_date} to {trip.end_date} ({trip_days} days)",
@@ -586,8 +601,11 @@ def _build_prompt(
         f"**Local currency for est_cost**: {local_currency}",
         f"  → Use ONLY {local_currency} amounts for every est_cost field.",
         f'  → Set est_cost_currency to "{local_currency}" on every item that has a cost.',
+        f"  → Use realistic PER-PERSON prices in {local_currency}: a typical restaurant meal"
+        f" is around {meal_example:g}, a typical attraction ticket around {ticket_example:g}."
+        " Free sights (beaches, parks, viewpoints, temples) must have est_cost 0.",
         "  → Example correct entry:"
-        f' {{"est_cost": 50000, "est_cost_currency": "{local_currency}"}}',
+        f' {{"est_cost": {meal_example:g}, "est_cost_currency": "{local_currency}"}}',
         "  → WRONG (never do this):"
         f' {{"est_cost": 500, "est_cost_currency": "{trip.budget_currency}"}}',
     ]

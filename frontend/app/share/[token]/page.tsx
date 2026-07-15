@@ -6,39 +6,37 @@ import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import {
-  Compass, MapPin, Calendar, Users, Loader2,
-  Utensils, Bus, Hotel, Coffee, ChevronDown,
-  Luggage, Sparkles, ArrowRight, Clock,
+  MapPin,
+  Calendar,
+  Users,
+  Loader2,
+  ChevronDown,
+  Sparkles,
+  ArrowRight,
+  Clock,
+  Shirt,
+  Plug,
+  FileText,
+  Pill,
+  Backpack,
+  Package,
   type LucideIcon,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { ShareTripOut, ItineraryItemOut } from "@/lib/api";
+import { ITEM_ICONS } from "@/lib/constants";
+import { CoverArt } from "@/components/ui/CoverArt";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { SectionHeader } from "@/components/ui/SectionHeader";
 
-// ── Destination gradient (deterministic hash of city name) ───────────────────
-
-const GRADIENTS = [
-  "from-sky-400 via-cyan-500 to-blue-600",
-  "from-amber-400 via-orange-500 to-rose-500",
-  "from-emerald-400 via-teal-500 to-cyan-600",
-  "from-rose-400 via-pink-500 to-fuchsia-600",
-  "from-indigo-400 via-blue-500 to-sky-600",
-  "from-orange-400 via-amber-500 to-yellow-500",
-];
-
-function destGradient(city: string): string {
-  let h = 0;
-  for (let i = 0; i < city.length; i++) h = (h * 31 + city.charCodeAt(i)) >>> 0;
-  return GRADIENTS[h % GRADIENTS.length];
-}
-
-// ── Item type config ──────────────────────────────────────────────────────────
-
-const ITEM_TYPE_CONFIG: Record<string, { icon: LucideIcon; color: string; label: string }> = {
-  activity: { icon: Compass, color: "text-electric-400", label: "Activity" },
-  meal: { icon: Utensils, color: "text-gold-400", label: "Meal" },
-  transport: { icon: Bus, color: "text-slate-400", label: "Transport" },
-  lodging: { icon: Hotel, color: "text-purple-400", label: "Lodging" },
-  free: { icon: Coffee, color: "text-emerald-400", label: "Free time" },
+const TONE_TEXT: Record<string, string> = {
+  accent: "text-accent",
+  warning: "text-warning",
+  info: "text-info",
+  success: "text-success",
+  danger: "text-danger",
+  neutral: "text-ink-400",
 };
 
 function formatTime(t: string | null): string | null {
@@ -60,33 +58,31 @@ function formatDate(iso: string): string {
 
 // ── Packing list collapsible ──────────────────────────────────────────────────
 
-const CATEGORY_ICONS: Record<string, string> = {
-  Clothing: "👕",
-  Electronics: "🔌",
-  Documents: "📄",
-  Health: "💊",
-  Accessories: "🎒",
-  "Destination-Specific": "📍",
+const CATEGORY_ICONS: Record<string, LucideIcon> = {
+  Clothing: Shirt,
+  Electronics: Plug,
+  Documents: FileText,
+  Health: Pill,
+  Accessories: Backpack,
+  "Destination-Specific": MapPin,
 };
 
 function PackingCategory({ name, items }: { name: string; items: string[] }) {
   const [open, setOpen] = useState(false);
-  const icon = CATEGORY_ICONS[name] ?? "📦";
+  const Icon = CATEGORY_ICONS[name] ?? Package;
   return (
     <div className="border border-ink-900/10 rounded-xl overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between px-4 py-3 hover:bg-ink-900/[0.04] transition-colors"
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-ink-900/[0.03] transition-colors"
       >
         <div className="flex items-center gap-2.5">
-          <span className="text-base">{icon}</span>
-          <span className="text-sm font-medium text-slate-100">{name}</span>
-          <span className="text-xs text-slate-500 bg-ink-900/[0.06] px-2 py-0.5 rounded-full">
-            {items.length}
-          </span>
+          <Icon className="w-4 h-4 text-ink-400" />
+          <span className="text-sm font-medium text-ink-900">{name}</span>
+          <span className="text-xs text-ink-400 bg-ink-100 px-2 py-0.5 rounded-full">{items.length}</span>
         </div>
         <motion.div animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2 }}>
-          <ChevronDown className="w-4 h-4 text-slate-500" />
+          <ChevronDown className="w-4 h-4 text-ink-400" />
         </motion.div>
       </button>
       <AnimatePresence initial={false}>
@@ -101,8 +97,8 @@ function PackingCategory({ name, items }: { name: string; items: string[] }) {
           >
             <div className="px-4 pb-3 pt-1 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               {items.map((item, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm text-slate-400">
-                  <div className="w-1.5 h-1.5 rounded-full bg-electric-500/60 shrink-0" />
+                <div key={i} className="flex items-center gap-2 text-sm text-ink-600">
+                  <div className="w-1.5 h-1.5 rounded-full bg-accent/60 shrink-0" />
                   {item}
                 </div>
               ))}
@@ -117,7 +113,7 @@ function PackingCategory({ name, items }: { name: string; items: string[] }) {
 // ── Itinerary item card ───────────────────────────────────────────────────────
 
 function ItineraryCard({ item, index }: { item: ItineraryItemOut; index: number }) {
-  const cfg = ITEM_TYPE_CONFIG[item.item_type] ?? ITEM_TYPE_CONFIG.free;
+  const cfg = ITEM_ICONS[item.item_type] ?? ITEM_ICONS.free;
   const Icon = cfg.icon;
   const startFmt = formatTime(item.start_time);
   const endFmt = formatTime(item.end_time);
@@ -127,32 +123,28 @@ function ItineraryCard({ item, index }: { item: ItineraryItemOut; index: number 
       initial={{ opacity: 0, x: -12 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.05, duration: 0.35 }}
-      className="flex items-start gap-3 p-4 rounded-xl bg-ink-900/[0.03] border border-ink-900/8 hover:bg-ink-900/[0.05] hover:border-ink-900/10 transition-all"
+      className="flex items-start gap-3 p-4 rounded-xl bg-surface border border-ink-900/10 hover:border-ink-900/20 transition-colors"
     >
-      <div className={`mt-0.5 p-2 rounded-lg bg-ink-900/[0.06] shrink-0 ${cfg.color}`}>
+      <div className={`mt-0.5 p-2 rounded-lg bg-ink-100 shrink-0 ${TONE_TEXT[cfg.tone]}`}>
         <Icon className="w-3.5 h-3.5" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-slate-100 leading-snug truncate">{item.title}</p>
-        {item.description && (
-          <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{item.description}</p>
-        )}
-        <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5">
+        <p className="text-sm font-medium text-ink-900 leading-snug truncate">{item.title}</p>
+        {item.description && <p className="text-xs text-ink-400 mt-0.5 line-clamp-2">{item.description}</p>}
+        <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5 font-mono">
           {startFmt && (
-            <span className="flex items-center gap-1 text-xs text-slate-500">
+            <span className="flex items-center gap-1 text-xs text-ink-400">
               <Clock className="w-3 h-3" />
               {startFmt}
               {endFmt ? ` – ${endFmt}` : ""}
             </span>
           )}
           {item.est_cost != null && (
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-ink-400">
               {item.est_cost_currency ?? ""} {item.est_cost.toLocaleString()}
             </span>
           )}
-          {item.is_outdoor && (
-            <span className="text-xs text-emerald-500/80">Outdoor</span>
-          )}
+          {item.is_outdoor && <span className="text-xs text-success">Outdoor</span>}
         </div>
       </div>
     </motion.div>
@@ -163,17 +155,11 @@ function ItineraryCard({ item, index }: { item: ItineraryItemOut; index: number 
 
 function DayGroup({ dayNum, date, items }: { dayNum: number; date: string; items: ItineraryItemOut[] }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
-    >
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
       <div className="flex items-center gap-3 mb-3">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-electric-400 bg-electric-500/10 border border-electric-500/20 px-2.5 py-1 rounded-full">
-            Day {dayNum}
-          </span>
-          <span className="text-sm text-slate-500">{formatDate(date)}</span>
+          <span className="text-xs font-mono font-medium text-accent bg-accent-tint px-2.5 py-1 rounded-full">Day {dayNum}</span>
+          <span className="text-sm text-ink-400">{formatDate(date)}</span>
         </div>
         <div className="flex-1 h-px bg-ink-900/10" />
       </div>
@@ -191,7 +177,11 @@ function DayGroup({ dayNum, date, items }: { dayNum: number; date: string; items
 export default function SharePage() {
   const { token } = useParams<{ token: string }>();
 
-  const { data: trip, isLoading, error } = useQuery<ShareTripOut>({
+  const {
+    data: trip,
+    isLoading,
+    error,
+  } = useQuery<ShareTripOut>({
     queryKey: ["share", token],
     queryFn: () => api.getSharedTrip(token),
     retry: false,
@@ -202,10 +192,10 @@ export default function SharePage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-space-900 flex items-center justify-center">
+      <div className="min-h-screen bg-paper flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-8 h-8 text-electric-400 animate-spin" />
-          <p className="text-slate-500 text-sm">Loading shared itinerary…</p>
+          <Loader2 className="w-8 h-8 text-accent animate-spin" />
+          <p className="text-ink-400 text-sm">Loading shared itinerary…</p>
         </div>
       </div>
     );
@@ -216,30 +206,23 @@ export default function SharePage() {
   if (error || !trip) {
     const isExpired = error instanceof ApiError && error.status === 410;
     return (
-      <div className="min-h-screen bg-space-900 flex items-center justify-center px-4">
-        <motion.div
-          initial={{ opacity: 0, y: 24 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="glass-card p-10 max-w-sm w-full text-center"
-        >
-          <div className="w-14 h-14 rounded-2xl bg-coral-500/10 flex items-center justify-center mx-auto mb-5">
-            <MapPin className="w-7 h-7 text-coral-500" />
-          </div>
-          <h1 className="text-xl font-bold text-slate-100 mb-2">
-            {isExpired ? "Link Expired" : "Link Not Found"}
-          </h1>
-          <p className="text-sm text-slate-500 mb-6">
-            {isExpired
-              ? "This share link has expired. Ask the trip owner to generate a new one."
-              : "This share link doesn't exist or has been removed."}
-          </p>
-          <Link
-            href="/login"
-            className="inline-flex items-center gap-2 text-sm text-electric-400 hover:text-electric-300 transition-colors"
-          >
-            Plan your own trip with TravelOS
-            <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
+      <div className="min-h-screen bg-paper flex items-center justify-center px-4">
+        <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm">
+          <Card className="p-10 text-center">
+            <div className="w-14 h-14 rounded-xl bg-danger-tint flex items-center justify-center mx-auto mb-5">
+              <MapPin className="w-7 h-7 text-danger" />
+            </div>
+            <h1 className="font-display text-xl font-medium text-ink-900 mb-2">{isExpired ? "Link Expired" : "Link Not Found"}</h1>
+            <p className="text-sm text-ink-400 mb-6">
+              {isExpired
+                ? "This share link has expired. Ask the trip owner to generate a new one."
+                : "This share link doesn't exist or has been removed."}
+            </p>
+            <Link href="/login" className="inline-flex items-center gap-2 text-sm text-accent hover:text-accent-deep transition-colors">
+              Plan your own trip with TravelOS
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </Card>
         </motion.div>
       </div>
     );
@@ -247,81 +230,45 @@ export default function SharePage() {
 
   // ── Data ──────────────────────────────────────────────────────────────────
 
-  const gradient = destGradient(trip.destination_city);
   const nights = Math.max(
     1,
-    Math.round(
-      (new Date(trip.end_date + "T00:00:00").getTime() -
-        new Date(trip.start_date + "T00:00:00").getTime()) /
-        86400000
-    )
+    Math.round((new Date(trip.end_date + "T00:00:00").getTime() - new Date(trip.start_date + "T00:00:00").getTime()) / 86400000),
   );
 
   // Group itinerary by day
-  const byDay = trip.itinerary.reduce<Record<number, { date: string; items: ItineraryItemOut[] }>>(
-    (acc, item) => {
-      if (!acc[item.day_number]) acc[item.day_number] = { date: item.item_date, items: [] };
-      acc[item.day_number].items.push(item);
-      return acc;
-    },
-    {}
-  );
+  const byDay = trip.itinerary.reduce<Record<number, { date: string; items: ItineraryItemOut[] }>>((acc, item) => {
+    if (!acc[item.day_number]) acc[item.day_number] = { date: item.item_date, items: [] };
+    acc[item.day_number].items.push(item);
+    return acc;
+  }, {});
   const days = Object.keys(byDay)
     .map(Number)
     .sort((a, b) => a - b);
 
   // Packing list categories
   const packingCategories =
-    trip.packing_list?.categories != null
-      ? Object.entries(trip.packing_list.categories as Record<string, string[]>)
-      : [];
+    trip.packing_list?.categories != null ? Object.entries(trip.packing_list.categories as Record<string, string[]>) : [];
   const destSpecific = trip.packing_list?.destination_specific ?? [];
 
   return (
-    <div className="min-h-screen bg-space-900">
-      {/* Ambient glow */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute top-0 left-1/4 w-96 h-72 bg-electric-500/4 rounded-full blur-3xl" />
-        <div className="absolute bottom-32 right-1/4 w-64 h-48 bg-purple-600/4 rounded-full blur-3xl" />
-      </div>
-
+    <div className="min-h-screen bg-paper">
       {/* ── Hero banner ──────────────────────────────────────────────────────── */}
-      <div
-        className={`relative h-48 sm:h-56 overflow-hidden ${!trip.cover_image_url ? `bg-gradient-to-br ${gradient}` : "bg-space-900"}`}
-        style={
-          trip.cover_image_url
-            ? { backgroundImage: `url(${trip.cover_image_url})`, backgroundSize: "cover", backgroundPosition: "center" }
-            : undefined
-        }
-      >
-        {!trip.cover_image_url && (
-          <div
-            className="absolute inset-0 opacity-15"
-            style={{
-              backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
-            }}
-          />
-        )}
-        <div className={`absolute inset-0 ${trip.cover_image_url ? "bg-gradient-to-t from-black/90 via-black/50 to-black/10" : "bg-gradient-to-t from-black/75 via-black/25 to-transparent"}`} />
-
-        {/* Shared badge */}
-        <div className="absolute top-4 right-4 flex items-center gap-1.5 text-xs text-white/70 bg-black/30 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10">
-          <Sparkles className="w-3 h-3" />
-          Shared itinerary
-        </div>
-
-        <div className="relative z-10 h-full flex flex-col justify-end px-4 sm:px-6 pb-5 max-w-3xl mx-auto">
-          <div className="flex items-center gap-2 mb-1">
-            <MapPin className="w-3.5 h-3.5 text-white/60" />
-            <span className="text-white/60 text-xs font-medium uppercase tracking-widest">
-              {trip.destination_country ?? ""}
-            </span>
+      <CoverArt city={trip.destination_city} country={trip.destination_country} imageUrl={trip.cover_image_url} height="h-48 sm:h-56">
+        <div className="relative h-full px-4 sm:px-6">
+          <div className="absolute top-4 right-4 sm:right-6 flex items-center gap-1.5 text-xs text-white/85 bg-black/35 px-3 py-1.5 rounded-full border border-white/15">
+            <Sparkles className="w-3 h-3" />
+            Shared itinerary
           </div>
-          <h1 className="font-display text-3xl sm:text-4xl font-semibold text-white leading-tight">
-            {trip.destination_city}
-          </h1>
+
+          <div className="h-full flex flex-col justify-end pb-5 max-w-3xl mx-auto">
+            <div className="flex items-center gap-2 mb-1">
+              <MapPin className="w-3.5 h-3.5 text-white/70" />
+              <span className="text-white/70 text-xs font-mono uppercase tracking-widest">{trip.destination_country ?? ""}</span>
+            </div>
+            <h1 className="font-display text-3xl sm:text-4xl font-medium text-white leading-tight">{trip.destination_city}</h1>
+          </div>
         </div>
-      </div>
+      </CoverArt>
 
       {/* ── Content ───────────────────────────────────────────────────────────── */}
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-8">
@@ -330,23 +277,19 @@ export default function SharePage() {
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
-          className="flex flex-wrap gap-2"
+          className="flex flex-wrap gap-2 font-mono"
         >
-          <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-ink-900/[0.05] border border-ink-900/10 px-3 py-1.5 rounded-full">
-            <Calendar className="w-3 h-3 text-electric-400" />
-            {new Date(trip.start_date + "T00:00:00").toLocaleDateString("en-US", {
-              month: "short", day: "numeric",
-            })}{" "}–{" "}
-            {new Date(trip.end_date + "T00:00:00").toLocaleDateString("en-US", {
-              month: "short", day: "numeric", year: "numeric",
-            })}
+          <div className="flex items-center gap-1.5 text-xs text-ink-600 bg-ink-100 px-3 py-1.5 rounded-full">
+            <Calendar className="w-3 h-3" />
+            {new Date(trip.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} –{" "}
+            {new Date(trip.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-ink-900/[0.05] border border-ink-900/10 px-3 py-1.5 rounded-full">
-            <Users className="w-3 h-3 text-gold-500" />
+          <div className="flex items-center gap-1.5 text-xs text-ink-600 bg-ink-100 px-3 py-1.5 rounded-full">
+            <Users className="w-3 h-3" />
             {trip.num_travelers} traveler{trip.num_travelers !== 1 ? "s" : ""}
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-ink-900/[0.05] border border-ink-900/10 px-3 py-1.5 rounded-full">
-            <Calendar className="w-3 h-3 text-emerald-400" />
+          <div className="flex items-center gap-1.5 text-xs text-ink-600 bg-ink-100 px-3 py-1.5 rounded-full">
+            <Calendar className="w-3 h-3" />
             {nights} night{nights !== 1 ? "s" : ""}
           </div>
         </motion.div>
@@ -354,67 +297,45 @@ export default function SharePage() {
         {/* ── Itinerary ───────────────────────────────────────────────────────── */}
         {days.length > 0 ? (
           <section>
-            <h2 className="text-lg font-bold text-slate-100 mb-5 flex items-center gap-2">
-              <Compass className="w-4 h-4 text-electric-400" />
-              Itinerary
-            </h2>
+            <SectionHeader eyebrow="Itinerary" />
             <div className="space-y-8">
               {days.map((d) => (
-                <DayGroup
-                  key={d}
-                  dayNum={d}
-                  date={byDay[d].date}
-                  items={byDay[d].items}
-                />
+                <DayGroup key={d} dayNum={d} date={byDay[d].date} items={byDay[d].items} />
               ))}
             </div>
           </section>
         ) : (
-          <div className="glass-card p-8 text-center">
-            <p className="text-slate-500 text-sm">No itinerary items yet.</p>
-          </div>
+          <Card className="p-8 text-center">
+            <p className="text-ink-400 text-sm">No itinerary items yet.</p>
+          </Card>
         )}
 
         {/* ── Packing list ────────────────────────────────────────────────────── */}
         {(packingCategories.length > 0 || destSpecific.length > 0) && (
           <section>
-            <h2 className="text-lg font-bold text-slate-100 mb-5 flex items-center gap-2">
-              <Luggage className="w-4 h-4 text-gold-500" />
-              Packing List
-            </h2>
-            <div className="glass-card p-4 space-y-2">
+            <SectionHeader eyebrow="Packing List" />
+            <Card padding="sm" className="space-y-2">
               {packingCategories.map(([name, items]) => (
                 <PackingCategory key={name} name={name} items={items} />
               ))}
-              {destSpecific.length > 0 && (
-                <PackingCategory name="Destination-Specific" items={destSpecific} />
-              )}
-            </div>
+              {destSpecific.length > 0 && <PackingCategory name="Destination-Specific" items={destSpecific} />}
+            </Card>
           </section>
         )}
 
         {/* ── CTA ─────────────────────────────────────────────────────────────── */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4, duration: 0.4 }}
-          className="glass-card p-6 flex items-center justify-between gap-4"
-        >
-          <div>
-            <p className="text-sm font-semibold text-slate-100">
-              Plan your own AI-powered trip
-            </p>
-            <p className="text-xs text-slate-500 mt-0.5">
-              TravelOS remembers your style and gets smarter every trip.
-            </p>
-          </div>
-          <Link
-            href="/login"
-            className="shrink-0 flex items-center gap-1.5 text-xs font-semibold text-[#0b1437] bg-electric-gradient px-4 py-2 rounded-full hover:opacity-90 transition-opacity shadow-electric"
-          >
-            Get started
-            <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
+        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4, duration: 0.4 }}>
+          <Card className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-ink-900">Plan your own AI-powered trip</p>
+              <p className="text-xs text-ink-400 mt-0.5">TravelOS remembers your style and gets smarter every trip.</p>
+            </div>
+            <Link href="/login" className="shrink-0">
+              <Button size="sm" iconRight={ArrowRight}>
+                Get started
+              </Button>
+            </Link>
+          </Card>
         </motion.div>
       </div>
     </div>
